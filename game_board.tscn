@@ -1,0 +1,94 @@
+[gd_scene load_steps=12 format=4 uid="uid://dnx0cxl4a46lg"]
+
+[ext_resource type="Script" uid="uid://daaph63aiv3vd" path="res://TurnManager.gd" id="1_xh13x"]
+[ext_resource type="Texture2D" uid="uid://ciitwnd7hxyra" path="res://assets/spritesheet.png" id="2_17g6i"]
+[ext_resource type="PackedScene" uid="uid://chbt4bn7n6ytk" path="res://Soldier.tscn" id="2_i37i2"]
+[ext_resource type="PackedScene" uid="uid://bapke0vi7mx1m" path="res://Archer.tscn" id="2_qkkkq"]
+[ext_resource type="Script" uid="uid://b4umrem1keqkr" path="res://hex_tile_map.gd" id="3_xh13x"]
+[ext_resource type="Script" uid="uid://dbjcmu0pwdism" path="res://game_board_node.gd" id="4_6lofv"]
+[ext_resource type="Script" uid="uid://cf8rb1kdlfa5q" path="res://UnitManager.gd" id="4_30eli"]
+[ext_resource type="Script" uid="uid://cpvudcuvy1hxc" path="res://UIManager.gd" id="6_qxawf"]
+[ext_resource type="Script" uid="uid://srlpr2fln13a" path="res://camera.gd" id="7_rs5it"]
+
+[sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_17g6i"]
+texture = ExtResource("2_17g6i")
+margins = Vector2i(21, 6)
+separation = Vector2i(42, 20)
+texture_region_size = Vector2i(170, 192)
+0:0/0 = 0
+1:0/0 = 0
+2:0/0 = 0
+3:0/0 = 0
+4:0/0 = 0
+0:1/0 = 0
+1:1/0 = 0
+2:1/0 = 0
+3:1/0 = 0
+4:1/0 = 0
+0:2/0 = 0
+1:2/0 = 0
+2:2/0 = 0
+3:2/0 = 0
+0:3/0 = 0
+1:3/0 = 0
+2:3/0 = 0
+3:3/0 = 0
+
+[sub_resource type="TileSet" id="TileSet_xh13x"]
+tile_shape = 3
+tile_size = Vector2i(170, 192)
+sources/2 = SubResource("TileSetAtlasSource_17g6i")
+
+[node name="Game" type="Node2D"]
+script = ExtResource("1_xh13x")
+unit_manager_path = NodePath("GameBoardNode/Units")
+archer_scene = ExtResource("2_qkkkq")
+soldier_scene = ExtResource("2_i37i2")
+
+[node name="GameBoardNode" type="Node2D" parent="."]
+script = ExtResource("4_6lofv")
+
+[node name="HexTileMap" type="TileMapLayer" parent="GameBoardNode"]
+tile_map_data = PackedByteArray("AAD//wEAAgACAAAAAAAAAAIAAgACAAAAAAAAAAAAAgACAAAAAAAAAAEAAgACAAAAAAD//wMAAgACAAAAAAAAAAMAAgACAAAAAAAAAAQAAgACAAAAAAD//wUAAgACAAAAAAAAAAYAAgACAAAAAAD//wcAAgACAAAAAAA=")
+tile_set = SubResource("TileSet_xh13x")
+script = ExtResource("3_xh13x")
+
+[node name="Units" type="Node2D" parent="GameBoardNode"]
+script = ExtResource("4_30eli")
+
+[node name="GameCamera" type="Camera2D" parent="."]
+position = Vector2(582, 329)
+script = ExtResource("7_rs5it")
+
+[node name="UI" type="CanvasLayer" parent="."]
+script = ExtResource("6_qxawf")
+turn_manager_path = NodePath("..")
+map_node_path = NodePath("../GameBoardNode")
+
+[node name="Panel" type="Panel" parent="UI"]
+custom_minimum_size = Vector2(300, 200)
+offset_right = 40.0
+offset_bottom = 40.0
+
+[node name="VBoxContainer" type="VBoxContainer" parent="UI/Panel"]
+layout_mode = 0
+offset_right = 40.0
+offset_bottom = 40.0
+
+[node name="GoldLabel" type="Label" parent="UI/Panel/VBoxContainer"]
+layout_mode = 2
+
+[node name="ArcherButton" type="Button" parent="UI/Panel/VBoxContainer"]
+custom_minimum_size = Vector2(200, 30)
+layout_mode = 2
+text = "Buy Archer (5g)"
+
+[node name="SoldierButton" type="Button" parent="UI/Panel/VBoxContainer"]
+custom_minimum_size = Vector2(200, 30)
+layout_mode = 2
+text = "Buy Soldier (3g)"
+
+[node name="DoneButton" type="Button" parent="UI/Panel/VBoxContainer"]
+custom_minimum_size = Vector2(200, 30)
+layout_mode = 2
+text = "Done With Orders"

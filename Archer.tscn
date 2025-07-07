@@ -1,0 +1,11 @@
+[gd_scene load_steps=3 format=3 uid="uid://bapke0vi7mx1m"]
+
+[ext_resource type="PackedScene" uid="uid://c62dn8sldq572" path="res://Unit.tscn" id="1_3lvsr"]
+[ext_resource type="Texture2D" uid="uid://0mno43uqremc" path="res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Objects Light/HSI_icon_130l.png" id="2_r2et3"]
+
+[node name="Archer" instance=ExtResource("1_3lvsr")]
+cost = 3
+ranged_strength = 3
+
+[node name="Sprite2D" parent="." index="0"]
+texture = ExtResource("2_r2et3")

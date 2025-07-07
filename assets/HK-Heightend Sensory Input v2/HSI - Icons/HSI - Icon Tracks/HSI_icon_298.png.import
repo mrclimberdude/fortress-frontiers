@@ -1,0 +1,34 @@
+[remap]
+
+importer="texture"
+type="CompressedTexture2D"
+uid="uid://b4el3oxw55b3c"
+path="res://.godot/imported/HSI_icon_298.png-68bf63727ecd4823a68dd7a3c7eb1d59.ctex"
+metadata={
+"vram_texture": false
+}
+
+[deps]
+
+source_file="res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Tracks/HSI_icon_298.png"
+dest_files=["res://.godot/imported/HSI_icon_298.png-68bf63727ecd4823a68dd7a3c7eb1d59.ctex"]
+
+[params]
+
+compress/mode=0
+compress/high_quality=false
+compress/lossy_quality=0.7
+compress/hdr_compression=1
+compress/normal_map=0
+compress/channel_pack=0
+mipmaps/generate=false
+mipmaps/limit=-1
+roughness/mode=0
+roughness/src_normal=""
+process/fix_alpha_border=true
+process/premult_alpha=false
+process/normal_map_invert_y=false
+process/hdr_as_srgb=false
+process/hdr_clamp_exposure=false
+process/size_limit=0
+detect_3d/compress_to=1

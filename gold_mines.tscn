@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://d1va4ye2htxlm"]
+
+[ext_resource type="Texture2D" uid="uid://vt08lm3q4tn7" path="res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Crystals Light/HSI_icon_060l.png" id="1_l4uv0"]
+
+[node name="Gold Mines" type="Sprite2D"]
+texture = ExtResource("1_l4uv0")
