@@ -52,7 +52,7 @@ func world_to_axial(p: Vector2) -> Vector2i:
 	return Vector2i(rx, rz)
 
 # Coloring API you already have:
-@export var ground_tile: Vector2i = Vector2i(0, 0)
+@export var ground_tile: Vector2i = Vector2i(2, 0)
 @export var player_tiles := {
 	"player1": Vector2i(0, 1),
 	"player2": Vector2i(2, 1)

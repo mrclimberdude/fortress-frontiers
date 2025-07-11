@@ -12,6 +12,13 @@ var placing_unit   : String = ""        # "archer" or "soldier"
 @onready var hex = $"../GameBoardNode/HexTileMap"
 @onready var gold_lbl = $Panel/VBoxContainer/GoldLabel as Label
 
+# Reference to your GameBoardNode
+@onready var game_board: Node = get_node("../GameBoardNode")
+
+# State for the currently-selected unit and its reachable tiles
+var currently_selected_unit: Node = null
+var current_reachable: Dictionary = {}
+
 func _ready():
 	hide()
 
@@ -46,6 +53,21 @@ func _on_archer_pressed():
 func _on_soldier_pressed():
 	placing_unit = "soldier"
 	gold_lbl.text = "Click map to place Soldier\nGold: %d" % turn_mgr.player_gold[current_player]
+
+func _on_unit_selected(unit: Node) -> void:
+	# 1) Clear any old highlights
+	game_board.clear_highlights()
+
+	# 2) Compute reachable tiles
+	var result = game_board.get_reachable_tiles(unit.grid_pos, unit.move_range)
+	var tiles = result["tiles"]
+
+	# 3) Show them
+	game_board.show_highlights(tiles)
+
+	# 4) Store for later path-drawing / order issuance
+	currently_selected_unit = unit
+	current_reachable = result
 
 func _on_done_pressed():
 	# signal back to TurnManager that this player is finished

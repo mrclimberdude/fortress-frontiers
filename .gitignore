@@ -24,3 +24,4 @@ export_presets.cfg
 *.exe
 
 assets/
+addons/

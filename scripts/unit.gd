@@ -17,18 +17,33 @@ var map_layer: Node
 func set_map_layer(layer: TileMapLayer) -> void:
 	map_layer = layer
 
-# Place the unit at the given grid position using the TileMapLayer’s own coordinate system
 func set_grid_position(pos: Vector2i) -> void:
+	var board   = map_layer.get_parent()
+	var old_pos = grid_pos
+
+	# 1) Clear previous tile
+	if board and board.has_method("vacate") and old_pos:
+		board.vacate(old_pos)
+		# reset the old tile to ground (empty) by passing an unknown pid
+		map_layer.set_player_tile(old_pos, "")
+
+	# 2) Update our stored grid_pos
 	grid_pos = pos
+
+	# 3) Snap our world position
 	if map_layer:
-		# get top-left of the hex:
 		var origin = map_layer.map_to_world(pos)
-		# center it by half the tile size you exported:
 		var center = map_layer.tile_size * 0.5
 		position = origin + center
 	else:
 		push_error("Unit.gd: no valid map_layer to place unit")
 
+	# 4) Register the new tile & recolor it for our player
+	if board and board.has_method("occupy"):
+		board.occupy(pos, self)
+		map_layer.set_player_tile(pos, player_id)
+	else:
+		push_error("Unit.gd: could not find GameBoardNode to occupy()")
 
 func _ready():
 	# if map_layer and grid_pos were set prior to ready, snap into place

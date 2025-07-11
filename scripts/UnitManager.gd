@@ -2,8 +2,8 @@
 extends Node2D
 
 # preload your two unit scenes
-@export var archer_scene: PackedScene  = preload("res://Archer.tscn")
-@export var soldier_scene: PackedScene = preload("res://Soldier.tscn")
+@export var archer_scene: PackedScene  = preload("res://scenes/Archer.tscn")
+@export var soldier_scene: PackedScene = preload("res://scenes/Soldier.tscn")
 @export var tile_size: Vector2 = Vector2(170, 192)   # width, height of one hex
 
 # reference to the board node to convert coords → world
@@ -31,10 +31,18 @@ func spawn_unit(unit_type: String, cell: Vector2i, owner: String) -> void:
 	add_child(unit)
 
 	# 3) Place it using your TileMapLayer’s map_to_world
-	var origin = hex_map.map_to_world(cell)
-	unit.position = origin + hex_map.tile_size * 0.5
+	unit.map_layer = hex_map
+	unit.player_id = owner
+	unit.set_grid_position(cell)
 
 	# 4) Color the tile underneath
-	hex_map.set_player_tile(cell, owner)
+	#hex_map.set_player_tile(cell, owner)
 
 	print("Spawned %s for %s at %s" % [unit_type, owner, cell])
+
+func _input(event):
+	if event.is_action_pressed("debug_move"):
+		# Grab your first unit under UnitManager; adjust path/index as needed
+		var unit = $".".get_child(0)
+		if unit:
+			unit.set_grid_position(Vector2i(4, 6))

@@ -1,14 +1,14 @@
 [gd_scene load_steps=12 format=4 uid="uid://dnx0cxl4a46lg"]
 
-[ext_resource type="Script" uid="uid://daaph63aiv3vd" path="res://TurnManager.gd" id="1_xh13x"]
+[ext_resource type="Script" uid="uid://daaph63aiv3vd" path="res://scripts/TurnManager.gd" id="1_xh13x"]
 [ext_resource type="Texture2D" uid="uid://ciitwnd7hxyra" path="res://assets/spritesheet.png" id="2_17g6i"]
-[ext_resource type="PackedScene" uid="uid://chbt4bn7n6ytk" path="res://Soldier.tscn" id="2_i37i2"]
-[ext_resource type="PackedScene" uid="uid://bapke0vi7mx1m" path="res://Archer.tscn" id="2_qkkkq"]
-[ext_resource type="Script" uid="uid://b4umrem1keqkr" path="res://hex_tile_map.gd" id="3_xh13x"]
-[ext_resource type="Script" uid="uid://dbjcmu0pwdism" path="res://game_board_node.gd" id="4_6lofv"]
-[ext_resource type="Script" uid="uid://cf8rb1kdlfa5q" path="res://UnitManager.gd" id="4_30eli"]
-[ext_resource type="Script" uid="uid://cpvudcuvy1hxc" path="res://UIManager.gd" id="6_qxawf"]
-[ext_resource type="Script" uid="uid://srlpr2fln13a" path="res://camera.gd" id="7_rs5it"]
+[ext_resource type="PackedScene" uid="uid://chbt4bn7n6ytk" path="res://scenes/Soldier.tscn" id="2_i37i2"]
+[ext_resource type="PackedScene" uid="uid://bapke0vi7mx1m" path="res://scenes/Archer.tscn" id="2_qkkkq"]
+[ext_resource type="Script" uid="uid://b4umrem1keqkr" path="res://scripts/hex_tile_map.gd" id="3_xh13x"]
+[ext_resource type="Script" uid="uid://dbjcmu0pwdism" path="res://scripts/game_board_node.gd" id="4_6lofv"]
+[ext_resource type="Script" uid="uid://cf8rb1kdlfa5q" path="res://scripts/UnitManager.gd" id="4_30eli"]
+[ext_resource type="Script" uid="uid://cpvudcuvy1hxc" path="res://scripts/UIManager.gd" id="6_qxawf"]
+[ext_resource type="Script" uid="uid://srlpr2fln13a" path="res://scripts/camera.gd" id="7_rs5it"]
 
 [sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_17g6i"]
 texture = ExtResource("2_17g6i")
@@ -49,6 +49,11 @@ soldier_scene = ExtResource("2_i37i2")
 script = ExtResource("4_6lofv")
 
 [node name="HexTileMap" type="TileMapLayer" parent="GameBoardNode"]
+tile_map_data = PackedByteArray("AAD//wEAAgACAAAAAAAAAAIAAgACAAAAAAAAAAAAAgACAAAAAAAAAAEAAgACAAAAAAD//wMAAgACAAAAAAAAAAMAAgACAAAAAAAAAAQAAgACAAAAAAD//wUAAgACAAAAAAAAAAYAAgACAAAAAAD//wcAAgACAAAAAAA=")
+tile_set = SubResource("TileSet_xh13x")
+script = ExtResource("3_xh13x")
+
+[node name="HighlightMap" type="TileMapLayer" parent="GameBoardNode"]
 tile_map_data = PackedByteArray("AAD//wEAAgACAAAAAAAAAAIAAgACAAAAAAAAAAAAAgACAAAAAAAAAAEAAgACAAAAAAD//wMAAgACAAAAAAAAAAMAAgACAAAAAAAAAAQAAgACAAAAAAD//wUAAgACAAAAAAAAAAYAAgACAAAAAAD//wcAAgACAAAAAAA=")
 tile_set = SubResource("TileSet_xh13x")
 script = ExtResource("3_xh13x")
