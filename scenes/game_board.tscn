@@ -97,3 +97,7 @@ text = "Buy Soldier (3g)"
 custom_minimum_size = Vector2(200, 30)
 layout_mode = 2
 text = "Done With Orders"
+
+[node name="ActionMenu" type="PopupMenu" parent="UI/Panel"]
+visible = true
+mouse_passthrough = true

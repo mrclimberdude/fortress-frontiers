@@ -1,3 +1,5 @@
+#UIManager.gd
+
 extends CanvasLayer
 
 # configure these in the Inspector
@@ -6,18 +8,19 @@ extends CanvasLayer
 
 # runtime state
 var current_player : String = ""
-var placing_unit   : String = ""        # "archer" or "soldier"
+var placing_unit   : String = ""
+var currently_selected_unit: Node = null
+var current_reachable: Dictionary = {}
+var action_mode:       String   = ""     # "move", "ranged", "melee", "support", "hold"
+
 
 @onready var turn_mgr = get_node(turn_manager_path) as Node
 @onready var hex = $"../GameBoardNode/HexTileMap"
 @onready var gold_lbl = $Panel/VBoxContainer/GoldLabel as Label
-
-# Reference to your GameBoardNode
 @onready var game_board: Node = get_node("../GameBoardNode")
+@onready var action_menu: PopupMenu      = $Panel/ActionMenu as PopupMenu
 
-# State for the currently-selected unit and its reachable tiles
-var currently_selected_unit: Node = null
-var current_reachable: Dictionary = {}
+const ArrowScene = preload("res://scenes/Arrow.tscn")
 
 func _ready():
 	hide()
@@ -36,6 +39,9 @@ func _ready():
 					 Callable(self, "_on_soldier_pressed"))
 	$Panel/VBoxContainer/DoneButton.connect("pressed",
 					 Callable(self, "_on_done_pressed"))
+					
+	action_menu.connect("id_pressed", Callable(self, "_on_action_selected"))
+	action_menu.hide()
 
 
 func _on_orders_phase_begin(player: String) -> void:
@@ -46,6 +52,7 @@ func _on_orders_phase_begin(player: String) -> void:
 	show()
 
 func _on_orders_phase_end() -> void:
+	game_board.clear_highlights()
 	hide()
 
 func _on_archer_pressed():
@@ -63,13 +70,40 @@ func _on_unit_selected(unit: Node) -> void:
 	# 2) Compute reachable tiles
 	var result = game_board.get_reachable_tiles(unit.grid_pos, unit.move_range)
 	var tiles = result["tiles"]
-
-	# 3) Show them
 	game_board.show_highlights(tiles)
 
-	# 4) Store for later path-drawing / order issuance
+	# 3) Store for later path-drawing / order issuance
 	currently_selected_unit = unit
 	current_reachable = result
+	
+	# Show action selection menu
+	action_menu.clear()
+	action_menu.add_item("Move", 0)
+	action_menu.add_item("Ranged Attack", 1)
+	action_menu.add_item("Melee Attack", 2)
+	action_menu.add_item("Support", 3)
+	action_menu.add_item("Hold", 4)
+
+func _on_action_selected(id: int) -> void:
+	match id:
+		0:
+			print("Move selected for %s" % currently_selected_unit.name)
+			# TODO: initiate move path selection
+		1:
+			print("Ranged Attack selected for %s" % currently_selected_unit.name)
+			# TODO: initiate ranged attack UI
+		2:
+			print("Melee Attack selected for %s" % currently_selected_unit.name)
+			# TODO: initiate melee attack UI
+		3:
+			print("Support selected for %s" % currently_selected_unit.name)
+			# TODO: initiate support UI
+		4:
+			print("Hold selected for %s" % currently_selected_unit.name)
+			# TODO: enqueue hold order
+	game_board.clear_highlights()
+	action_menu.hide()
+
 
 func _on_done_pressed():
 	game_board.clear_highlights()
@@ -97,3 +131,5 @@ func _unhandled_input(ev):
 			var unit = game_board.get_unit_at(cell)
 			if unit:
 				_on_unit_selected(unit)
+				action_menu.set_position(ev.position)
+				action_menu.show()
