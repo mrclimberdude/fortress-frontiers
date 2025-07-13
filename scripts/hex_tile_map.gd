@@ -64,6 +64,7 @@ func set_player_tile(pos: Vector2i, pid: String) -> void:
 	var corrected = axial_to_offset(axial)
 	var tint = player_tiles.get(pid, ground_tile)
 	set_cell(corrected, src, tint)
+	$"..".clear_highlights()
 	update_internals()
 	
 # convert an offset-coordinate cell → world pixels

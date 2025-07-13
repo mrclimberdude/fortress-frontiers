@@ -21,7 +21,9 @@ var current_reachable: Dictionary = {}
 
 func _ready():
 	hide()
-
+	
+	# Enable unhandled input processing
+	set_process_unhandled_input(true)
 	# connect using Callable(self, "method_name")
 	turn_mgr.connect("orders_phase_begin",
 					 Callable(self, "_on_orders_phase_begin"))
@@ -76,19 +78,20 @@ func _on_done_pressed():
 	placing_unit = ""
 
 func _unhandled_input(ev):
-	if placing_unit != "" and ev is InputEventMouseButton \
-	and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT:
-
-		# 1) Screen → world (includes Camera2D pan/zoom)
+	if ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT:
+		# Convert screen click → world → map cell
 		var world_pos = get_viewport().get_camera_2d().get_global_mouse_position()
-
-		# 2) World → map‐layer’s local → cell
 		var cell = hex.world_to_map(world_pos)
-		print("click → cell", cell)
 
-		# 3) place & color
-		if turn_mgr.buy_unit(current_player, placing_unit, cell):
-			gold_lbl.text = "Gold: %d" % turn_mgr.player_gold[current_player]
-			placing_unit = ""
-		else:
-			gold_lbl.text = "[Not enough gold]\nGold: %d" % turn_mgr.player_gold[current_player]
+		if placing_unit != "":
+			# Placement logic
+			if turn_mgr.buy_unit(current_player, placing_unit, cell):
+				gold_lbl.text = "Gold: %d" % turn_mgr.player_gold[current_player]
+				placing_unit = ""
+			else:
+				gold_lbl.text = "[Not enough gold]\nGold: %d" % turn_mgr.player_gold[current_player]
+		elif turn_mgr.current_phase == $"..".Phase.ORDERS:
+			# Unit selection in orders phase
+			var unit = game_board.get_unit_at(cell)
+			if unit:
+				_on_unit_selected(unit)
