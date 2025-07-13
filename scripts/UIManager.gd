@@ -72,6 +72,7 @@ func _on_unit_selected(unit: Node) -> void:
 	current_reachable = result
 
 func _on_done_pressed():
+	game_board.clear_highlights()
 	# signal back to TurnManager that this player is finished
 	turn_mgr.submit_player_order(current_player, {"action":"done"})
 	# prevent further clicks
@@ -80,6 +81,7 @@ func _on_done_pressed():
 func _unhandled_input(ev):
 	if ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT:
 		# Convert screen click → world → map cell
+		game_board.clear_highlights()
 		var world_pos = get_viewport().get_camera_2d().get_global_mouse_position()
 		var cell = hex.world_to_map(world_pos)
 
