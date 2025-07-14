@@ -1,6 +1,6 @@
 [gd_scene load_steps=2 format=3 uid="uid://js02d750vp5f"]
 
-[ext_resource type="Texture2D" uid="uid://lhyhfe4sf1ks" path="res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Objects/HSI - Icons Arrows/HSI_icon_191.png" id="1_4yf74"]
+[ext_resource type="Texture2D" uid="uid://dya0pbffqnx35" path="res://assets/RightArrow.png" id="1_4yf74"]
 
 [node name="Sprite2D" type="Sprite2D"]
 texture = ExtResource("1_4yf74")

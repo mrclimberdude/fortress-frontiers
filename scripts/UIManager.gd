@@ -87,6 +87,7 @@ func _on_unit_selected(unit: Node) -> void:
 func _on_action_selected(id: int) -> void:
 	match id:
 		0:
+			action_mode = "move"
 			print("Move selected for %s" % currently_selected_unit.name)
 			# TODO: initiate move path selection
 		1:
@@ -101,35 +102,92 @@ func _on_action_selected(id: int) -> void:
 		4:
 			print("Hold selected for %s" % currently_selected_unit.name)
 			# TODO: enqueue hold order
-	game_board.clear_highlights()
 	action_menu.hide()
-
 
 func _on_done_pressed():
 	game_board.clear_highlights()
+	if hex.has_node("PathArrows"):
+		hex.get_node("PathArrows").queue_free()
 	# signal back to TurnManager that this player is finished
 	turn_mgr.submit_player_order(current_player, {"action":"done"})
 	# prevent further clicks
 	placing_unit = ""
 
-func _unhandled_input(ev):
-	if ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT:
-		# Convert screen click → world → map cell
-		game_board.clear_highlights()
-		var world_pos = get_viewport().get_camera_2d().get_global_mouse_position()
-		var cell = hex.world_to_map(world_pos)
+# Backtrack and draw arrow sprites along the path to `dest`
+func _draw_path(dest: Vector2i) -> void:
+	# Clear old arrows
 
-		if placing_unit != "":
-			# Placement logic
-			if turn_mgr.buy_unit(current_player, placing_unit, cell):
-				gold_lbl.text = "Gold: %d" % turn_mgr.player_gold[current_player]
-				placing_unit = ""
-			else:
-				gold_lbl.text = "[Not enough gold]\nGold: %d" % turn_mgr.player_gold[current_player]
-		elif turn_mgr.current_phase == $"..".Phase.ORDERS:
-			# Unit selection in orders phase
-			var unit = game_board.get_unit_at(cell)
-			if unit:
-				_on_unit_selected(unit)
-				action_menu.set_position(ev.position)
-				action_menu.show()
+	var root = Node2D.new()
+	root.name = "PathArrows"
+	hex.add_child(root)
+
+	# Build path array
+	var path = []
+	var prev = current_reachable["prev"]
+	var cur = dest
+	while cur in prev:
+		path.insert(0, cur)
+		cur = prev[cur]
+	# include start
+	path.insert(0, currently_selected_unit.grid_pos)
+
+	# Draw arrows between consecutive cells
+	for i in range(path.size() - 1):
+		var a = path[i]
+		var b = path[i + 1]
+		var p1 = hex.map_to_world(a) + hex.tile_size * 0.5
+		var p2 = hex.map_to_world(b) + hex.tile_size * 0.5
+
+		# Instance arrow as a Sprite2D
+		var arrow = ArrowScene.instantiate() as Sprite2D
+		# Calculate direction and texture size
+		var dir = (p2 - p1).normalized()
+		var tex_size = arrow.texture.get_size()
+
+		# Calculate distance between tile centers
+		var distance: float = (p2 - p1).length()
+		# Scale arrow sprite to cover that distance
+		var scale_x: float = distance / tex_size.x
+		arrow.scale = Vector2(scale_x, 1)
+		# After scaling, offset so the arrow's tail (pivot) sits at the source tile center
+		var half_length = tex_size.x * scale_x * 0.5
+		arrow.position = p1 + dir * half_length
+		# Rotate arrow to point from a -> b
+		arrow.rotation = (p2 - p1).angle()
+		
+		arrow.z_index = 10
+		root.add_child(arrow)
+
+func _unhandled_input(ev):
+	if not (ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT):
+		return
+	
+	game_board.clear_highlights()
+	var world_pos = get_viewport().get_camera_2d().get_global_mouse_position()
+	var cell = hex.world_to_map(world_pos)
+
+	if placing_unit != "":
+		# Placement logic
+		if turn_mgr.buy_unit(current_player, placing_unit, cell):
+			gold_lbl.text = "Gold: %d" % turn_mgr.player_gold[current_player]
+			placing_unit = ""
+		else:
+			gold_lbl.text = "[Not enough gold]\nGold: %d" % turn_mgr.player_gold[current_player]
+		return
+	
+	# Order phase: if waiting for destination (move mode)
+	if action_mode == "move" and currently_selected_unit:
+		# Only allow valid reachable cells
+		if cell in current_reachable["tiles"]:
+			_draw_path(cell)
+		action_mode = ""
+		# TODO: enqueue move order via turn_mgr.enqueue_order(...)
+		return
+	
+	if turn_mgr.current_phase == $"..".Phase.ORDERS:
+		# Unit selection in orders phase
+		var unit = game_board.get_unit_at(cell)
+		if unit:
+			_on_unit_selected(unit)
+			action_menu.set_position(ev.position)
+			action_menu.show()

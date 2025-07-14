@@ -1,6 +1,6 @@
 [gd_scene load_steps=3 format=3 uid="uid://chbt4bn7n6ytk"]
 
-[ext_resource type="PackedScene" uid="uid://c62dn8sldq572" path="res://Unit.tscn" id="1_av0cm"]
+[ext_resource type="PackedScene" uid="uid://c62dn8sldq572" path="res://scenes/Unit.tscn" id="1_av0cm"]
 [ext_resource type="Texture2D" uid="uid://dj7l5khu6nin6" path="res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Objects Light/HSI_icon_183l.png" id="2_4420q"]
 
 [node name="Soldier" instance=ExtResource("1_av0cm")]
