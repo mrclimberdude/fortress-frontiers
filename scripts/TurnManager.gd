@@ -34,7 +34,7 @@ var special_tiles := {
 }
 
 # --- Orders Data ---
-var player_orders     := { "player1": [], "player2": [] }
+var player_orders     := { "player1": {}, "player2": {} }
 var _orders_submitted := { "player1": false, "player2": false }
 
 # --------------------------------------------------------
@@ -90,9 +90,22 @@ func _do_orders() -> void:
 	await self.orders_phase_end
 	print("→ Both players submitted orders: %s" % player_orders)
 
+# Called by UIManager to add orders
+func add_order(player: String, order: Dictionary) -> void:
+	# Order is a dictionary with keys: "unit", "type", and "path"
+	player_orders[player][order.unit] = order
+
+func get_order(player:String, unit:Node) -> Dictionary:
+	return player_orders[player].get(unit,{})
+
+func get_all_orders(player_id: String) -> Array:
+	if player_orders.has(player_id):
+		return player_orders[player_id].values()
+	push_error("Unknown player in get_orders: %s" % player_id)
+	return []
+
 # Called by UIManager when a player hits 'Done'
-func submit_player_order(player: String, order: Dictionary) -> void:
-	player_orders[player].append(order)
+func submit_player_order(player: String) -> void:
 	_orders_submitted[player] = true
 
 	# hand off from player1 to player2

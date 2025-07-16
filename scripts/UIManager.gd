@@ -101,26 +101,22 @@ func _on_action_selected(id: int) -> void:
 			# TODO: initiate support UI
 		4:
 			print("Hold selected for %s" % currently_selected_unit.name)
-			# TODO: enqueue hold order
+			turn_mgr.add_order(current_player, {
+				"unit": currently_selected_unit,
+				"type": "hold",
+			})
 	action_menu.hide()
 
 func _on_done_pressed():
 	game_board.clear_highlights()
-	if hex.has_node("PathArrows"):
-		hex.get_node("PathArrows").queue_free()
+	for child in hex.get_node("PathArrows").get_children():
+		child.queue_free()
 	# signal back to TurnManager that this player is finished
-	turn_mgr.submit_player_order(current_player, {"action":"done"})
+	turn_mgr.submit_player_order(current_player)
 	# prevent further clicks
 	placing_unit = ""
 
-# Backtrack and draw arrow sprites along the path to `dest`
-func _draw_path(dest: Vector2i) -> void:
-	# Clear old arrows
-
-	var root = Node2D.new()
-	root.name = "PathArrows"
-	hex.add_child(root)
-
+func calculate_path(dest: Vector2i) -> Array:
 	# Build path array
 	var path = []
 	var prev = current_reachable["prev"]
@@ -130,33 +126,47 @@ func _draw_path(dest: Vector2i) -> void:
 		cur = prev[cur]
 	# include start
 	path.insert(0, currently_selected_unit.grid_pos)
+	return path
+	
 
-	# Draw arrows between consecutive cells
-	for i in range(path.size() - 1):
-		var a = path[i]
-		var b = path[i + 1]
-		var p1 = hex.map_to_world(a) + hex.tile_size * 0.5
-		var p2 = hex.map_to_world(b) + hex.tile_size * 0.5
+# Backtrack and draw arrow sprites along the path to `dest`
+func _draw_paths() -> void:
+	var path_arrows_node = hex.get_node("PathArrows")
+	for child in path_arrows_node.get_children():
+		child.free()
+	var all_orders = turn_mgr.get_all_orders(current_player)
+	for order in all_orders:
+		if order["type"] == "move":
+			var root = Node2D.new()
+			path_arrows_node.add_child(root)
+			var path = order["path"]
+			
+			# Draw arrows between consecutive cells
+			for i in range(path.size() - 1):
+				var a = path[i]
+				var b = path[i + 1]
+				var p1 = hex.map_to_world(a) + hex.tile_size * 0.5
+				var p2 = hex.map_to_world(b) + hex.tile_size * 0.5
 
-		# Instance arrow as a Sprite2D
-		var arrow = ArrowScene.instantiate() as Sprite2D
-		# Calculate direction and texture size
-		var dir = (p2 - p1).normalized()
-		var tex_size = arrow.texture.get_size()
+				# Instance arrow as a Sprite2D
+				var arrow = ArrowScene.instantiate() as Sprite2D
+				# Calculate direction and texture size
+				var dir = (p2 - p1).normalized()
+				var tex_size = arrow.texture.get_size()
 
-		# Calculate distance between tile centers
-		var distance: float = (p2 - p1).length()
-		# Scale arrow sprite to cover that distance
-		var scale_x: float = distance / tex_size.x
-		arrow.scale = Vector2(scale_x, 1)
-		# After scaling, offset so the arrow's tail (pivot) sits at the source tile center
-		var half_length = tex_size.x * scale_x * 0.5
-		arrow.position = p1 + dir * half_length
-		# Rotate arrow to point from a -> b
-		arrow.rotation = (p2 - p1).angle()
-		
-		arrow.z_index = 10
-		root.add_child(arrow)
+				# Calculate distance between tile centers
+				var distance: float = (p2 - p1).length()
+				# Scale arrow sprite to cover that distance
+				var scale_x: float = distance / tex_size.x
+				arrow.scale = Vector2(scale_x, 1)
+				# After scaling, offset so the arrow's tail (pivot) sits at the source tile center
+				var half_length = tex_size.x * scale_x * 0.5
+				arrow.position = p1 + dir * half_length
+				# Rotate arrow to point from a -> b
+				arrow.rotation = (p2 - p1).angle()
+				
+				arrow.z_index = 10
+				root.add_child(arrow)
 
 func _unhandled_input(ev):
 	if not (ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT):
@@ -177,9 +187,16 @@ func _unhandled_input(ev):
 	
 	# Order phase: if waiting for destination (move mode)
 	if action_mode == "move" and currently_selected_unit:
+		var path = []
 		# Only allow valid reachable cells
 		if cell in current_reachable["tiles"]:
-			_draw_path(cell)
+			path = calculate_path(cell)
+			turn_mgr.add_order(current_player, {
+				"unit": currently_selected_unit,
+				"type": "move",
+				"path": path
+			})
+			_draw_paths()
 		action_mode = ""
 		# TODO: enqueue move order via turn_mgr.enqueue_order(...)
 		return
