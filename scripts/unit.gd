@@ -5,9 +5,13 @@ extends Node2D
 @export var cost:      int       = 0
 
 # -- combat stats
+@export var is_ranged:       bool = false
 @export var melee_strength:  int = 1
 @export var ranged_strength: int = 0
 @export var move_range:      int = 2
+@export var ranged_range:    int = 0
+@export var max_health:      int = 100
+@export var curr_health:     int = 100
 
 # -- grid positioning and reference to the TileMapLayer
 var grid_pos: Vector2i

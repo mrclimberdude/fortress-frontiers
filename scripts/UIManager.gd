@@ -68,13 +68,13 @@ func _on_unit_selected(unit: Node) -> void:
 	game_board.clear_highlights()
 
 	# 2) Compute reachable tiles
-	var result = game_board.get_reachable_tiles(unit.grid_pos, unit.move_range)
-	var tiles = result["tiles"]
-	game_board.show_highlights(tiles)
+	#var result = game_board.get_reachable_tiles(unit.grid_pos, unit.move_range)
+	#var tiles = result["tiles"]
+	#game_board.show_highlights(tiles)
 
 	# 3) Store for later path-drawing / order issuance
 	currently_selected_unit = unit
-	current_reachable = result
+	#current_reachable = result
 	
 	# Show action selection menu
 	action_menu.clear()
@@ -88,6 +88,10 @@ func _on_action_selected(id: int) -> void:
 	match id:
 		0:
 			action_mode = "move"
+			var result = game_board.get_reachable_tiles(currently_selected_unit.grid_pos, currently_selected_unit.move_range)
+			var tiles = result["tiles"]
+			game_board.show_highlights(tiles)
+			current_reachable = result
 			print("Move selected for %s" % currently_selected_unit.name)
 			# TODO: initiate move path selection
 		1:
