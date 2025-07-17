@@ -43,7 +43,7 @@ func get_offset_neighbors(tile: Vector2i) -> Array:
 		neighbors.append(tile + d)
 	return neighbors
 
-func get_reachable_tiles(start: Vector2i, range: int) -> Dictionary:
+func get_reachable_tiles(start: Vector2i, range: int, mode: String) -> Dictionary:
 	var reachable: Array = []
 	var prev: Dictionary = {}
 	var visited: Dictionary = {}
@@ -66,12 +66,15 @@ func get_reachable_tiles(start: Vector2i, range: int) -> Dictionary:
 					continue
 				if neighbor.y < 0 or neighbor.y >= hex_map.rows:
 					continue
-
-				# Skip already visited or occupied tiles
 				if visited.has(neighbor):
 					continue
-				if is_occupied(neighbor):
-					continue
+				if mode == "move":
+					# Skip already visited or occupied tiles
+					
+					if is_occupied(neighbor):
+						continue
+				elif mode == "ranged":
+					pass
 
 				# Mark and enqueue
 				visited[neighbor] = dist + 1

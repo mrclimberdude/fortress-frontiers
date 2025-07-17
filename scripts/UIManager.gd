@@ -11,6 +11,7 @@ var current_player : String = ""
 var placing_unit   : String = ""
 var currently_selected_unit: Node = null
 var current_reachable: Dictionary = {}
+var enemy_tiles: Array = []
 var action_mode:       String   = ""     # "move", "ranged", "melee", "support", "hold"
 
 
@@ -21,6 +22,7 @@ var action_mode:       String   = ""     # "move", "ranged", "melee", "support",
 @onready var action_menu: PopupMenu      = $Panel/ActionMenu as PopupMenu
 
 const ArrowScene = preload("res://scenes/Arrow.tscn")
+const AttackArrowScene = preload("res://scenes/AttackArrow.tscn")
 
 func _ready():
 	hide()
@@ -79,8 +81,10 @@ func _on_unit_selected(unit: Node) -> void:
 	# Show action selection menu
 	action_menu.clear()
 	action_menu.add_item("Move", 0)
-	action_menu.add_item("Ranged Attack", 1)
-	action_menu.add_item("Melee Attack", 2)
+	if unit.is_ranged:
+		action_menu.add_item("Ranged Attack", 1)
+	else:
+		action_menu.add_item("Melee Attack", 2)
 	action_menu.add_item("Support", 3)
 	action_menu.add_item("Hold", 4)
 
@@ -88,13 +92,23 @@ func _on_action_selected(id: int) -> void:
 	match id:
 		0:
 			action_mode = "move"
-			var result = game_board.get_reachable_tiles(currently_selected_unit.grid_pos, currently_selected_unit.move_range)
-			var tiles = result["tiles"]
+			var result = game_board.get_reachable_tiles(currently_selected_unit.grid_pos, currently_selected_unit.move_range, action_mode)
+			var tiles = result["tiles"].slice(1)
 			game_board.show_highlights(tiles)
 			current_reachable = result
 			print("Move selected for %s" % currently_selected_unit.name)
 			# TODO: initiate move path selection
 		1:
+			action_mode = "ranged"
+			var result = game_board.get_reachable_tiles(currently_selected_unit.grid_pos, currently_selected_unit.ranged_range, action_mode)
+			var tiles = result["tiles"]
+			enemy_tiles = []
+			for tile in tiles:
+				if game_board.is_occupied(tile):
+					var other_unit = game_board.get_unit_at(tile)
+					if other_unit.player_id != current_player:
+						enemy_tiles.append(tile)
+			game_board.show_highlights(enemy_tiles)
 			print("Ranged Attack selected for %s" % currently_selected_unit.name)
 			# TODO: initiate ranged attack UI
 		2:
@@ -114,6 +128,8 @@ func _on_action_selected(id: int) -> void:
 func _on_done_pressed():
 	game_board.clear_highlights()
 	for child in hex.get_node("PathArrows").get_children():
+		child.queue_free()
+	for child in hex.get_node("AttackArrows").get_children():
 		child.queue_free()
 	# signal back to TurnManager that this player is finished
 	turn_mgr.submit_player_order(current_player)
@@ -137,7 +153,7 @@ func calculate_path(dest: Vector2i) -> Array:
 func _draw_paths() -> void:
 	var path_arrows_node = hex.get_node("PathArrows")
 	for child in path_arrows_node.get_children():
-		child.free()
+		child.queue_free()
 	var all_orders = turn_mgr.get_all_orders(current_player)
 	for order in all_orders:
 		if order["type"] == "move":
@@ -152,25 +168,47 @@ func _draw_paths() -> void:
 				var p1 = hex.map_to_world(a) + hex.tile_size * 0.5
 				var p2 = hex.map_to_world(b) + hex.tile_size * 0.5
 
-				# Instance arrow as a Sprite2D
 				var arrow = ArrowScene.instantiate() as Sprite2D
 				# Calculate direction and texture size
 				var dir = (p2 - p1).normalized()
 				var tex_size = arrow.texture.get_size()
-
-				# Calculate distance between tile centers
 				var distance: float = (p2 - p1).length()
-				# Scale arrow sprite to cover that distance
 				var scale_x: float = distance / tex_size.x
 				arrow.scale = Vector2(scale_x, 1)
 				# After scaling, offset so the arrow's tail (pivot) sits at the source tile center
 				var half_length = tex_size.x * scale_x * 0.5
 				arrow.position = p1 + dir * half_length
-				# Rotate arrow to point from a -> b
 				arrow.rotation = (p2 - p1).angle()
 				
 				arrow.z_index = 10
 				root.add_child(arrow)
+
+func _draw_attacks():
+	var attack_arrows_node = hex.get_node("AttackArrows")
+	for child in attack_arrows_node.get_children():
+		child.queue_free()
+	var all_orders = turn_mgr.get_all_orders(current_player)
+	for order in all_orders:
+		if order["type"] == "ranged":
+			var root = Node2D.new()
+			attack_arrows_node.add_child(root)
+			
+			# calculate direction and size for attack arrow
+			var attacker = order["unit"]
+			var p1 = hex.map_to_world(attacker.grid_pos) + hex.tile_size * 0.5
+			var p2 = hex.map_to_world(order["target_tile"]) + hex.tile_size * 0.5
+			var arrow = AttackArrowScene.instantiate() as Sprite2D
+			var dir = (p2 - p1).normalized()
+			var tex_size = arrow.texture.get_size()
+			var distance: float = (p2 - p1).length()
+			var scale_x: float = distance / tex_size.x
+			arrow.scale = Vector2(scale_x, 1)
+			# set position to center of tile
+			var half_length = tex_size.x * scale_x * 0.5
+			arrow.position = p1 + dir * half_length
+			arrow.rotation = (p2 - p1).angle()
+			arrow.z_index = 10
+			root.add_child(arrow)
 
 func _unhandled_input(ev):
 	if not (ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT):
@@ -193,7 +231,7 @@ func _unhandled_input(ev):
 	if action_mode == "move" and currently_selected_unit:
 		var path = []
 		# Only allow valid reachable cells
-		if cell in current_reachable["tiles"]:
+		if cell in current_reachable["tiles"] and cell != currently_selected_unit.grid_pos:
 			path = calculate_path(cell)
 			turn_mgr.add_order(current_player, {
 				"unit": currently_selected_unit,
@@ -201,14 +239,29 @@ func _unhandled_input(ev):
 				"path": path
 			})
 			_draw_paths()
+			_draw_attacks()
 		action_mode = ""
 		# TODO: enqueue move order via turn_mgr.enqueue_order(...)
+		return
+	
+	if action_mode == "ranged" and currently_selected_unit:
+		if cell in enemy_tiles:
+			turn_mgr.add_order(current_player, {
+				"unit": currently_selected_unit,
+				"type": "ranged",
+				"target_tile": cell,
+				"target_unit": game_board.get_unit_at(cell)
+			})
+		_draw_paths()
+		_draw_attacks()
+		action_mode = ""
 		return
 	
 	if turn_mgr.current_phase == $"..".Phase.ORDERS:
 		# Unit selection in orders phase
 		var unit = game_board.get_unit_at(cell)
 		if unit:
-			_on_unit_selected(unit)
-			action_menu.set_position(ev.position)
-			action_menu.show()
+			if unit.player_id == current_player:
+				_on_unit_selected(unit)
+				action_menu.set_position(ev.position)
+				action_menu.show()
