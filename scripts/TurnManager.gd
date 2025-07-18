@@ -73,11 +73,19 @@ func _do_upkeep() -> void:
 				income += SPECIAL_INCOME
 		player_gold[player] += income
 		print("%s income: %d  → total gold: %d" % [player.capitalize(), income, player_gold[player]])
-		# reset orders state
+	
+	# reset orders and unit states
+	$UI._clear_all_drawings()
+	var all_units = $GameBoardNode.get_all_units()
 	for p in ["player1", "player2"]:
 		player_orders[p].clear()
 		_orders_submitted[p] = false
-
+		for unit in all_units[p]:
+			unit.is_defending = false
+			if unit.is_healing:
+				unit.curr_health += unit.regen
+				unit.is_healing = false
+	
 # --------------------------------------------------------
 # Phase 2: Orders — async per-player input
 # --------------------------------------------------------
@@ -154,19 +162,31 @@ func _process_ranged():
 	$UI._draw_attacks()
 
 func _process_melee():
-	var melee_dmg: Dictionary = {}
+	var melee_attacks: Dictionary = {} # key: target, value: array[[attacker, priority]]
+	var melee_dmg: Dictionary = {} # key: target, vale: damage recieved
 	# melee orders resolution
 	for player in ["player1", "player2"]:
 		for unit in player_orders[player].keys():
 			var order = player_orders[player][unit]
 			if order["type"] == "melee":
 				if is_instance_valid(order["target_unit"]):
-					var damaged_penalty = (100 - order["unit"].curr_health) * 0.005
-					var melee_str = order["unit"].melee_strength * damaged_penalty
-					var def_str = order["target_unit"].melee_strength
-					var dmg = 30 * exp((melee_str-def_str)/25 * randf_range(0.75,1.25))
-					melee_dmg[order["target_unit"]] = melee_dmg.get(order["target_unit"], 0) + dmg
-				player_orders[player].erase(unit)
+					melee_attacks[order["target_unit"]] = melee_attacks.get(order["target_unit"], [])
+					melee_attacks[order["target_unit"]].append([order["unit"], order["priority"]])
+					player_orders[player].erase(unit)
+	for target in melee_attacks.keys():
+		var def_penalty = target.multi_def_penalty * (melee_attacks[target].size() -1)
+		var def_damaged_penalty = (100 - target.curr_health) * 0.005
+		var def_str = (target.melee_strength - def_penalty) * def_damaged_penalty
+		melee_attacks[target].sort_custom(func(a,b): return a[1] < b[1])
+		for attack in melee_attacks[target]:
+			var attacker = attack[0]
+			var damaged_penalty = (100 - attacker.curr_health) * 0.005
+			var melee_str = attacker.melee_strength * damaged_penalty
+			var def_dmg = 30 * exp((melee_str-def_str)/25 * randf_range(0.75,1.25))
+			melee_dmg[target] = melee_dmg.get(target, 0) + def_dmg
+			if target.is_defending:
+				var atk_dmg = 30 * exp((melee_str-def_str)/25 * randf_range(0.75,1.25))
+				melee_dmg[attacker] = melee_dmg.get(attacker, 0) + atk_dmg
 	
 	for target in melee_dmg.keys():
 		target.curr_health -= melee_dmg[target]
@@ -176,7 +196,9 @@ func _process_melee():
 				player_orders[player].erase(target)
 			$GameBoardNode/HexTileMap.set_player_tile(target.grid_pos, "")
 			$GameBoardNode.vacate(target.grid_pos)
-			target.free()
+			if target in melee_attacks.keys():
+				melee_attacks[target][0][0].set_grid_position(target.grid_pos)
+			target.queue_free()
 		else:
 			target.set_health_bar()
 	$UI._draw_attacks()

@@ -13,8 +13,9 @@ extends Node2D
 @export var max_health:      int = 100
 @export var curr_health:     int = 100
 @export var regen:           int = 10
-@export var num_attacks:     int = 0
-@export var defending:       bool = false
+@export var multi_def_penalty:int = 2
+@export var is_defending:    bool = false
+@export var is_healing:      bool = false
 
 # -- grid positioning and reference to the TileMapLayer
 var grid_pos: Vector2i

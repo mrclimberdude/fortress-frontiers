@@ -22,6 +22,15 @@ func is_occupied(tile: Vector2i) -> bool:
 
 func get_unit_at(tile: Vector2i) -> Node:
 	return occupied_tiles.get(tile, null)
+
+func get_all_units():
+	var units: Dictionary = {"player1": [], "player2": []}
+	for unit in occupied_tiles.values():
+		if unit.player_id == "player1":
+			units["player1"].append(unit)
+		else:
+			units["player2"].append(unit)
+	return units
 # ────────────────────────────────────────────────────────────────────────────────
 
 # ─── Hex neighbor & reachability ───────────────────────────────────────────────

@@ -96,12 +96,13 @@ func _on_unit_selected(unit: Node) -> void:
 		action_menu.add_item("Ranged Attack", 1)
 	else:
 		action_menu.add_item("Melee Attack", 2)
-	action_menu.add_item("Support", 3)
+	#action_menu.add_item("Support", 3)
 	action_menu.add_item("Heal", 4)
 	action_menu.add_item("Defend", 5)
 
 func _on_action_selected(id: int) -> void:
-	currently_selected_unit.defending = false
+	currently_selected_unit.is_defending = false
+	currently_selected_unit.is_healing = false
 	match id:
 		0:
 			action_mode = "move"
@@ -156,6 +157,7 @@ func _on_action_selected(id: int) -> void:
 			print("Support selected for %s" % currently_selected_unit.name)
 		4:
 			print("Heal selected for %s" % currently_selected_unit.name)
+			currently_selected_unit.is_healing = true
 			turn_mgr.add_order(current_player, {
 				"unit": currently_selected_unit,
 				"type": "heal",
@@ -170,15 +172,14 @@ func _on_action_selected(id: int) -> void:
 				"unit": currently_selected_unit,
 				"type": "defend",
 			})
-			currently_selected_unit.defending = true
+			currently_selected_unit.is_defending = true
 			_draw_paths()
 			_draw_attacks()
 			_draw_supports()
 			_draw_heals()
 	action_menu.hide()
 
-func _on_done_pressed():
-	game_board.clear_highlights()
+func _clear_all_drawings():
 	for child in hex.get_node("PathArrows").get_children():
 		child.queue_free()
 	for child in hex.get_node("AttackArrows").get_children():
@@ -187,6 +188,10 @@ func _on_done_pressed():
 		child.queue_free()
 	for child in hex.get_node("HealingSprites").get_children():
 		child.queue_free()
+
+func _on_done_pressed():
+	game_board.clear_highlights()
+	_clear_all_drawings()
 	# signal back to TurnManager that this player is finished
 	turn_mgr.submit_player_order(current_player)
 	# prevent further clicks
@@ -339,7 +344,7 @@ func _draw_heals():
 	for player in players:
 		var all_orders = turn_mgr.get_all_orders(player)
 		for order in all_orders:
-			if order["type"] == "hold":
+			if order["type"] == "heal":
 				var root = Node2D.new()
 				heal_node.add_child(root)
 				var heart = HealScene.instantiate() as Sprite2D
@@ -386,11 +391,13 @@ func _unhandled_input(ev):
 	
 	if action_mode == "ranged" or action_mode == "melee" and currently_selected_unit:
 		if cell in enemy_tiles:
+			move_priority += 1
 			turn_mgr.add_order(current_player, {
 				"unit": currently_selected_unit,
 				"type": action_mode,
 				"target_tile": cell,
-				"target_unit": game_board.get_unit_at(cell)
+				"target_unit": game_board.get_unit_at(cell),
+				"priority": move_priority
 			})
 		_draw_paths()
 		_draw_attacks()
