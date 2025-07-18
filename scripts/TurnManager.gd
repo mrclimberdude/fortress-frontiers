@@ -125,10 +125,65 @@ func submit_player_order(player: String) -> void:
 func _do_execution() -> void:
 	current_phase = Phase.EXECUTION
 	print("Executing orders...")
+	# key unit, value damage recieved
+	var ranged_dmg: Dictionary = {}
+	var melee_dmg: Dictionary = {}
+	
+	# ranged orders resolution
 	for player in ["player1", "player2"]:
-		for order in player_orders[player]:
-			print("%s: %s" % [player, order])
-	# (hook in movement/combat resolution here)
+		for unit in player_orders[player].keys():
+			var order = player_orders[player][unit]
+			if order["type"] == "ranged":
+				# check to make sure target unit still exists
+				if is_instance_valid(order["target_unit"]):
+					var damaged_penalty = (100 - order["unit"].curr_health) * 0.005
+					var ranged_str = order["unit"].ranged_strength * damaged_penalty
+					var def_str
+					if order["target_unit"].is_ranged:
+						def_str = order["target_unit"].ranged_strength
+					else:
+						def_str = order["target_unit"].melee_strength
+					var dmg = 30 * exp((ranged_str-def_str)/25 * randf_range(0.75,1.25))
+					ranged_dmg[order["target_unit"]] = ranged_dmg.get(order["target_unit"], 0) + dmg
+				
+	for target in ranged_dmg.keys():
+		target.curr_health -= ranged_dmg[target]
+		# dead unit, remove from all orders and remove node from game
+		if target.curr_health <= 0:
+			for player in ["player1", "player2"]:
+				player_orders[player].erase(target)
+			$GameBoardNode/HexTileMap.set_player_tile(target.grid_pos, "")
+			$GameBoardNode.vacate(target.grid_pos)
+			target.free()
+		else:
+			target.set_health_bar()
+	
+	# melee orders resolution
+	for player in ["player1", "player2"]:
+		for unit in player_orders[player].keys():
+			var order = player_orders[player][unit]
+			if order["type"] == "melee":
+				if is_instance_valid(order["target_unit"]):
+					var damaged_penalty = (100 - order["unit"].curr_health) * 0.005
+					var melee_str = order["unit"].melee_strength * damaged_penalty
+					var def_str = order["target_unit"].melee_strength
+					var dmg = 30 * exp((melee_str-def_str)/25 * randf_range(0.75,1.25))
+					melee_dmg[order["target_unit"]] = melee_dmg.get(order["target_unit"], 0) + dmg
+	
+	for target in melee_dmg.keys():
+		target.curr_health -= melee_dmg[target]
+		# dead unit, remove from all orders and remove node from game
+		if target.curr_health <= 0:
+			for player in ["player1", "player2"]:
+				player_orders[player].erase(target)
+			$GameBoardNode/HexTileMap.set_player_tile(target.grid_pos, "")
+			$GameBoardNode.vacate(target.grid_pos)
+			target.free()
+		else:
+			target.set_health_bar()
+	
+	# move orders resolution
+	
 
 # --------------------------------------------------------
 # API: attempt to buy and spawn a unit
