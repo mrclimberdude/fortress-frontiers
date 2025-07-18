@@ -14,7 +14,7 @@ var current_reachable: Dictionary = {}
 var enemy_tiles: Array = []
 var support_tiles = []
 var action_mode:       String   = ""     # "move", "ranged", "melee", "support", "hold"
-
+var move_priority: int = 0
 
 @onready var turn_mgr = get_node(turn_manager_path) as Node
 @onready var hex = $"../GameBoardNode/HexTileMap"
@@ -97,9 +97,11 @@ func _on_unit_selected(unit: Node) -> void:
 	else:
 		action_menu.add_item("Melee Attack", 2)
 	action_menu.add_item("Support", 3)
-	action_menu.add_item("Hold/Heal", 4)
+	action_menu.add_item("Heal", 4)
+	action_menu.add_item("Defend", 5)
 
 func _on_action_selected(id: int) -> void:
+	currently_selected_unit.defending = false
 	match id:
 		0:
 			action_mode = "move"
@@ -153,11 +155,22 @@ func _on_action_selected(id: int) -> void:
 			game_board.show_highlights(support_tiles)
 			print("Support selected for %s" % currently_selected_unit.name)
 		4:
-			print("Hold selected for %s" % currently_selected_unit.name)
+			print("Heal selected for %s" % currently_selected_unit.name)
 			turn_mgr.add_order(current_player, {
 				"unit": currently_selected_unit,
-				"type": "hold",
+				"type": "heal",
 			})
+			_draw_paths()
+			_draw_attacks()
+			_draw_supports()
+			_draw_heals()
+		5:
+			print("Defend selected for %s" % currently_selected_unit.name)
+			turn_mgr.add_order(current_player, {
+				"unit": currently_selected_unit,
+				"type": "defend",
+			})
+			currently_selected_unit.defending = true
 			_draw_paths()
 			_draw_attacks()
 			_draw_supports()
@@ -184,7 +197,8 @@ func _on_execution_paused(phase_idx):
 	exec_panel.visible = true
 	var phase_names = ["Iniitialization", "Ranged Attacks","Melee","Movement"]
 	if phase_idx >= phase_names.size():
-		phase_names.append("Movement")
+		for i in range(phase_idx - phase_names.size()+1):
+			phase_names.append("Movement")
 	phase_label.text = "Processed: %s\n(Click Next to continue)" % phase_names[phase_idx]
 
 func _on_next_pressed():
@@ -356,10 +370,12 @@ func _unhandled_input(ev):
 		# Only allow valid reachable cells
 		if cell in current_reachable["tiles"] and cell != currently_selected_unit.grid_pos:
 			path = calculate_path(cell)
+			move_priority += 1
 			turn_mgr.add_order(current_player, {
 				"unit": currently_selected_unit,
 				"type": "move",
-				"path": path
+				"path": path,
+				"priority": move_priority
 			})
 			_draw_paths()
 			_draw_attacks()

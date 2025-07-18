@@ -184,16 +184,129 @@ func _process_melee():
 	$UI._draw_supports()
 
 func _process_move():
-	pass
-	#var melee_dmg: Dictionary = {}
-	#var tiles_entering: Dictionary = {}
-	#for player in ["player1", "player2"]:
-		#for unit in player_orders[player].keys():
-			#var order = player_orders[player][unit]
-			#if order["type"] == "move":
-				#var next_tile = order["path"][1]
-				#tiles_entering[next_tile] = tiles_entering.get(next_tile, []).append(unit)
+	var tiles_entering: Dictionary = {}
+	# find all tiles that are being entered into on the next move by both players
+	for player in ["player1", "player2"]:
+		for unit in player_orders[player].keys():
+			var order = player_orders[player][unit]
+			if order["type"] == "move":
+				var next_tile = order["path"][1]
+				tiles_entering[next_tile] = tiles_entering.get(next_tile, [])
+				tiles_entering[next_tile].append(unit)
+	
+	for tile in tiles_entering.keys():
+		# if no conflicts, perform the move
+		if tiles_entering[tile].size() == 1:
+			var curr_unit = tiles_entering[tile][0]
+			curr_unit.set_grid_position(tile)
+			if player_orders[curr_unit.player_id][curr_unit]["path"].size() <= 2:
+				player_orders[curr_unit.player_id].erase(curr_unit)
+			else:
+				player_orders[curr_unit.player_id][curr_unit]["path"].pop_front()
+			
+		
+		# conflict handling
+		else:
+			var p1_units = []
+			var p2_units = []
+			for unit in tiles_entering[tile]:
+				if unit.player_id == "player1":
+					p1_units.append([unit,player_orders["player1"][unit]["priority"]])
+				else:
+					p2_units.append([unit,player_orders["player2"][unit]["priority"]])
+			p1_units.sort_custom(func(a,b): return a[1] < b[1])
+			p2_units.sort_custom(func(a,b): return a[1] < b[1])
+			
+			while p1_units.size() > 0 or p2_units.size > 0:
 				
+				# all of one players entering units have acted or died
+				if p1_units.size() == 0:
+					p2_units[0][0].set_grid_position(tile)
+					for unit in p2_units:
+						player_orders["player2"].erase(unit[0])
+					break
+				if p2_units.size() == 0:
+					p1_units[0][0].set_grid_position(tile)
+					for unit in p1_units:
+						player_orders["player1"].erase(unit[0])
+					break
+				var first_p1 = p1_units[0][0]
+				var first_p2 = p2_units[0][0]
+				# first priority units of each player fight each other
+				var p1_damaged_penalty = (100 - first_p1.curr_health) * 0.005
+				var p1_melee_str = first_p1.melee_strength * p1_damaged_penalty
+				var p2_damaged_penalty = (100 - first_p2.curr_health) * 0.005
+				var p2_melee_str = first_p2.melee_strength * p2_damaged_penalty
+				var p1_dmg = 30 * exp((p2_melee_str - first_p1.melee_strength)/25 * randf_range(0.75,1.25))
+				var p2_dmg = 30 * exp((p1_melee_str - first_p2.melee_strength)/25 * randf_range(0.75,1.25))
+				first_p1.curr_health -= p1_dmg
+				first_p1.set_health_bar()
+				first_p2.curr_health -= p2_dmg
+				first_p2.set_health_bar()
+				
+				# dead unit handling
+				# both dead
+				if first_p1.curr_health <= 0 and first_p2.curr_health <=0:
+					player_orders["player1"].erase(first_p1)
+					player_orders["player2"].erase(first_p2)
+					$GameBoardNode/HexTileMap.set_player_tile(first_p1.grid_pos, "")
+					$GameBoardNode/HexTileMap.set_player_tile(first_p2.grid_pos, "")
+					$GameBoardNode.vacate(first_p1.grid_pos)
+					$GameBoardNode.vacate(first_p2.grid_pos)
+					first_p1.queue_free()
+					first_p2.queue_free()
+					p1_units.pop_front()
+					p2_units.pop_front()
+				# just one dead
+				elif first_p1.curr_health <= 0 or first_p2.curr_health <= 0:
+					# p1 unit dead
+					if first_p1.curr_health <= 0:
+						player_orders["player1"].erase(first_p1)
+						$GameBoardNode/HexTileMap.set_player_tile(first_p1.grid_pos, "")
+						$GameBoardNode.vacate(first_p1.grid_pos)
+						first_p1.queue_free()
+						p1_units.pop_front()
+						if p1_units.size() == 0:
+							first_p2.set_grid_position(tile)
+							for unit in p2_units:
+								player_orders["player2"].erase(unit[0])
+							break
+						else:
+							player_orders["player2"].erase(first_p2)
+							p2_units.pop_front()
+							
+					#p2 unit dead
+					else:
+						player_orders["player2"].erase(first_p2)
+						$GameBoardNode/HexTileMap.set_player_tile(first_p2.grid_pos, "")
+						$GameBoardNode.vacate(first_p2.grid_pos)
+						first_p2.queue_free()
+						p2_units.pop_front()
+						if p2_units.size() == 0:
+							first_p1.set_grid_position(tile)
+							for unit in p1_units:
+								player_orders["player1"].erase(unit[0])
+							break
+						else:
+							player_orders["player1"].erase(first_p1)
+							p1_units.pop_front()
+				
+				# both still alive
+				else:
+					player_orders["player1"].erase(first_p1)
+					p1_units.pop_front()
+					player_orders["player2"].erase(first_p2)
+					p2_units.pop_front()
+	
+	# check if there are more moves and requeue _process_moves
+	for player in ["player1", "player2"]:
+		for unit in player_orders[player].keys():
+			var order = player_orders[player][unit]
+			if order["type"] == "move":
+				exec_steps.append(func(): _process_move())
+				$UI._draw_paths()
+				return
+	$UI._draw_paths()
 
 func _initialize_execution():
 	$UI._draw_attacks()
