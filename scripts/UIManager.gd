@@ -21,6 +21,9 @@ var action_mode:       String   = ""     # "move", "ranged", "melee", "support",
 @onready var gold_lbl = $Panel/VBoxContainer/GoldLabel as Label
 @onready var game_board: Node = get_node("../GameBoardNode")
 @onready var action_menu: PopupMenu      = $Panel/ActionMenu as PopupMenu
+@onready var exec_panel: PanelContainer  = $ExecutionPanel
+@onready var phase_label   : Label       = exec_panel.get_node("PhaseLabel")
+@onready var next_button   : Button      = exec_panel.get_node("NextButton")
 
 const ArrowScene = preload("res://scenes/Arrow.tscn")
 const AttackArrowScene = preload("res://scenes/AttackArrow.tscn")
@@ -28,15 +31,20 @@ const SupportArrowScene = preload("res://scenes/SupportArrow.tscn")
 const HealScene = preload("res://scenes/Healing.tscn")
 
 func _ready():
-	hide()
 	
 	# Enable unhandled input processing
 	set_process_unhandled_input(true)
 	# connect using Callable(self, "method_name")
 	turn_mgr.connect("orders_phase_begin",
-					 Callable(self, "_on_orders_phase_begin"))
+					Callable(self, "_on_orders_phase_begin"))
 	turn_mgr.connect("orders_phase_end",
-					 Callable(self, "_on_orders_phase_end"))
+					Callable(self, "_on_orders_phase_end"))
+	turn_mgr.connect("execution_paused",
+					Callable(self, "_on_execution_paused"))
+	turn_mgr.connect("execution_complete",
+					Callable(self, "_on_execution_complete"))
+	next_button.connect("pressed",
+					Callable(self, "_on_next_pressed"))
 
 	$Panel/VBoxContainer/ArcherButton.connect("pressed",
 					 Callable(self, "_on_archer_pressed"))
@@ -54,11 +62,11 @@ func _on_orders_phase_begin(player: String) -> void:
 	current_player = player
 	gold_lbl.text = "Gold: %d" % turn_mgr.player_gold[current_player]
 	placing_unit  = ""
-	show()
+	$Panel.visible = true
 
 func _on_orders_phase_end() -> void:
 	game_board.clear_highlights()
-	hide()
+	$Panel.visible = false
 
 func _on_archer_pressed():
 	placing_unit = "archer"
@@ -162,10 +170,29 @@ func _on_done_pressed():
 		child.queue_free()
 	for child in hex.get_node("AttackArrows").get_children():
 		child.queue_free()
+	for child in hex.get_node("SupportArrows").get_children():
+		child.queue_free()
+	for child in hex.get_node("HealingSprites").get_children():
+		child.queue_free()
 	# signal back to TurnManager that this player is finished
 	turn_mgr.submit_player_order(current_player)
 	# prevent further clicks
 	placing_unit = ""
+
+func _on_execution_paused(phase_idx):
+	# Show the panel, update text
+	exec_panel.visible = true
+	var phase_names = ["Iniitialization", "Ranged Attacks","Melee","Movement"]
+	if phase_idx >= phase_names.size():
+		phase_names.append("Movement")
+	phase_label.text = "Processed: %s\n(Click Next to continue)" % phase_names[phase_idx]
+
+func _on_next_pressed():
+	exec_panel.visible = false
+	turn_mgr.resume_execution()
+
+func _on_execution_complete():
+	exec_panel.visible = false
 
 func calculate_path(dest: Vector2i) -> Array:
 	# Build path array
@@ -224,28 +251,34 @@ func _draw_attacks():
 	var attack_arrows_node = hex.get_node("AttackArrows")
 	for child in attack_arrows_node.get_children():
 		child.queue_free()
-	var all_orders = turn_mgr.get_all_orders(current_player)
-	for order in all_orders:
-		if order["type"] == "ranged" or order["type"] == "melee":
-			var root = Node2D.new()
-			attack_arrows_node.add_child(root)
-			
-			# calculate direction and size for attack arrow
-			var attacker = order["unit"]
-			var p1 = hex.map_to_world(attacker.grid_pos) + hex.tile_size * 0.5
-			var p2 = hex.map_to_world(order["target_tile"]) + hex.tile_size * 0.5
-			var arrow = AttackArrowScene.instantiate() as Sprite2D
-			var dir = (p2 - p1).normalized()
-			var tex_size = arrow.texture.get_size()
-			var distance: float = (p2 - p1).length()
-			var scale_x: float = distance / tex_size.x
-			arrow.scale = Vector2(scale_x, 1)
-			# set position to center of tile
-			var half_length = tex_size.x * scale_x * 0.5
-			arrow.position = p1 + dir * half_length
-			arrow.rotation = (p2 - p1).angle()
-			arrow.z_index = 10
-			root.add_child(arrow)
+	var players = []
+	if turn_mgr.current_phase == turn_mgr.Phase.ORDERS:
+		players.append(current_player)
+	else:
+		players = ["player1", "player2"]
+	for player in players:
+		var all_orders = turn_mgr.get_all_orders(player)
+		for order in all_orders:
+			if order["type"] == "ranged" or order["type"] == "melee":
+				var root = Node2D.new()
+				attack_arrows_node.add_child(root)
+				
+				# calculate direction and size for attack arrow
+				var attacker = order["unit"]
+				var p1 = hex.map_to_world(attacker.grid_pos) + hex.tile_size * 0.5
+				var p2 = hex.map_to_world(order["target_tile"]) + hex.tile_size * 0.5
+				var arrow = AttackArrowScene.instantiate() as Sprite2D
+				var dir = (p2 - p1).normalized()
+				var tex_size = arrow.texture.get_size()
+				var distance: float = (p2 - p1).length()
+				var scale_x: float = distance / tex_size.x
+				arrow.scale = Vector2(scale_x, 1)
+				# set position to center of tile
+				var half_length = tex_size.x * scale_x * 0.5
+				arrow.position = p1 + dir * half_length
+				arrow.rotation = (p2 - p1).angle()
+				arrow.z_index = 10
+				root.add_child(arrow)
 
 func _draw_supports():
 	var support_arrows_node = hex.get_node("SupportArrows")
