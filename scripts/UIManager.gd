@@ -29,6 +29,7 @@ const ArrowScene = preload("res://scenes/Arrow.tscn")
 const AttackArrowScene = preload("res://scenes/AttackArrow.tscn")
 const SupportArrowScene = preload("res://scenes/SupportArrow.tscn")
 const HealScene = preload("res://scenes/Healing.tscn")
+const DefendScene = preload("res://scenes/Defending.tscn")
 
 func _ready():
 	
@@ -103,6 +104,7 @@ func _on_unit_selected(unit: Node) -> void:
 func _on_action_selected(id: int) -> void:
 	currently_selected_unit.is_defending = false
 	currently_selected_unit.is_healing = false
+	currently_selected_unit.is_moving = false
 	match id:
 		0:
 			action_mode = "move"
@@ -162,10 +164,7 @@ func _on_action_selected(id: int) -> void:
 				"unit": currently_selected_unit,
 				"type": "heal",
 			})
-			_draw_paths()
-			_draw_attacks()
-			_draw_supports()
-			_draw_heals()
+			_draw_all()
 		5:
 			print("Defend selected for %s" % currently_selected_unit.name)
 			turn_mgr.add_order(current_player, {
@@ -173,10 +172,7 @@ func _on_action_selected(id: int) -> void:
 				"type": "defend",
 			})
 			currently_selected_unit.is_defending = true
-			_draw_paths()
-			_draw_attacks()
-			_draw_supports()
-			_draw_heals()
+			_draw_all()
 	action_menu.hide()
 
 func _clear_all_drawings():
@@ -196,6 +192,7 @@ func _on_done_pressed():
 	turn_mgr.submit_player_order(current_player)
 	# prevent further clicks
 	placing_unit = ""
+	move_priority = 0
 
 func _on_execution_paused(phase_idx):
 	# Show the panel, update text
@@ -351,7 +348,34 @@ func _draw_heals():
 				heart.position = hex.map_to_world(order["unit"].grid_pos) + hex.tile_size * 0.65
 				heart.z_index = 10
 				root.add_child(heart)
-			
+
+func _draw_defends():
+	var defend_node = hex.get_node("DefendingSprites")
+	for child in defend_node.get_children():
+		child.queue_free()
+	var players = []
+	if turn_mgr.current_phase == turn_mgr.Phase.ORDERS:
+		players.append(current_player)
+	else:
+		players = ["player1", "player2"]
+	for player in players:
+		var all_orders = turn_mgr.get_all_orders(player)
+		for order in all_orders:
+			if order["type"] == "defend":
+				var root = Node2D.new()
+				defend_node.add_child(root)
+				var defend = DefendScene.instantiate() as Sprite2D
+				defend.position = hex.map_to_world(order["unit"].grid_pos) + hex.tile_size * 0.5
+				defend.z_index = 0
+				root.add_child(defend)
+
+func _draw_all():
+	_draw_attacks()
+	_draw_heals()
+	_draw_paths()
+	_draw_supports()
+	_draw_defends()
+
 func _unhandled_input(ev):
 	if not (ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT):
 		return
@@ -376,22 +400,24 @@ func _unhandled_input(ev):
 		if cell in current_reachable["tiles"] and cell != currently_selected_unit.grid_pos:
 			path = calculate_path(cell)
 			move_priority += 1
+			currently_selected_unit.is_moving = true
+			currently_selected_unit.moving_to = path[1]
 			turn_mgr.add_order(current_player, {
 				"unit": currently_selected_unit,
 				"type": "move",
 				"path": path,
 				"priority": move_priority
 			})
-			_draw_paths()
-			_draw_attacks()
-			_draw_supports()
-			_draw_heals()
+			_draw_all()
 		action_mode = ""
 		return
 	
 	if action_mode == "ranged" or action_mode == "melee" and currently_selected_unit:
 		if cell in enemy_tiles:
 			move_priority += 1
+			if action_mode == "melee":
+				currently_selected_unit.is_moving = true
+				currently_selected_unit.moving_to = game_board.get_unit_at(cell).grid_pos
 			turn_mgr.add_order(current_player, {
 				"unit": currently_selected_unit,
 				"type": action_mode,
@@ -399,10 +425,7 @@ func _unhandled_input(ev):
 				"target_unit": game_board.get_unit_at(cell),
 				"priority": move_priority
 			})
-		_draw_paths()
-		_draw_attacks()
-		_draw_supports()
-		_draw_heals()
+		_draw_all()
 		action_mode = ""
 		return
 	
@@ -413,10 +436,7 @@ func _unhandled_input(ev):
 				"type": action_mode,
 				"target_tile": cell
 			})
-		_draw_paths()
-		_draw_attacks()
-		_draw_supports()
-		_draw_heals()
+		_draw_all()
 		action_mode = ""
 		return
 	

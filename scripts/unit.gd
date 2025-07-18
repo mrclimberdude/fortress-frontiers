@@ -16,6 +16,8 @@ extends Node2D
 @export var multi_def_penalty:int = 2
 @export var is_defending:    bool = false
 @export var is_healing:      bool = false
+@export var is_moving:       bool = false
+@export var moving_to:       Vector2i
 
 # -- grid positioning and reference to the TileMapLayer
 var grid_pos: Vector2i

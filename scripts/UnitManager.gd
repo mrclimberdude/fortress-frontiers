@@ -40,6 +40,23 @@ func spawn_unit(unit_type: String, cell: Vector2i, owner: String) -> void:
 
 	print("Spawned %s for %s at %s" % [unit_type, owner, cell])
 
+func find_end(unit, path, enemy, enemy_flag):
+	if enemy:
+		enemy_flag = true
+	if unit.is_moving:
+		path.append(unit.moving_to)
+		if unit.moving_to == path[0]:
+			return [path, enemy_flag]
+		if $"..".is_occupied(unit.moving_to):
+			var obstacle = $"..".get_unit_at(unit.moving_to)
+			if not obstacle.is_moving:
+				return [path, enemy_flag]
+			if obstacle.player_id == unit.player_id:
+				return find_end(obstacle, path, false, enemy_flag)
+			else:
+				return find_end(obstacle, path, true, enemy_flag)
+	return [path, enemy_flag]
+
 func _input(event):
 	if event.is_action_pressed("debug_move"):
 		# Grab your first unit under UnitManager; adjust path/index as needed

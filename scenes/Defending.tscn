@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://i7dn1fn0odgu"]
+
+[ext_resource type="Texture2D" uid="uid://b27ab3vx600lc" path="res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Geometric/HSI_icon_121.png" id="1_7kp0y"]
+
+[node name="Sprite2D" type="Sprite2D"]
+texture = ExtResource("1_7kp0y")

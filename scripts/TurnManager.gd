@@ -172,7 +172,7 @@ func _process_melee():
 				if is_instance_valid(order["target_unit"]):
 					melee_attacks[order["target_unit"]] = melee_attacks.get(order["target_unit"], [])
 					melee_attacks[order["target_unit"]].append([order["unit"], order["priority"]])
-					player_orders[player].erase(unit)
+				player_orders[player].erase(unit)
 	for target in melee_attacks.keys():
 		var def_penalty = target.multi_def_penalty * (melee_attacks[target].size() -1)
 		var def_damaged_penalty = (100 - target.curr_health) * 0.005
@@ -206,7 +206,7 @@ func _process_melee():
 	$UI._draw_supports()
 
 func _process_move():
-	var tiles_entering: Dictionary = {}
+	var tiles_entering: Dictionary = {} # key: tile, value: [unit]
 	# find all tiles that are being entered into on the next move by both players
 	for player in ["player1", "player2"]:
 		for unit in player_orders[player].keys():
@@ -217,14 +217,59 @@ func _process_move():
 				tiles_entering[next_tile].append(unit)
 	
 	for tile in tiles_entering.keys():
-		# if no conflicts, perform the move
+		# if only one unit entering a tile, perform the move
 		if tiles_entering[tile].size() == 1:
 			var curr_unit = tiles_entering[tile][0]
-			curr_unit.set_grid_position(tile)
-			if player_orders[curr_unit.player_id][curr_unit]["path"].size() <= 2:
+			# check if there is something there and fight if an enemy
+			if $GameBoardNode.is_occupied(tile):
+				var dependency_path = $GameBoardNode/Units.find_end(curr_unit, [curr_unit.grid_pos], false, false)
+				if dependency_path[0][-1] == curr_unit.grid_pos:
+					# circular path
+					var units = []
+					for spot in dependency_path[0]:
+						units.append($GameBoardNode.get_unit_at(spot))
+					for i in range(units.size()-1):
+						units[i].set_grid_position(dependency_path[0][i+1])
+						if player_orders[units[i].player_id][units[i]]["path"].size() <= 2:
+							player_orders[units[i].player_id].erase(units[i])
+							units[i].is_moving = false
+						else:
+							player_orders[units[i].player_id][units[i]]["path"].pop_front()
+							units[i].moving_to = player_orders[units[i].player_id][units[i]]["path"][1]
+					for i in range(units.size()-1):
+						units[i].set_grid_position(dependency_path[0][i+1])
+					break
+				var obstacle = $GameBoardNode.get_unit_at(tile)
+				var atkr_damaged_penalty = (100 - curr_unit.curr_health) * 0.005
+				var atkr_melee_str = curr_unit.melee_strength * atkr_damaged_penalty
+				var defr_damaged_penalty = (100 - obstacle.curr_health) * 0.005
+				var defr_melee_str = obstacle.melee_strength * defr_damaged_penalty
+				var atkr_dmg = 30 * exp((defr_melee_str - atkr_melee_str)/25 * randf_range(0.75,1.25))
+				var defr_dmg = 30 * exp((atkr_melee_str - defr_melee_str)/25 * randf_range(0.75,1.25))
+				obstacle.curr_health -= defr_dmg
+				obstacle.set_health_bar()
+				if obstacle.is_defending:
+					curr_unit.curr_health -= atkr_dmg
+					curr_unit.set_health_bar()
+				if obstacle.curr_health <= 0:
+					player_orders[obstacle.player_id].erase(obstacle)
+					$GameBoardNode/HexTileMap.set_player_tile(obstacle.grid_pos, "")
+					$GameBoardNode.vacate(obstacle.grid_pos)
+					obstacle.queue_free()
+					if curr_unit.curr_health > 0:
+						curr_unit.set_grid_position(tile)
 				player_orders[curr_unit.player_id].erase(curr_unit)
+				if curr_unit.curr_health <= 0:
+					player_orders[curr_unit.player_id].erase(curr_unit)
+					$GameBoardNode/HexTileMap.set_player_tile(curr_unit.grid_pos, "")
+					$GameBoardNode.vacate(curr_unit.grid_pos)
+					curr_unit.queue_free()
 			else:
-				player_orders[curr_unit.player_id][curr_unit]["path"].pop_front()
+				curr_unit.set_grid_position(tile)
+				if player_orders[curr_unit.player_id][curr_unit]["path"].size() <= 2:
+					player_orders[curr_unit.player_id].erase(curr_unit)
+				else:
+					player_orders[curr_unit.player_id][curr_unit]["path"].pop_front()
 			
 		
 		# conflict handling
