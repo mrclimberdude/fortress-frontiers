@@ -185,34 +185,40 @@ func _draw_paths() -> void:
 	var path_arrows_node = hex.get_node("PathArrows")
 	for child in path_arrows_node.get_children():
 		child.queue_free()
-	var all_orders = turn_mgr.get_all_orders(current_player)
-	for order in all_orders:
-		if order["type"] == "move":
-			var root = Node2D.new()
-			path_arrows_node.add_child(root)
-			var path = order["path"]
-			
-			# Draw arrows between consecutive cells
-			for i in range(path.size() - 1):
-				var a = path[i]
-				var b = path[i + 1]
-				var p1 = hex.map_to_world(a) + hex.tile_size * 0.5
-				var p2 = hex.map_to_world(b) + hex.tile_size * 0.5
-
-				var arrow = ArrowScene.instantiate() as Sprite2D
-				# Calculate direction and texture size
-				var dir = (p2 - p1).normalized()
-				var tex_size = arrow.texture.get_size()
-				var distance: float = (p2 - p1).length()
-				var scale_x: float = distance / tex_size.x
-				arrow.scale = Vector2(scale_x, 1)
-				# After scaling, offset so the arrow's tail (pivot) sits at the source tile center
-				var half_length = tex_size.x * scale_x * 0.5
-				arrow.position = p1 + dir * half_length
-				arrow.rotation = (p2 - p1).angle()
+	var players = []
+	if turn_mgr.current_phase == turn_mgr.Phase.ORDERS:
+		players.append(current_player)
+	else:
+		players = ["player1", "player2"]
+	for player in players:
+		var all_orders = turn_mgr.get_all_orders(player)
+		for order in all_orders:
+			if order["type"] == "move":
+				var root = Node2D.new()
+				path_arrows_node.add_child(root)
+				var path = order["path"]
 				
-				arrow.z_index = 10
-				root.add_child(arrow)
+				# Draw arrows between consecutive cells
+				for i in range(path.size() - 1):
+					var a = path[i]
+					var b = path[i + 1]
+					var p1 = hex.map_to_world(a) + hex.tile_size * 0.5
+					var p2 = hex.map_to_world(b) + hex.tile_size * 0.5
+
+					var arrow = ArrowScene.instantiate() as Sprite2D
+					# Calculate direction and texture size
+					var dir = (p2 - p1).normalized()
+					var tex_size = arrow.texture.get_size()
+					var distance: float = (p2 - p1).length()
+					var scale_x: float = distance / tex_size.x
+					arrow.scale = Vector2(scale_x, 1)
+					# After scaling, offset so the arrow's tail (pivot) sits at the source tile center
+					var half_length = tex_size.x * scale_x * 0.5
+					arrow.position = p1 + dir * half_length
+					arrow.rotation = (p2 - p1).angle()
+					
+					arrow.z_index = 10
+					root.add_child(arrow)
 
 func _draw_attacks():
 	var attack_arrows_node = hex.get_node("AttackArrows")
@@ -245,42 +251,54 @@ func _draw_supports():
 	var support_arrows_node = hex.get_node("SupportArrows")
 	for child in support_arrows_node.get_children():
 		child.queue_free()
-	var all_orders = turn_mgr.get_all_orders(current_player)
-	for order in all_orders:
-		if order["type"] == "support":
-			var root = Node2D.new()
-			support_arrows_node.add_child(root)
-			
-			# calculate direction and size for support arrow
-			var supporter = order["unit"]
-			var p1 = hex.map_to_world(supporter.grid_pos) + hex.tile_size * 0.5
-			var p2 = hex.map_to_world(order["target_tile"]) + hex.tile_size * 0.5
-			var arrow = SupportArrowScene.instantiate() as Sprite2D
-			var dir = (p2 - p1).normalized()
-			var tex_size = arrow.texture.get_size()
-			var distance: float = (p2 - p1).length()
-			var scale_x: float = distance / tex_size.x
-			arrow.scale = Vector2(scale_x, 1)
-			# set position to center of tile
-			var half_length = tex_size.x * scale_x * 0.5
-			arrow.position = p1 + dir * half_length
-			arrow.rotation = (p2 - p1).angle()
-			arrow.z_index = 10
-			root.add_child(arrow)
+	var players = []
+	if turn_mgr.current_phase == turn_mgr.Phase.ORDERS:
+		players.append(current_player)
+	else:
+		players = ["player1", "player2"]
+	for player in players:
+		var all_orders = turn_mgr.get_all_orders(player)
+		for order in all_orders:
+			if order["type"] == "support":
+				var root = Node2D.new()
+				support_arrows_node.add_child(root)
+				
+				# calculate direction and size for support arrow
+				var supporter = order["unit"]
+				var p1 = hex.map_to_world(supporter.grid_pos) + hex.tile_size * 0.5
+				var p2 = hex.map_to_world(order["target_tile"]) + hex.tile_size * 0.5
+				var arrow = SupportArrowScene.instantiate() as Sprite2D
+				var dir = (p2 - p1).normalized()
+				var tex_size = arrow.texture.get_size()
+				var distance: float = (p2 - p1).length()
+				var scale_x: float = distance / tex_size.x
+				arrow.scale = Vector2(scale_x, 1)
+				# set position to center of tile
+				var half_length = tex_size.x * scale_x * 0.5
+				arrow.position = p1 + dir * half_length
+				arrow.rotation = (p2 - p1).angle()
+				arrow.z_index = 10
+				root.add_child(arrow)
 
 func _draw_heals():
 	var heal_node = hex.get_node("HealingSprites")
 	for child in heal_node.get_children():
 		child.queue_free()
-	var all_orders = turn_mgr.get_all_orders(current_player)
-	for order in all_orders:
-		if order["type"] == "hold":
-			var root = Node2D.new()
-			heal_node.add_child(root)
-			var heart = HealScene.instantiate() as Sprite2D
-			heart.position = hex.map_to_world(order["unit"].grid_pos) + hex.tile_size * 0.65
-			heart.z_index = 10
-			root.add_child(heart)
+	var players = []
+	if turn_mgr.current_phase == turn_mgr.Phase.ORDERS:
+		players.append(current_player)
+	else:
+		players = ["player1", "player2"]
+	for player in players:
+		var all_orders = turn_mgr.get_all_orders(player)
+		for order in all_orders:
+			if order["type"] == "hold":
+				var root = Node2D.new()
+				heal_node.add_child(root)
+				var heart = HealScene.instantiate() as Sprite2D
+				heart.position = hex.map_to_world(order["unit"].grid_pos) + hex.tile_size * 0.65
+				heart.z_index = 10
+				root.add_child(heart)
 			
 func _unhandled_input(ev):
 	if not (ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT):

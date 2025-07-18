@@ -145,7 +145,7 @@ func _do_execution() -> void:
 						def_str = order["target_unit"].melee_strength
 					var dmg = 30 * exp((ranged_str-def_str)/25 * randf_range(0.75,1.25))
 					ranged_dmg[order["target_unit"]] = ranged_dmg.get(order["target_unit"], 0) + dmg
-				
+	
 	for target in ranged_dmg.keys():
 		target.curr_health -= ranged_dmg[target]
 		# dead unit, remove from all orders and remove node from game
