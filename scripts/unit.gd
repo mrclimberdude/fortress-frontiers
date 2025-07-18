@@ -12,6 +12,7 @@ extends Node2D
 @export var ranged_range:    int = 0
 @export var max_health:      int = 100
 @export var curr_health:     int = 100
+@export var regen:           int = 10
 
 # -- grid positioning and reference to the TileMapLayer
 var grid_pos: Vector2i
@@ -49,7 +50,11 @@ func set_grid_position(pos: Vector2i) -> void:
 	else:
 		push_error("Unit.gd: could not find GameBoardNode to occupy()")
 
+func set_health_bar():
+	$HealthBar.value = curr_health
+
 func _ready():
 	# if map_layer and grid_pos were set prior to ready, snap into place
 	if map_layer and grid_pos:
 		set_grid_position(grid_pos)
+	set_health_bar()

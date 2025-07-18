@@ -12,6 +12,7 @@ var placing_unit   : String = ""
 var currently_selected_unit: Node = null
 var current_reachable: Dictionary = {}
 var enemy_tiles: Array = []
+var support_tiles = []
 var action_mode:       String   = ""     # "move", "ranged", "melee", "support", "hold"
 
 
@@ -23,6 +24,8 @@ var action_mode:       String   = ""     # "move", "ranged", "melee", "support",
 
 const ArrowScene = preload("res://scenes/Arrow.tscn")
 const AttackArrowScene = preload("res://scenes/AttackArrow.tscn")
+const SupportArrowScene = preload("res://scenes/SupportArrow.tscn")
+const HealScene = preload("res://scenes/Healing.tscn")
 
 func _ready():
 	hide()
@@ -86,7 +89,7 @@ func _on_unit_selected(unit: Node) -> void:
 	else:
 		action_menu.add_item("Melee Attack", 2)
 	action_menu.add_item("Support", 3)
-	action_menu.add_item("Hold", 4)
+	action_menu.add_item("Hold/Heal", 4)
 
 func _on_action_selected(id: int) -> void:
 	match id:
@@ -97,7 +100,7 @@ func _on_action_selected(id: int) -> void:
 			game_board.show_highlights(tiles)
 			current_reachable = result
 			print("Move selected for %s" % currently_selected_unit.name)
-			# TODO: initiate move path selection
+
 		1:
 			action_mode = "ranged"
 			var result = game_board.get_reachable_tiles(currently_selected_unit.grid_pos, currently_selected_unit.ranged_range, action_mode)
@@ -110,19 +113,47 @@ func _on_action_selected(id: int) -> void:
 						enemy_tiles.append(tile)
 			game_board.show_highlights(enemy_tiles)
 			print("Ranged Attack selected for %s" % currently_selected_unit.name)
-			# TODO: initiate ranged attack UI
+
 		2:
+			action_mode = "melee"
+			var result = game_board.get_reachable_tiles(currently_selected_unit.grid_pos, 1, action_mode)
+			var tiles = result["tiles"]
+			enemy_tiles = []
+			for tile in tiles:
+				if game_board.is_occupied(tile):
+					var other_unit = game_board.get_unit_at(tile)
+					if other_unit.player_id != current_player:
+						enemy_tiles.append(tile)
+			game_board.show_highlights(enemy_tiles)
 			print("Melee Attack selected for %s" % currently_selected_unit.name)
-			# TODO: initiate melee attack UI
+
 		3:
+			action_mode = "support"
+			var result: Dictionary = {}
+			if currently_selected_unit.is_ranged:
+				result = game_board.get_reachable_tiles(currently_selected_unit.grid_pos, currently_selected_unit.ranged_range, action_mode)
+			else:
+				result = game_board.get_reachable_tiles(currently_selected_unit.grid_pos, 1, action_mode)
+			var tiles = result["tiles"]
+			support_tiles = []
+			var orders = turn_mgr.get_all_orders(current_player)
+			for order in orders:
+				if order["type"] == "move":
+					for tile in order["path"].slice(1):
+						if tile in tiles:
+							support_tiles.append(tile)
+			game_board.show_highlights(support_tiles)
 			print("Support selected for %s" % currently_selected_unit.name)
-			# TODO: initiate support UI
 		4:
 			print("Hold selected for %s" % currently_selected_unit.name)
 			turn_mgr.add_order(current_player, {
 				"unit": currently_selected_unit,
 				"type": "hold",
 			})
+			_draw_paths()
+			_draw_attacks()
+			_draw_supports()
+			_draw_heals()
 	action_menu.hide()
 
 func _on_done_pressed():
@@ -189,7 +220,7 @@ func _draw_attacks():
 		child.queue_free()
 	var all_orders = turn_mgr.get_all_orders(current_player)
 	for order in all_orders:
-		if order["type"] == "ranged":
+		if order["type"] == "ranged" or order["type"] == "melee":
 			var root = Node2D.new()
 			attack_arrows_node.add_child(root)
 			
@@ -210,6 +241,47 @@ func _draw_attacks():
 			arrow.z_index = 10
 			root.add_child(arrow)
 
+func _draw_supports():
+	var support_arrows_node = hex.get_node("SupportArrows")
+	for child in support_arrows_node.get_children():
+		child.queue_free()
+	var all_orders = turn_mgr.get_all_orders(current_player)
+	for order in all_orders:
+		if order["type"] == "support":
+			var root = Node2D.new()
+			support_arrows_node.add_child(root)
+			
+			# calculate direction and size for support arrow
+			var supporter = order["unit"]
+			var p1 = hex.map_to_world(supporter.grid_pos) + hex.tile_size * 0.5
+			var p2 = hex.map_to_world(order["target_tile"]) + hex.tile_size * 0.5
+			var arrow = SupportArrowScene.instantiate() as Sprite2D
+			var dir = (p2 - p1).normalized()
+			var tex_size = arrow.texture.get_size()
+			var distance: float = (p2 - p1).length()
+			var scale_x: float = distance / tex_size.x
+			arrow.scale = Vector2(scale_x, 1)
+			# set position to center of tile
+			var half_length = tex_size.x * scale_x * 0.5
+			arrow.position = p1 + dir * half_length
+			arrow.rotation = (p2 - p1).angle()
+			arrow.z_index = 10
+			root.add_child(arrow)
+
+func _draw_heals():
+	var heal_node = hex.get_node("HealingSprites")
+	for child in heal_node.get_children():
+		child.queue_free()
+	var all_orders = turn_mgr.get_all_orders(current_player)
+	for order in all_orders:
+		if order["type"] == "hold":
+			var root = Node2D.new()
+			heal_node.add_child(root)
+			var heart = HealScene.instantiate() as Sprite2D
+			heart.position = hex.map_to_world(order["unit"].grid_pos) + hex.tile_size * 0.65
+			heart.z_index = 10
+			root.add_child(heart)
+			
 func _unhandled_input(ev):
 	if not (ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT):
 		return
@@ -240,20 +312,37 @@ func _unhandled_input(ev):
 			})
 			_draw_paths()
 			_draw_attacks()
+			_draw_supports()
+			_draw_heals()
 		action_mode = ""
-		# TODO: enqueue move order via turn_mgr.enqueue_order(...)
 		return
 	
-	if action_mode == "ranged" and currently_selected_unit:
+	if action_mode == "ranged" or action_mode == "melee" and currently_selected_unit:
 		if cell in enemy_tiles:
 			turn_mgr.add_order(current_player, {
 				"unit": currently_selected_unit,
-				"type": "ranged",
+				"type": action_mode,
 				"target_tile": cell,
 				"target_unit": game_board.get_unit_at(cell)
 			})
 		_draw_paths()
 		_draw_attacks()
+		_draw_supports()
+		_draw_heals()
+		action_mode = ""
+		return
+	
+	if action_mode == "support" and currently_selected_unit:
+		if cell in support_tiles:
+			turn_mgr.add_order(current_player, {
+				"unit": currently_selected_unit,
+				"type": action_mode,
+				"target_tile": cell
+			})
+		_draw_paths()
+		_draw_attacks()
+		_draw_supports()
+		_draw_heals()
 		action_mode = ""
 		return
 	

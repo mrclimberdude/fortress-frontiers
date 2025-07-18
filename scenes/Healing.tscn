@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://d2dmm8nil8783"]
+
+[ext_resource type="Texture2D" uid="uid://dye5gpqxbvmv3" path="res://assets/Healing.png" id="1_ien83"]
+
+[node name="Sprite2D" type="Sprite2D"]
+texture = ExtResource("1_ien83")
