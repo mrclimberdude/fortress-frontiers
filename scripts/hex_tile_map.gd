@@ -1,13 +1,22 @@
 ## hex_tile_map.gd
+@tool
 extends TileMapLayer
 
+@export var use_editor_paint: bool = true
 @export var columns: int      = 18
 @export var rows:    int      = 15
 @export var tile_size: Vector2 = Vector2(170, 192)
 @export var spacing:   Vector2 = Vector2(0,  0)
 
-# (Re-)draw your board however you like…
+var used_cells = get_used_cells_by_id()
+var valid_cells := {}
+
+
 func _ready():
+	if Engine.is_editor_hint() or use_editor_paint:
+		for cell in used_cells:
+			valid_cells[cell] = true
+		return
 	_generate_board()
 
 func _generate_board():
@@ -26,10 +35,15 @@ func _generate_board():
 	"player2": Vector2i(2, 1)
 }
 
+func is_cell_valid(cell: Vector2i) -> bool:
+	return valid_cells.has(cell)
+
 func set_player_tile(pos: Vector2i, pid: String) -> void:
 	var src = tile_set.get_source_id(0)
 	var tint = player_tiles.get(pid, ground_tile)
-	set_cell(pos, src, tint)
+	var base_positions = $"../..".base_positions
+	if pos != base_positions["player1"] and pos != base_positions["player2"]:
+		set_cell(pos, src, tint)
 	$"..".clear_highlights()
 	update_internals()
 
@@ -55,6 +69,6 @@ func world_to_map(world_pos: Vector2) -> Vector2i:
 
 	# Determine column, adjusting for odd-r offset
 	var col_f = local.x / fw - 0.5 * (row & 1)
-	var col = int(clamp(floor(col_f), 0, columns - 1))
+	var col = int(clamp(floor(col_f), -1, columns - 1))
 
 	return Vector2i(col, row)

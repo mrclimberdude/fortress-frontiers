@@ -71,9 +71,7 @@ func get_reachable_tiles(start: Vector2i, range: int, mode: String) -> Dictionar
 		if dist < range:
 			for neighbor in get_offset_neighbors(current):
 				# Bounds check
-				if neighbor.x < 0 or neighbor.x >= hex_map.columns:
-					continue
-				if neighbor.y < 0 or neighbor.y >= hex_map.rows:
+				if not hex_map.is_cell_valid(neighbor):
 					continue
 				if visited.has(neighbor):
 					continue
