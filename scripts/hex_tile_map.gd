@@ -11,8 +11,22 @@ extends TileMapLayer
 var used_cells = get_used_cells_by_id()
 var valid_cells := {}
 
+# Coloring API you already have:
+@export var ground_tile: Vector2i = Vector2i(2, 0)
+@export var player_atlas_tiles := {
+	"player1": Vector2i(0, 1),
+	"player2": Vector2i(2, 1)
+}
+@export var structure_atlas_tiles:= {
+	"player1": Vector2i(1, 3),
+	"player2": Vector2i(3, 3)
+}
+
+var structure_tiles : Array
+
 
 func _ready():
+	structure_tiles = $"../..".structure_positions
 	if Engine.is_editor_hint() or use_editor_paint:
 		for cell in used_cells:
 			valid_cells[cell] = true
@@ -28,22 +42,17 @@ func _generate_board():
 			set_cell(Vector2i(x,y), src, ground)
 	update_internals()
 
-# Coloring API you already have:
-@export var ground_tile: Vector2i = Vector2i(2, 0)
-@export var player_tiles := {
-	"player1": Vector2i(0, 1),
-	"player2": Vector2i(2, 1)
-}
-
 func is_cell_valid(cell: Vector2i) -> bool:
 	return valid_cells.has(cell)
 
 func set_player_tile(pos: Vector2i, pid: String) -> void:
 	var src = tile_set.get_source_id(0)
-	var tint = player_tiles.get(pid, ground_tile)
-	var base_positions = $"../..".base_positions
-	if pos != base_positions["player1"] and pos != base_positions["player2"]:
-		set_cell(pos, src, tint)
+	var tint
+	if pos in structure_tiles:
+		tint = structure_atlas_tiles.get(pid, ground_tile)
+	else:
+		tint = player_atlas_tiles.get(pid, ground_tile)
+	set_cell(pos, src, tint)
 	$"..".clear_highlights()
 	update_internals()
 

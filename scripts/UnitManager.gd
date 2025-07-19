@@ -11,6 +11,8 @@ extends Node2D
 # reference to the board node to convert coords → world
 @onready var board = get_parent()  as Node2D# GameBoardNode
 @onready var hex_map = get_parent().get_node("HexTileMap") as TileMapLayer
+@export var turn_manager_path: NodePath
+@onready var turn_mgr = get_node(turn_manager_path) as Node
 
 func _ready():
 	print("UnitManager: hex_map =", hex_map, "script=", hex_map.get_script())

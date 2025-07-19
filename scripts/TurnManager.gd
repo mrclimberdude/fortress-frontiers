@@ -29,11 +29,26 @@ var player_gold       := { "player1": 5, "player2": 5 }
 const BASE_INCOME    : int = 5
 const SPECIAL_INCOME : int = 2
 
+@export var structure_positions = [Vector2i(5, 2),
+					Vector2i(12, 2),
+					Vector2i(8, 7),
+					Vector2i(5, 12),
+					Vector2i(12, 12),
+					Vector2i(-1, 7),
+					Vector2i(17, 7)
+					]
+
 var base_positions := {
 	"player1": Vector2i(-1, 7),
 	"player2": Vector2i(17, 7)
 }
 var special_tiles := {
+	"unclaimed": [Vector2i(5, 2),
+					Vector2i(12, 2),
+					Vector2i(8, 7),
+					Vector2i(5, 12),
+					Vector2i(12, 12)
+					],
 	"player1": [],
 	"player2": []
 }
@@ -86,6 +101,7 @@ func _do_upkeep() -> void:
 			unit.is_defending = false
 			if unit.is_healing:
 				unit.curr_health += unit.regen
+				unit.set_health_bar()
 				unit.is_healing = false
 	
 # --------------------------------------------------------
@@ -158,7 +174,7 @@ func _process_ranged():
 				player_orders[player].erase(target)
 			$GameBoardNode/HexTileMap.set_player_tile(target.grid_pos, "")
 			$GameBoardNode.vacate(target.grid_pos)
-			target.free()
+			target.queue_free()
 		else:
 			target.set_health_bar()
 	$UI._draw_attacks()

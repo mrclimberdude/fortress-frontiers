@@ -34,6 +34,8 @@ const DefendScene = preload("res://scenes/Defending.tscn")
 const ArcherScene = preload("res://scenes/Archer.tscn")
 const SoldierScene = preload("res://scenes/Soldier.tscn")
 
+const MineScene = preload("res://scenes/GemMine.tscn")
+
 func _ready():
 	
 	# Enable unhandled input processing
@@ -65,7 +67,17 @@ func _ready():
 	temp.free()
 	action_menu.connect("id_pressed", Callable(self, "_on_action_selected"))
 	action_menu.hide()
+	
+	var structures_node = hex.get_node("Structures")
+	for tile in turn_mgr.special_tiles["unclaimed"]:
+		var root = Node2D.new()
+		structures_node.add_child(root)
+		var mine = MineScene.instantiate() as Sprite2D
+		mine.position = hex.map_to_world(tile) + hex.tile_size * 0.5
+		mine.z_index = 0
+		root.add_child(mine)
 
+		
 
 func _on_orders_phase_begin(player: String) -> void:
 	# show the UI and reset state
@@ -87,18 +99,8 @@ func _on_soldier_pressed():
 	gold_lbl.text = "Click map to place Soldier\nGold: %d" % turn_mgr.player_gold[current_player]
 
 func _on_unit_selected(unit: Node) -> void:
-	# 1) Clear any old highlights
 	game_board.clear_highlights()
-
-	# 2) Compute reachable tiles
-	#var result = game_board.get_reachable_tiles(unit.grid_pos, unit.move_range)
-	#var tiles = result["tiles"]
-	#game_board.show_highlights(tiles)
-
-	# 3) Store for later path-drawing / order issuance
 	currently_selected_unit = unit
-	#current_reachable = result
-	
 	# Show action selection menu
 	action_menu.clear()
 	action_menu.add_item("Move", 0)
