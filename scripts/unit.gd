@@ -19,6 +19,8 @@ extends Node2D
 @export var is_moving:       bool = false
 @export var moving_to:       Vector2i
 @export var is_base:         bool = false
+@export var just_purchased:  bool = true
+@export var first_turn_move: bool = false
 
 # -- grid positioning and reference to the TileMapLayer
 var grid_pos: Vector2i

@@ -16,6 +16,7 @@ enum Phase { UPKEEP, ORDERS, EXECUTION }
 
 @export var archer_scene:  PackedScene
 @export var soldier_scene: PackedScene
+@export var scout_scene: PackedScene
 
 # --- Turn & Phase State ---
 var turn_number:   int    = 0
@@ -25,7 +26,7 @@ var exec_steps: Array     = []
 var step_index: int       = 0
 
 # --- Economy State ---
-var player_gold       := { "player1": 5, "player2": 5 }
+var player_gold       := { "player1": 0, "player2": 0 }
 const BASE_INCOME    : int = 5
 const SPECIAL_INCOME : int = 2
 
@@ -99,6 +100,7 @@ func _do_upkeep() -> void:
 		_orders_submitted[p] = false
 		for unit in all_units[p]:
 			unit.is_defending = false
+			unit.just_purchased = false
 			if unit.is_healing:
 				unit.curr_health += unit.regen
 				unit.set_health_bar()
@@ -275,6 +277,7 @@ func _process_move():
 					if obstacle.moving_to == curr_unit.grid_pos:
 						curr_unit.curr_health -= atkr_dmg
 						curr_unit.set_health_bar()
+						player_orders[obstacle.player_id].erase(obstacle)
 					if obstacle.curr_health <= 0:
 						player_orders[obstacle.player_id].erase(obstacle)
 						$GameBoardNode/HexTileMap.set_player_tile(obstacle.grid_pos, "")
@@ -447,6 +450,8 @@ func buy_unit(player: String, unit_type: String, grid_pos: Vector2i) -> bool:
 		scene = archer_scene
 	elif unit_type.to_lower() == "soldier":
 		scene = soldier_scene
+	elif unit_type.to_lower() == "scout":
+		scene = scout_scene
 	else:
 		push_error("Unknown unit type '%s'" % unit_type)
 		return false

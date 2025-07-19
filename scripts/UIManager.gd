@@ -33,6 +33,7 @@ const DefendScene = preload("res://scenes/Defending.tscn")
 
 const ArcherScene = preload("res://scenes/Archer.tscn")
 const SoldierScene = preload("res://scenes/Soldier.tscn")
+const ScoutScene = preload("res://scenes/Scout.tscn")
 
 const MineScene = preload("res://scenes/GemMine.tscn")
 
@@ -56,6 +57,8 @@ func _ready():
 					 Callable(self, "_on_archer_pressed"))
 	$Panel/VBoxContainer/SoldierButton.connect("pressed",
 					 Callable(self, "_on_soldier_pressed"))
+	$Panel/VBoxContainer/ScoutButton.connect("pressed",
+					 Callable(self, "_on_scout_pressed"))
 	$Panel/VBoxContainer/DoneButton.connect("pressed",
 					 Callable(self, "_on_done_pressed"))
 	
@@ -64,6 +67,9 @@ func _ready():
 	temp.free()
 	temp = SoldierScene.instantiate()
 	$Panel/VBoxContainer/SoldierButton.text = "Buy Soldier (%dg)" % temp.cost
+	temp.free()
+	temp = ScoutScene.instantiate()
+	$Panel/VBoxContainer/ScoutButton.text = "Buy Scout (%dg)" % temp.cost
 	temp.free()
 	action_menu.connect("id_pressed", Callable(self, "_on_action_selected"))
 	action_menu.hide()
@@ -98,19 +104,24 @@ func _on_soldier_pressed():
 	placing_unit = "soldier"
 	gold_lbl.text = "Click map to place Soldier\nGold: %d" % turn_mgr.player_gold[current_player]
 
+func _on_scout_pressed():
+	placing_unit = "scout"
+	gold_lbl.text = "Click map to place Scout\nGold: %d" % turn_mgr.player_gold[current_player]
+
 func _on_unit_selected(unit: Node) -> void:
 	game_board.clear_highlights()
 	currently_selected_unit = unit
 	# Show action selection menu
 	action_menu.clear()
 	action_menu.add_item("Move", 0)
-	if unit.is_ranged:
-		action_menu.add_item("Ranged Attack", 1)
-	else:
-		action_menu.add_item("Melee Attack", 2)
-	#action_menu.add_item("Support", 3)
-	action_menu.add_item("Heal", 4)
-	action_menu.add_item("Defend", 5)
+	if not unit.just_purchased:
+		if unit.is_ranged:
+			action_menu.add_item("Ranged Attack", 1)
+		else:
+			action_menu.add_item("Melee Attack", 2)
+		#action_menu.add_item("Support", 3)
+		action_menu.add_item("Heal", 4)
+		action_menu.add_item("Defend", 5)
 
 func _on_action_selected(id: int) -> void:
 	currently_selected_unit.is_defending = false
@@ -462,6 +473,8 @@ func _unhandled_input(ev):
 		if unit:
 			if unit.player_id == current_player:
 				if unit.is_base:
+					return
+				if unit.just_purchased and not unit.first_turn_move:
 					return
 				_on_unit_selected(unit)
 				action_menu.set_position(ev.position)

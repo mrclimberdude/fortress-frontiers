@@ -1,10 +1,11 @@
-[gd_scene load_steps=12 format=4 uid="uid://dnx0cxl4a46lg"]
+[gd_scene load_steps=13 format=4 uid="uid://dnx0cxl4a46lg"]
 
 [ext_resource type="Script" uid="uid://daaph63aiv3vd" path="res://scripts/TurnManager.gd" id="1_xh13x"]
 [ext_resource type="Texture2D" uid="uid://ciitwnd7hxyra" path="res://assets/spritesheet.png" id="2_17g6i"]
 [ext_resource type="PackedScene" uid="uid://chbt4bn7n6ytk" path="res://scenes/Soldier.tscn" id="2_i37i2"]
 [ext_resource type="PackedScene" uid="uid://bapke0vi7mx1m" path="res://scenes/Archer.tscn" id="2_qkkkq"]
 [ext_resource type="Script" uid="uid://b4umrem1keqkr" path="res://scripts/hex_tile_map.gd" id="3_xh13x"]
+[ext_resource type="PackedScene" uid="uid://rgm2p8qm0fpu" path="res://scenes/Scout.tscn" id="4_04ve2"]
 [ext_resource type="Script" uid="uid://dbjcmu0pwdism" path="res://scripts/game_board_node.gd" id="4_6lofv"]
 [ext_resource type="Script" uid="uid://cf8rb1kdlfa5q" path="res://scripts/UnitManager.gd" id="4_30eli"]
 [ext_resource type="Script" uid="uid://cpvudcuvy1hxc" path="res://scripts/UIManager.gd" id="6_qxawf"]
@@ -44,6 +45,7 @@ script = ExtResource("1_xh13x")
 unit_manager_path = NodePath("GameBoardNode/Units")
 archer_scene = ExtResource("2_qkkkq")
 soldier_scene = ExtResource("2_i37i2")
+scout_scene = ExtResource("4_04ve2")
 
 [node name="GameBoardNode" type="Node2D" parent="."]
 script = ExtResource("4_6lofv")
@@ -95,15 +97,18 @@ offset_bottom = 40.0
 [node name="GoldLabel" type="Label" parent="UI/Panel/VBoxContainer"]
 layout_mode = 2
 
-[node name="ArcherButton" type="Button" parent="UI/Panel/VBoxContainer"]
-custom_minimum_size = Vector2(200, 30)
+[node name="ScoutButton" type="Button" parent="UI/Panel/VBoxContainer"]
 layout_mode = 2
-text = "Buy Archer (5g)"
 
 [node name="SoldierButton" type="Button" parent="UI/Panel/VBoxContainer"]
 custom_minimum_size = Vector2(200, 30)
 layout_mode = 2
 text = "Buy Soldier (3g)"
+
+[node name="ArcherButton" type="Button" parent="UI/Panel/VBoxContainer"]
+custom_minimum_size = Vector2(200, 30)
+layout_mode = 2
+text = "Buy Archer (5g)"
 
 [node name="DoneButton" type="Button" parent="UI/Panel/VBoxContainer"]
 custom_minimum_size = Vector2(200, 30)
