@@ -75,14 +75,6 @@ func get_reachable_tiles(start: Vector2i, range: int, mode: String) -> Dictionar
 					continue
 				if visited.has(neighbor):
 					continue
-				#if mode == "move":
-					# Skip already visited or occupied tiles
-					
-					#if is_occupied(neighbor):
-						#continue
-				elif mode == "ranged":
-					pass
-
 				# Mark and enqueue
 				visited[neighbor] = dist + 1
 				prev[neighbor] = current

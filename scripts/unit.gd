@@ -18,6 +18,7 @@ extends Node2D
 @export var is_healing:      bool = false
 @export var is_moving:       bool = false
 @export var moving_to:       Vector2i
+@export var is_base:         bool = false
 
 # -- grid positioning and reference to the TileMapLayer
 var grid_pos: Vector2i
@@ -32,7 +33,7 @@ func set_grid_position(pos: Vector2i) -> void:
 	var old_pos = grid_pos
 
 	# 1) Clear previous tile
-	if board and board.has_method("vacate") and old_pos:
+	if board and board.has_method("vacate") and old_pos and not self.is_base:
 		board.vacate(old_pos)
 		# reset the old tile to ground (empty) by passing an unknown pid
 		map_layer.set_player_tile(old_pos, "")

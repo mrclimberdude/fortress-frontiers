@@ -31,6 +31,9 @@ const SupportArrowScene = preload("res://scenes/SupportArrow.tscn")
 const HealScene = preload("res://scenes/Healing.tscn")
 const DefendScene = preload("res://scenes/Defending.tscn")
 
+const ArcherScene = preload("res://scenes/Archer.tscn")
+const SoldierScene = preload("res://scenes/Soldier.tscn")
+
 func _ready():
 	
 	# Enable unhandled input processing
@@ -53,7 +56,13 @@ func _ready():
 					 Callable(self, "_on_soldier_pressed"))
 	$Panel/VBoxContainer/DoneButton.connect("pressed",
 					 Callable(self, "_on_done_pressed"))
-					
+	
+	var temp = ArcherScene.instantiate()
+	$Panel/VBoxContainer/ArcherButton.text = "Buy Archer (%dg)" % temp.cost
+	temp.free()
+	temp = SoldierScene.instantiate()
+	$Panel/VBoxContainer/SoldierButton.text = "Buy Soldier (%dg)" % temp.cost
+	temp.free()
 	action_menu.connect("id_pressed", Callable(self, "_on_action_selected"))
 	action_menu.hide()
 
@@ -61,7 +70,7 @@ func _ready():
 func _on_orders_phase_begin(player: String) -> void:
 	# show the UI and reset state
 	current_player = player
-	gold_lbl.text = "Gold: %d" % turn_mgr.player_gold[current_player]
+	gold_lbl.text = "%s Gold: %d" % [current_player, turn_mgr.player_gold[current_player]]
 	placing_unit  = ""
 	$Panel.visible = true
 
@@ -388,8 +397,11 @@ func _unhandled_input(ev):
 
 	if placing_unit != "":
 		# Placement logic
+		if game_board.is_occupied(cell):
+			gold_lbl.text = "Cannot place on occupied tile"
+			return
 		if turn_mgr.buy_unit(current_player, placing_unit, cell):
-			gold_lbl.text = "Gold: %d" % turn_mgr.player_gold[current_player]
+			gold_lbl.text = "%s Gold: %d" % [current_player, turn_mgr.player_gold[current_player]]
 			placing_unit = ""
 		else:
 			gold_lbl.text = "[Not enough gold]\nGold: %d" % turn_mgr.player_gold[current_player]
@@ -447,6 +459,8 @@ func _unhandled_input(ev):
 		var unit = game_board.get_unit_at(cell)
 		if unit:
 			if unit.player_id == current_player:
+				if unit.is_base:
+					return
 				_on_unit_selected(unit)
 				action_menu.set_position(ev.position)
 				action_menu.show()

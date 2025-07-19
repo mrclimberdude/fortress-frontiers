@@ -25,7 +25,7 @@ var exec_steps: Array     = []
 var step_index: int       = 0
 
 # --- Economy State ---
-var player_gold       := { "player1": 0, "player2": 0 }
+var player_gold       := { "player1": 5, "player2": 5 }
 const BASE_INCOME    : int = 5
 const SPECIAL_INCOME : int = 2
 
@@ -34,8 +34,8 @@ var base_positions := {
 	"player2": Vector2i(17, 7)
 }
 var special_tiles := {
-	"player1": [ Vector2i(5, 5), Vector2i(3, 11) ],
-	"player2": [ Vector2i(12, 6), Vector2i(14, 2) ]
+	"player1": [],
+	"player2": []
 }
 
 # --- Orders Data ---
@@ -46,6 +46,8 @@ var _orders_submitted := { "player1": false, "player2": false }
 # Entry point: start the game loop once the scene is ready
 # --------------------------------------------------------
 func _ready():
+	unit_manager.spawn_unit("base", base_positions["player1"], "player1")
+	unit_manager.spawn_unit("base", base_positions["player2"], "player2")
 	call_deferred("_game_loop")
 
 # --------------------------------------------------------
@@ -222,48 +224,60 @@ func _process_move():
 			var curr_unit = tiles_entering[tile][0]
 			# check if there is something there and fight if an enemy
 			if $GameBoardNode.is_occupied(tile):
-				var dependency_path = $GameBoardNode/Units.find_end(curr_unit, [curr_unit.grid_pos], false, false)
-				if dependency_path[0][-1] == curr_unit.grid_pos:
-					# circular path
-					var units = []
-					for spot in dependency_path[0]:
-						units.append($GameBoardNode.get_unit_at(spot))
-					for i in range(units.size()-1):
-						units[i].set_grid_position(dependency_path[0][i+1])
-						if player_orders[units[i].player_id][units[i]]["path"].size() <= 2:
-							player_orders[units[i].player_id].erase(units[i])
-							units[i].is_moving = false
-						else:
-							player_orders[units[i].player_id][units[i]]["path"].pop_front()
-							units[i].moving_to = player_orders[units[i].player_id][units[i]]["path"][1]
-					for i in range(units.size()-1):
-						units[i].set_grid_position(dependency_path[0][i+1])
-					break
 				var obstacle = $GameBoardNode.get_unit_at(tile)
-				var atkr_damaged_penalty = (100 - curr_unit.curr_health) * 0.005
-				var atkr_melee_str = curr_unit.melee_strength * atkr_damaged_penalty
-				var defr_damaged_penalty = (100 - obstacle.curr_health) * 0.005
-				var defr_melee_str = obstacle.melee_strength * defr_damaged_penalty
-				var atkr_dmg = 30 * exp((defr_melee_str - atkr_melee_str)/25 * randf_range(0.75,1.25))
-				var defr_dmg = 30 * exp((atkr_melee_str - defr_melee_str)/25 * randf_range(0.75,1.25))
-				obstacle.curr_health -= defr_dmg
-				obstacle.set_health_bar()
-				if obstacle.is_defending:
-					curr_unit.curr_health -= atkr_dmg
-					curr_unit.set_health_bar()
-				if obstacle.curr_health <= 0:
-					player_orders[obstacle.player_id].erase(obstacle)
-					$GameBoardNode/HexTileMap.set_player_tile(obstacle.grid_pos, "")
-					$GameBoardNode.vacate(obstacle.grid_pos)
-					obstacle.queue_free()
-					if curr_unit.curr_health > 0:
-						curr_unit.set_grid_position(tile)
-				player_orders[curr_unit.player_id].erase(curr_unit)
-				if curr_unit.curr_health <= 0:
+				if obstacle.is_moving:
+					if obstacle.player_id == curr_unit.player_id or obstacle.moving_to != curr_unit.grid_pos:
+						var dependency_path = $GameBoardNode/Units.find_end(curr_unit, [curr_unit.grid_pos], false, false)
+						if dependency_path[0][-1] == curr_unit.grid_pos:
+							# circular path
+							var units = []
+							for spot in dependency_path[0]:
+								units.append($GameBoardNode.get_unit_at(spot))
+							for i in range(units.size()-1):
+								units[i].set_grid_position(dependency_path[0][i+1])
+								if player_orders[units[i].player_id][units[i]]["path"].size() <= 2:
+									player_orders[units[i].player_id].erase(units[i])
+									units[i].is_moving = false
+								else:
+									player_orders[units[i].player_id][units[i]]["path"].pop_front()
+									units[i].moving_to = player_orders[units[i].player_id][units[i]]["path"][1]
+							for i in range(units.size()-1):
+								units[i].set_grid_position(dependency_path[0][i+1])
+							break
+				if obstacle.player_id != curr_unit.player_id:
+					var atkr_damaged_penalty = (100 - curr_unit.curr_health) * 0.005
+					var atkr_melee_str = curr_unit.melee_strength * (1- atkr_damaged_penalty)
+					var defr_damaged_penalty = (100 - obstacle.curr_health) * 0.005
+					var defr_melee_str = obstacle.melee_strength * (1- defr_damaged_penalty)
+					var atkr_dmg = 30 * exp((defr_melee_str - atkr_melee_str)/25 * randf_range(0.75,1.25))
+					var defr_dmg = 30 * exp((atkr_melee_str - defr_melee_str)/25 * randf_range(0.75,1.25))
+					obstacle.curr_health -= defr_dmg
+					obstacle.set_health_bar()
+					if obstacle.is_defending:
+						curr_unit.curr_health -= atkr_dmg
+						curr_unit.set_health_bar()
+					if obstacle.moving_to == curr_unit.grid_pos:
+						curr_unit.curr_health -= atkr_dmg
+						curr_unit.set_health_bar()
+					if obstacle.curr_health <= 0:
+						player_orders[obstacle.player_id].erase(obstacle)
+						$GameBoardNode/HexTileMap.set_player_tile(obstacle.grid_pos, "")
+						$GameBoardNode.vacate(obstacle.grid_pos)
+						obstacle.queue_free()
+						if curr_unit.curr_health > 0:
+							curr_unit.set_grid_position(tile)
 					player_orders[curr_unit.player_id].erase(curr_unit)
-					$GameBoardNode/HexTileMap.set_player_tile(curr_unit.grid_pos, "")
-					$GameBoardNode.vacate(curr_unit.grid_pos)
-					curr_unit.queue_free()
+					if curr_unit.curr_health <= 0:
+						player_orders[curr_unit.player_id].erase(curr_unit)
+						$GameBoardNode/HexTileMap.set_player_tile(curr_unit.grid_pos, "")
+						$GameBoardNode.vacate(curr_unit.grid_pos)
+						if obstacle.moving_to == curr_unit.grid_pos:
+							obstacle.set_grid_position(curr_unit.grid_pos)
+							player_orders[obstacle.player_id].erase(obstacle)
+						curr_unit.queue_free()
+					break
+				else:
+					player_orders[curr_unit.player_id].erase(curr_unit)
 			else:
 				curr_unit.set_grid_position(tile)
 				if player_orders[curr_unit.player_id][curr_unit]["path"].size() <= 2:
@@ -284,7 +298,7 @@ func _process_move():
 			p1_units.sort_custom(func(a,b): return a[1] < b[1])
 			p2_units.sort_custom(func(a,b): return a[1] < b[1])
 			
-			while p1_units.size() > 0 or p2_units.size > 0:
+			while p1_units.size() > 0 or p2_units.size() > 0:
 				
 				# all of one players entering units have acted or died
 				if p1_units.size() == 0:
@@ -301,9 +315,9 @@ func _process_move():
 				var first_p2 = p2_units[0][0]
 				# first priority units of each player fight each other
 				var p1_damaged_penalty = (100 - first_p1.curr_health) * 0.005
-				var p1_melee_str = first_p1.melee_strength * p1_damaged_penalty
+				var p1_melee_str = first_p1.melee_strength * (1 - p1_damaged_penalty)
 				var p2_damaged_penalty = (100 - first_p2.curr_health) * 0.005
-				var p2_melee_str = first_p2.melee_strength * p2_damaged_penalty
+				var p2_melee_str = first_p2.melee_strength * (1- p2_damaged_penalty)
 				var p1_dmg = 30 * exp((p2_melee_str - first_p1.melee_strength)/25 * randf_range(0.75,1.25))
 				var p2_dmg = 30 * exp((p1_melee_str - first_p2.melee_strength)/25 * randf_range(0.75,1.25))
 				first_p1.curr_health -= p1_dmg

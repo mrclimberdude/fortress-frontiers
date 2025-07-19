@@ -1,7 +1,7 @@
-[gd_scene load_steps=5 format=3 uid="uid://chbt4bn7n6ytk"]
+[gd_scene load_steps=5 format=3 uid="uid://bx481r3fkb2ym"]
 
-[ext_resource type="PackedScene" uid="uid://c62dn8sldq572" path="res://scenes/Unit.tscn" id="1_av0cm"]
-[ext_resource type="Texture2D" uid="uid://dj7l5khu6nin6" path="res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Objects Light/HSI_icon_183l.png" id="2_4420q"]
+[ext_resource type="PackedScene" uid="uid://c62dn8sldq572" path="res://scenes/Unit.tscn" id="1_bd46k"]
+[ext_resource type="Texture2D" uid="uid://d2pr37bwe0hrv" path="res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Geometric/HSI_icon_079.png" id="1_c07sk"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_tqf8n"]
 bg_color = Color(0.988235, 0.227451, 0.152941, 0.603922)
@@ -9,18 +9,19 @@ bg_color = Color(0.988235, 0.227451, 0.152941, 0.603922)
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_qtvpb"]
 bg_color = Color(0, 0.843137, 0.0941176, 0.92549)
 
-[node name="Soldier" instance=ExtResource("1_av0cm")]
-cost = 8
-melee_strength = 10
+[node name="Base" instance=ExtResource("1_bd46k")]
+melee_strength = 3
+move_range = 0
+is_base = true
 
 [node name="Sprite2D" parent="." index="0"]
-texture = ExtResource("2_4420q")
+texture = ExtResource("1_c07sk")
 
 [node name="HealthBar" type="ProgressBar" parent="." index="1"]
-offset_left = 34.0
-offset_top = -53.0
-offset_right = 73.0
-offset_bottom = 42.0
+offset_left = 86.0
+offset_top = -54.0
+offset_right = 125.0
+offset_bottom = 41.0
 theme_override_colors/font_color = Color(0, 0, 0, 1)
 theme_override_styles/background = SubResource("StyleBoxFlat_tqf8n")
 theme_override_styles/fill = SubResource("StyleBoxFlat_qtvpb")
