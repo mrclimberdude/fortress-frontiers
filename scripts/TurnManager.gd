@@ -30,7 +30,7 @@ const BASE_INCOME    : int = 5
 const SPECIAL_INCOME : int = 2
 
 var base_positions := {
-	"player1": Vector2i(0, 7),
+	"player1": Vector2i(-1, 7),
 	"player2": Vector2i(17, 7)
 }
 var special_tiles := {
@@ -378,6 +378,7 @@ func _process_move():
 func _initialize_execution():
 	$UI._draw_attacks()
 	$UI._draw_heals()
+	$UI._draw_defends()
 
 # --------------------------------------------------------
 # Phase 3: Execution — process orders

@@ -184,6 +184,8 @@ func _clear_all_drawings():
 		child.queue_free()
 	for child in hex.get_node("HealingSprites").get_children():
 		child.queue_free()
+	for child in hex.get_node("DefendingSprites").get_children():
+		child.queue_free()
 
 func _on_done_pressed():
 	game_board.clear_highlights()
@@ -417,7 +419,7 @@ func _unhandled_input(ev):
 			move_priority += 1
 			if action_mode == "melee":
 				currently_selected_unit.is_moving = true
-				currently_selected_unit.moving_to = game_board.get_unit_at(cell).grid_pos
+				currently_selected_unit.moving_to = cell
 			turn_mgr.add_order(current_player, {
 				"unit": currently_selected_unit,
 				"type": action_mode,
