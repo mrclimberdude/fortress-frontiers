@@ -62,9 +62,12 @@ var _orders_submitted := { "player1": false, "player2": false }
 # Entry point: start the game loop once the scene is ready
 # --------------------------------------------------------
 func _ready():
+	NetworkManager.hex = $GameBoardNode/HexTileMap
+	NetworkManager.turn_mgr = $"."
 	unit_manager.spawn_unit("base", base_positions["player1"], "player1")
 	unit_manager.spawn_unit("base", base_positions["player2"], "player2")
-	call_deferred("_game_loop")
+	if get_tree().get_multiplayer().is_server():
+		call_deferred("_game_loop")
 
 # --------------------------------------------------------
 # Main loop: Upkeep → Orders → Execution → increment → loop
@@ -72,8 +75,11 @@ func _ready():
 func _game_loop() -> void:
 	turn_number += 1
 	print("\n===== TURN %d =====" % turn_number)
+	NetworkManager.broadcast_phase("UPKEEP")
 	_do_upkeep()
+	NetworkManager.broadcast_phase("ORDERS")
 	await _do_orders()
+	NetworkManager.broadcast_phase("EXECUTION")
 	_do_execution()
 
 # --------------------------------------------------------
@@ -440,6 +446,17 @@ func _run_next_step():
 func resume_execution():
 	step_index += 1
 	_run_next_step()
+
+func start_phase_locally(phase_name: String) -> void:
+	print("[TurnManager] start_phase_locally:", phase_name)
+	match phase_name:
+		"UPKEEP":
+			_do_upkeep()
+		"ORDERS":
+			# kick off the orders coroutine on the client
+			_do_orders()
+		"EXECUTION":
+			_do_execution()
 
 # --------------------------------------------------------
 # API: attempt to buy and spawn a unit

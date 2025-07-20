@@ -38,9 +38,13 @@ const ScoutScene = preload("res://scenes/Scout.tscn")
 const MineScene = preload("res://scenes/GemMine.tscn")
 
 func _ready():
-	
 	# Enable unhandled input processing
 	set_process_unhandled_input(true)
+	
+	$HostButton.connect("pressed",
+					Callable(self, "_on_host_pressed"))
+	$JoinButton.connect("pressed",
+					Callable(self, "_on_join_pressed"))
 	# connect using Callable(self, "method_name")
 	turn_mgr.connect("orders_phase_begin",
 					Callable(self, "_on_orders_phase_begin"))
@@ -107,6 +111,12 @@ func _on_soldier_pressed():
 func _on_scout_pressed():
 	placing_unit = "scout"
 	gold_lbl.text = "Click map to place Scout\nGold: %d" % turn_mgr.player_gold[current_player]
+
+func _on_host_pressed():
+	NetworkManager.host_game(7777)
+
+func _on_join_pressed():
+	NetworkManager.join_game("127.0.0.1", 7777)
 
 func _on_unit_selected(unit: Node) -> void:
 	game_board.clear_highlights()
