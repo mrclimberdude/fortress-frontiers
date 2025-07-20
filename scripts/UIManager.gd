@@ -5,6 +5,7 @@ extends CanvasLayer
 # configure these in the Inspector
 @export var turn_manager_path: NodePath
 @export var map_node_path:     NodePath
+@export var unit_manager_path: NodePath
 
 # runtime state
 var current_player : String = ""
@@ -16,6 +17,8 @@ var support_tiles = []
 var action_mode:       String   = ""     # "move", "ranged", "melee", "support", "hold"
 var move_priority: int = 0
 
+var _current_exec_step_idx: int = 0
+
 @onready var turn_mgr = get_node(turn_manager_path) as Node
 @onready var hex = $"../GameBoardNode/HexTileMap"
 @onready var gold_lbl = $Panel/VBoxContainer/GoldLabel as Label
@@ -24,6 +27,7 @@ var move_priority: int = 0
 @onready var exec_panel: PanelContainer  = $ExecutionPanel
 @onready var phase_label   : Label       = exec_panel.get_node("PhaseLabel")
 @onready var next_button   : Button      = exec_panel.get_node("NextButton")
+@onready var unit_mgr = get_node(unit_manager_path) as Node
 
 const ArrowScene = preload("res://scenes/Arrow.tscn")
 const AttackArrowScene = preload("res://scenes/AttackArrow.tscn")
@@ -38,9 +42,13 @@ const ScoutScene = preload("res://scenes/Scout.tscn")
 const MineScene = preload("res://scenes/GemMine.tscn")
 
 func _ready():
-	
 	# Enable unhandled input processing
 	set_process_unhandled_input(true)
+	
+	$HostButton.connect("pressed",
+					Callable(self, "_on_host_pressed"))
+	$JoinButton.connect("pressed",
+					Callable(self, "_on_join_pressed"))
 	# connect using Callable(self, "method_name")
 	turn_mgr.connect("orders_phase_begin",
 					Callable(self, "_on_orders_phase_begin"))
@@ -107,6 +115,14 @@ func _on_soldier_pressed():
 func _on_scout_pressed():
 	placing_unit = "scout"
 	gold_lbl.text = "Click map to place Scout\nGold: %d" % turn_mgr.player_gold[current_player]
+
+func _on_host_pressed():
+	NetworkManager.host_game(7777)
+	turn_mgr.local_player_id = "player1"
+
+func _on_join_pressed():
+	NetworkManager.join_game("127.0.0.1", 7777)
+	turn_mgr.local_player_id = "player2"
 
 func _on_unit_selected(unit: Node) -> void:
 	game_board.clear_highlights()
@@ -183,14 +199,14 @@ func _on_action_selected(id: int) -> void:
 			print("Heal selected for %s" % currently_selected_unit.name)
 			currently_selected_unit.is_healing = true
 			turn_mgr.add_order(current_player, {
-				"unit": currently_selected_unit,
+				"unit_net_id": currently_selected_unit.net_id,
 				"type": "heal",
 			})
 			_draw_all()
 		5:
 			print("Defend selected for %s" % currently_selected_unit.name)
 			turn_mgr.add_order(current_player, {
-				"unit": currently_selected_unit,
+				"unit_net_id": currently_selected_unit.net_id,
 				"type": "defend",
 			})
 			currently_selected_unit.is_defending = true
@@ -212,16 +228,17 @@ func _clear_all_drawings():
 func _on_done_pressed():
 	game_board.clear_highlights()
 	_clear_all_drawings()
-	# signal back to TurnManager that this player is finished
-	turn_mgr.submit_player_order(current_player)
+	$Panel.visible = false
+	var my_orders = turn_mgr.get_all_orders(current_player)
+	NetworkManager.submit_orders(current_player, my_orders)
 	# prevent further clicks
 	placing_unit = ""
 	move_priority = 0
 
 func _on_execution_paused(phase_idx):
-	# Show the panel, update text
+	_current_exec_step_idx = phase_idx
 	exec_panel.visible = true
-	var phase_names = ["Iniitialization", "Ranged Attacks","Melee","Movement"]
+	var phase_names = ["Initialization", "Defends and Heals", "Unit Spawns", "Ranged Attacks","Melee","Movement"]
 	if phase_idx >= phase_names.size():
 		for i in range(phase_idx - phase_names.size()+1):
 			phase_names.append("Movement")
@@ -229,7 +246,11 @@ func _on_execution_paused(phase_idx):
 
 func _on_next_pressed():
 	exec_panel.visible = false
-	turn_mgr.resume_execution()
+	print("[UI] Next pressed for step %d" % _current_exec_step_idx)
+	NetworkManager.rpc("rpc_step_ready", _current_exec_step_idx)
+	
+	if get_tree().get_multiplayer().is_server():
+		NetworkManager.rpc_step_ready(_current_exec_step_idx)
 
 func _on_execution_complete():
 	exec_panel.visible = false
@@ -304,7 +325,7 @@ func _draw_attacks():
 				attack_arrows_node.add_child(root)
 				
 				# calculate direction and size for attack arrow
-				var attacker = order["unit"]
+				var attacker = unit_mgr.get_unit_by_net_id(order["unit_net_id"])
 				var p1 = hex.map_to_world(attacker.grid_pos) + hex.tile_size * 0.5
 				var p2 = hex.map_to_world(order["target_tile"]) + hex.tile_size * 0.5
 				var arrow = AttackArrowScene.instantiate() as Sprite2D
@@ -369,7 +390,7 @@ func _draw_heals():
 				var root = Node2D.new()
 				heal_node.add_child(root)
 				var heart = HealScene.instantiate() as Sprite2D
-				heart.position = hex.map_to_world(order["unit"].grid_pos) + hex.tile_size * 0.65
+				heart.position = hex.map_to_world(unit_mgr.get_unit_by_net_id(order["unit_net_id"]).grid_pos) + hex.tile_size * 0.65
 				heart.z_index = 10
 				root.add_child(heart)
 
@@ -389,7 +410,7 @@ func _draw_defends():
 				var root = Node2D.new()
 				defend_node.add_child(root)
 				var defend = DefendScene.instantiate() as Sprite2D
-				defend.position = hex.map_to_world(order["unit"].grid_pos) + hex.tile_size * 0.5
+				defend.position = hex.map_to_world(unit_mgr.get_unit_by_net_id(order["unit_net_id"]).grid_pos) + hex.tile_size * 0.5
 				defend.z_index = 0
 				root.add_child(defend)
 
@@ -413,7 +434,7 @@ func _unhandled_input(ev):
 		if game_board.is_occupied(cell):
 			gold_lbl.text = "Cannot place on occupied tile"
 			return
-		if turn_mgr.buy_unit(current_player, placing_unit, cell):
+		if turn_mgr.buy_unit(turn_mgr.local_player_id, placing_unit, cell):
 			gold_lbl.text = "%s Gold: %d" % [current_player, turn_mgr.player_gold[current_player]]
 			placing_unit = ""
 		else:
@@ -430,7 +451,7 @@ func _unhandled_input(ev):
 			currently_selected_unit.is_moving = true
 			currently_selected_unit.moving_to = path[1]
 			turn_mgr.add_order(current_player, {
-				"unit": currently_selected_unit,
+				"unit_net_id": currently_selected_unit.net_id,
 				"type": "move",
 				"path": path,
 				"priority": move_priority
@@ -446,10 +467,10 @@ func _unhandled_input(ev):
 				currently_selected_unit.is_moving = true
 				currently_selected_unit.moving_to = cell
 			turn_mgr.add_order(current_player, {
-				"unit": currently_selected_unit,
+				"unit_net_id": currently_selected_unit.net_id,
 				"type": action_mode,
 				"target_tile": cell,
-				"target_unit": game_board.get_unit_at(cell),
+				"target_unit_net_id": game_board.get_unit_at(cell).net_id,
 				"priority": move_priority
 			})
 		_draw_all()
@@ -459,7 +480,7 @@ func _unhandled_input(ev):
 	if action_mode == "support" and currently_selected_unit:
 		if cell in support_tiles:
 			turn_mgr.add_order(current_player, {
-				"unit": currently_selected_unit,
+				"unit_net_id": currently_selected_unit.net_id,
 				"type": action_mode,
 				"target_tile": cell
 			})

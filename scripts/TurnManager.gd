@@ -58,12 +58,19 @@ var special_tiles := {
 var player_orders     := { "player1": {}, "player2": {} }
 var _orders_submitted := { "player1": false, "player2": false }
 
+var local_player_id: String
+var rng: RandomNumberGenerator = RandomNumberGenerator.new()
+
 # --------------------------------------------------------
 # Entry point: start the game loop once the scene is ready
 # --------------------------------------------------------
 func _ready():
+	NetworkManager.hex = $GameBoardNode/HexTileMap
+	NetworkManager.turn_mgr = $"."
 	unit_manager.spawn_unit("base", base_positions["player1"], "player1")
 	unit_manager.spawn_unit("base", base_positions["player2"], "player2")
+
+func start_game() -> void:
 	call_deferred("_game_loop")
 
 # --------------------------------------------------------
@@ -72,8 +79,15 @@ func _ready():
 func _game_loop() -> void:
 	turn_number += 1
 	print("\n===== TURN %d =====" % turn_number)
-	_do_upkeep()
+	rng.seed = turn_number
+	NetworkManager._orders_submitted = { "player1": false, "player2": false }
+	player_orders = NetworkManager.player_orders
+	NetworkManager.broadcast_phase("UPKEEP")
+	start_phase_locally("UPKEEP")
+	NetworkManager.broadcast_phase("ORDERS")
 	await _do_orders()
+	player_orders = NetworkManager.player_orders
+	NetworkManager.broadcast_phase("EXECUTION")
 	_do_execution()
 
 # --------------------------------------------------------
@@ -81,6 +95,7 @@ func _game_loop() -> void:
 # --------------------------------------------------------
 func _do_upkeep() -> void:
 	current_phase = Phase.UPKEEP
+	NetworkManager._step_ready_counts = {}
 	print("--- Upkeep Phase ---")
 	for player in ["player1", "player2"]:
 		var income = 0
@@ -112,25 +127,39 @@ func _do_upkeep() -> void:
 func _do_orders() -> void:
 	current_phase = Phase.ORDERS
 	# start with player1
-	current_player = "player1"
-	print("--- Orders Phase for %s ---" % current_player.capitalize())
-	emit_signal("orders_phase_begin", current_player)
+	var me = local_player_id
+	print("--- Orders Phase for %s ---" % me.capitalize())
+	emit_signal("orders_phase_begin", me)
 
 	# wait until both players have submitted
-	await self.orders_phase_end
+	await NetworkManager.orders_ready
 	print("→ Both players submitted orders: %s" % player_orders)
 
 # Called by UIManager to add orders
 func add_order(player: String, order: Dictionary) -> void:
 	# Order is a dictionary with keys: "unit", "type", and "path"
-	player_orders[player][order.unit] = order
+	if order["type"] == "spawn":
+		player_orders[player][order["cell"]] = order
+	else:
+		player_orders[player][order["unit_net_id"]] = order
 
-func get_order(player:String, unit:Node) -> Dictionary:
-	return player_orders[player].get(unit,{})
+func get_order(player:String, unit_net_id:int) -> Dictionary:
+	return player_orders[player].get(unit_net_id,{})
 
 func get_all_orders(player_id: String) -> Array:
 	if player_orders.has(player_id):
-		return player_orders[player_id].values()
+		var all_orders = player_orders[player_id].values()
+		var spawn_orders = []
+		var non_spawn_orders = []
+		for order in all_orders:
+			if order["type"] == "spawn":
+				spawn_orders.append(order)
+			else:
+				non_spawn_orders.append(order)
+		non_spawn_orders.sort_custom(func(order1, order2): order1["unit_net_id"] < order2["unit_net_id"])
+		for order in spawn_orders:
+			non_spawn_orders.append(order)
+		return non_spawn_orders
 	push_error("Unknown player in get_orders: %s" % player_id)
 	return []
 
@@ -149,31 +178,64 @@ func submit_player_order(player: String) -> void:
 	if _orders_submitted["player1"] and _orders_submitted["player2"]:
 		emit_signal("orders_phase_end")
 
+func _process_spawns():
+	for player_id in NetworkManager.player_orders.keys():
+		for order in NetworkManager.player_orders[player_id].values():
+			if order["type"] == "spawn":
+				if order["owner_id"] != local_player_id:
+					unit_manager.spawn_unit(order["unit_type"], order["cell"], order["owner_id"])
+	for player_id in NetworkManager.player_orders.keys():
+		for order in NetworkManager.player_orders[player_id].keys():
+			if NetworkManager.player_orders[player_id][order]["type"] == "spawn":
+				NetworkManager.player_orders[player_id].erase(order)
+
+func _process_defends_heals():
+	for player in ["player1", "player2"]:
+		var unit_ids = player_orders[player].keys()
+		unit_ids.sort()
+		for unit_net_id in unit_ids:
+			if unit_net_id is not int:
+				continue
+			var order = player_orders[player][unit_net_id]
+			if order["type"] == "defend":
+				var unit = unit_manager.get_unit_by_net_id(unit_net_id)
+				unit.is_defending = true
+			if order["type"] == "heal":
+				var unit = unit_manager.get_unit_by_net_id(unit_net_id)
+				unit.is_healing = true
+	$UI._draw_heals()
+	$UI._draw_defends()
+
 func _process_ranged():
 	var ranged_dmg: Dictionary = {}
 	# ranged orders resolution
 	for player in ["player1", "player2"]:
-		for unit in player_orders[player].keys():
-			var order = player_orders[player][unit]
+		var unit_ids = player_orders[player].keys()
+		unit_ids.sort()
+		for unit_net_id in unit_ids:
+			if unit_net_id is not int:
+				continue
+			var order = player_orders[player][unit_net_id]
 			if order["type"] == "ranged":
+				var unit = unit_manager.get_unit_by_net_id(unit_net_id)
+				var target = unit_manager.get_unit_by_net_id(order["target_unit_net_id"])
 				# check to make sure target unit still exists
-				if is_instance_valid(order["target_unit"]):
-					var damaged_penalty = (100 - order["unit"].curr_health) * 0.005
-					var ranged_str = order["unit"].ranged_strength * damaged_penalty
-					var def_str
-					if order["target_unit"].is_ranged:
-						def_str = order["target_unit"].ranged_strength
-					else:
-						def_str = order["target_unit"].melee_strength
-					var dmg = 30 * exp((ranged_str-def_str)/25 * randf_range(0.75,1.25))
-					ranged_dmg[order["target_unit"]] = ranged_dmg.get(order["target_unit"], 0) + dmg
-				player_orders[player].erase(unit)
-	for target in ranged_dmg.keys():
-		target.curr_health -= ranged_dmg[target]
+				if is_instance_valid(target):
+					var damaged_penalty = (100 - unit.curr_health) * 0.005
+					var ranged_str = unit.ranged_strength * damaged_penalty
+					var def_str = target.melee_strength
+					var dmg = 30 * exp((ranged_str-def_str)/25 * rng.randf_range(0.75,1.25))
+					ranged_dmg[order["target_unit_net_id"]] = ranged_dmg.get(order["target_unit_net_id"], 0) + dmg
+				player_orders[player].erase(unit.net_id)
+	var target_ids = ranged_dmg.keys()
+	target_ids.sort()
+	for target_net_id in target_ids:
+		var target = unit_manager.get_unit_by_net_id(target_net_id)
+		target.curr_health -= ranged_dmg[target_net_id]
 		# dead unit, remove from all orders and remove node from game
 		if target.curr_health <= 0:
 			for player in ["player1", "player2"]:
-				player_orders[player].erase(target)
+				player_orders[player].erase(target_net_id)
 			$GameBoardNode/HexTileMap.set_player_tile(target.grid_pos, "")
 			$GameBoardNode.vacate(target.grid_pos)
 			target.queue_free()
@@ -186,37 +248,48 @@ func _process_melee():
 	var melee_dmg: Dictionary = {} # key: target, vale: damage recieved
 	# melee orders resolution
 	for player in ["player1", "player2"]:
-		for unit in player_orders[player].keys():
-			var order = player_orders[player][unit]
+		var unit_ids = player_orders[player].keys()
+		unit_ids.sort()
+		for unit_net_id in unit_ids:
+			if unit_net_id is not int:
+				continue
+			var order = player_orders[player][unit_net_id]
 			if order["type"] == "melee":
-				if is_instance_valid(order["target_unit"]):
-					melee_attacks[order["target_unit"]] = melee_attacks.get(order["target_unit"], [])
-					melee_attacks[order["target_unit"]].append([order["unit"], order["priority"]])
-				player_orders[player].erase(unit)
-	for target in melee_attacks.keys():
-		var def_penalty = target.multi_def_penalty * (melee_attacks[target].size() -1)
+				var unit = unit_manager.get_unit_by_net_id(unit_net_id)
+				var target = unit_manager.get_unit_by_net_id(order["target_unit_net_id"])
+				if is_instance_valid(target):
+					melee_attacks[order["target_unit_net_id"]] = melee_attacks.get(order["target_unit_net_id"], [])
+					melee_attacks[order["target_unit_net_id"]].append([unit.net_id, order["priority"]])
+				player_orders[player].erase(unit.net_id)
+	var target_ids = melee_attacks.keys()
+	target_ids.sort()
+	for target_unit_net_id in target_ids:
+		var target = unit_manager.get_unit_by_net_id(target_unit_net_id)
+		var def_penalty = target.multi_def_penalty * (melee_attacks[target.net_id].size() -1)
 		var def_damaged_penalty = (100 - target.curr_health) * 0.005
 		var def_str = (target.melee_strength - def_penalty) * def_damaged_penalty
-		melee_attacks[target].sort_custom(func(a,b): return a[1] < b[1])
-		for attack in melee_attacks[target]:
-			var attacker = attack[0]
+		melee_attacks[target.net_id].sort_custom(func(a,b): return a[1] < b[1])
+		for attack in melee_attacks[target.net_id]:
+			var attacker = unit_manager.get_unit_by_net_id(attack[0])
 			var damaged_penalty = (100 - attacker.curr_health) * 0.005
 			var melee_str = attacker.melee_strength * damaged_penalty
-			var def_dmg = 30 * exp((melee_str-def_str)/25 * randf_range(0.75,1.25))
-			melee_dmg[target] = melee_dmg.get(target, 0) + def_dmg
+			var def_dmg = 30 * exp((melee_str-def_str)/25 * rng.randf_range(0.75,1.25))
+			melee_dmg[target.net_id] = melee_dmg.get(target, 0) + def_dmg
 			if target.is_defending:
-				var atk_dmg = 30 * exp((melee_str-def_str)/25 * randf_range(0.75,1.25))
-				melee_dmg[attacker] = melee_dmg.get(attacker, 0) + atk_dmg
-	
-	for target in melee_dmg.keys():
-		target.curr_health -= melee_dmg[target]
+				var atk_dmg = 30 * exp((melee_str-def_str)/25 * rng.randf_range(0.75,1.25))
+				melee_dmg[attacker.net_id] = melee_dmg.get(attacker, 0) + atk_dmg
+	target_ids = melee_dmg.keys()
+	target_ids.sort()
+	for target_unit_net_id in target_ids:
+		var target = unit_manager.get_unit_by_net_id(target_unit_net_id)
+		target.curr_health -= melee_dmg[target.net_id]
 		# dead unit, remove from all orders and remove node from game
 		if target.curr_health <= 0:
 			for player in ["player1", "player2"]:
-				player_orders[player].erase(target)
+				player_orders[player].erase(target.net_id)
 			$GameBoardNode/HexTileMap.set_player_tile(target.grid_pos, "")
 			$GameBoardNode.vacate(target.grid_pos)
-			if target in melee_attacks.keys():
+			if target_unit_net_id in melee_attacks.keys():
 				melee_attacks[target][0][0].set_grid_position(target.grid_pos)
 			target.queue_free()
 		else:
@@ -229,17 +302,23 @@ func _process_move():
 	var tiles_entering: Dictionary = {} # key: tile, value: [unit]
 	# find all tiles that are being entered into on the next move by both players
 	for player in ["player1", "player2"]:
-		for unit in player_orders[player].keys():
-			var order = player_orders[player][unit]
+		var unit_ids = player_orders[player].keys()
+		unit_ids.sort()
+		for unit_net_id in unit_ids:
+			if unit_net_id is not int:
+				continue
+			var unit = unit_manager.get_unit_by_net_id(unit_net_id)
+			var order = player_orders[player][unit_net_id]
 			if order["type"] == "move":
 				var next_tile = order["path"][1]
 				tiles_entering[next_tile] = tiles_entering.get(next_tile, [])
-				tiles_entering[next_tile].append(unit)
-	
-	for tile in tiles_entering.keys():
+				tiles_entering[next_tile].append(unit_net_id)
+	var sorted_tiles = tiles_entering.keys()
+	sorted_tiles.sort()
+	for tile in sorted_tiles:
 		# if only one unit entering a tile, perform the move
 		if tiles_entering[tile].size() == 1:
-			var curr_unit = tiles_entering[tile][0]
+			var curr_unit = unit_manager.get_unit_by_net_id(tiles_entering[tile][0])
 			# check if there is something there and fight if an enemy
 			if $GameBoardNode.is_occupied(tile):
 				var obstacle = $GameBoardNode.get_unit_at(tile)
@@ -253,12 +332,12 @@ func _process_move():
 								units.append($GameBoardNode.get_unit_at(spot))
 							for i in range(units.size()-1):
 								units[i].set_grid_position(dependency_path[0][i+1])
-								if player_orders[units[i].player_id][units[i]]["path"].size() <= 2:
-									player_orders[units[i].player_id].erase(units[i])
+								if player_orders[units[i].player_id][units[i].net_id]["path"].size() <= 2:
+									player_orders[units[i].player_id].erase(units[i].net_id)
 									units[i].is_moving = false
 								else:
-									player_orders[units[i].player_id][units[i]]["path"].pop_front()
-									units[i].moving_to = player_orders[units[i].player_id][units[i]]["path"][1]
+									player_orders[units[i].player_id][units[i].net_id]["path"].pop_front()
+									units[i].moving_to = player_orders[units[i].player_id][units[i].net_id]["path"][1]
 							for i in range(units.size()-1):
 								units[i].set_grid_position(dependency_path[0][i+1])
 							break
@@ -267,8 +346,8 @@ func _process_move():
 					var atkr_melee_str = curr_unit.melee_strength * (1- atkr_damaged_penalty)
 					var defr_damaged_penalty = (100 - obstacle.curr_health) * 0.005
 					var defr_melee_str = obstacle.melee_strength * (1- defr_damaged_penalty)
-					var atkr_dmg = 30 * exp((defr_melee_str - atkr_melee_str)/25 * randf_range(0.75,1.25))
-					var defr_dmg = 30 * exp((atkr_melee_str - defr_melee_str)/25 * randf_range(0.75,1.25))
+					var atkr_dmg = 30 * exp((defr_melee_str - atkr_melee_str)/25 * rng.randf_range(0.75,1.25))
+					var defr_dmg = 30 * exp((atkr_melee_str - defr_melee_str)/25 * rng.randf_range(0.75,1.25))
 					obstacle.curr_health -= defr_dmg
 					obstacle.set_health_bar()
 					if obstacle.is_defending:
@@ -277,43 +356,43 @@ func _process_move():
 					if obstacle.moving_to == curr_unit.grid_pos:
 						curr_unit.curr_health -= atkr_dmg
 						curr_unit.set_health_bar()
-						player_orders[obstacle.player_id].erase(obstacle)
+						player_orders[obstacle.player_id].erase(obstacle.net_id)
 					if obstacle.curr_health <= 0:
-						player_orders[obstacle.player_id].erase(obstacle)
+						player_orders[obstacle.player_id].erase(obstacle.net_id)
 						$GameBoardNode/HexTileMap.set_player_tile(obstacle.grid_pos, "")
 						$GameBoardNode.vacate(obstacle.grid_pos)
 						obstacle.queue_free()
 						if curr_unit.curr_health > 0:
 							curr_unit.set_grid_position(tile)
-					player_orders[curr_unit.player_id].erase(curr_unit)
+					player_orders[curr_unit.player_id].erase(curr_unit.net_id)
 					if curr_unit.curr_health <= 0:
-						player_orders[curr_unit.player_id].erase(curr_unit)
 						$GameBoardNode/HexTileMap.set_player_tile(curr_unit.grid_pos, "")
 						$GameBoardNode.vacate(curr_unit.grid_pos)
 						if obstacle.moving_to == curr_unit.grid_pos:
 							obstacle.set_grid_position(curr_unit.grid_pos)
-							player_orders[obstacle.player_id].erase(obstacle)
+							player_orders[obstacle.player_id].erase(obstacle.net_id)
 						curr_unit.queue_free()
 					break
 				else:
-					player_orders[curr_unit.player_id].erase(curr_unit)
+					player_orders[curr_unit.player_id].erase(curr_unit.net_id)
 			else:
 				curr_unit.set_grid_position(tile)
-				if player_orders[curr_unit.player_id][curr_unit]["path"].size() <= 2:
-					player_orders[curr_unit.player_id].erase(curr_unit)
+				if player_orders[curr_unit.player_id][curr_unit.net_id]["path"].size() <= 2:
+					player_orders[curr_unit.player_id].erase(curr_unit.net_id)
 				else:
-					player_orders[curr_unit.player_id][curr_unit]["path"].pop_front()
+					player_orders[curr_unit.player_id][curr_unit.net_id]["path"].pop_front()
 			
 		
 		# conflict handling
 		else:
 			var p1_units = []
 			var p2_units = []
-			for unit in tiles_entering[tile]:
+			for unit_net_id in tiles_entering[tile]:
+				var unit = unit_manager.get_unit_by_net_id(unit_net_id)
 				if unit.player_id == "player1":
-					p1_units.append([unit,player_orders["player1"][unit]["priority"]])
+					p1_units.append([unit,player_orders["player1"][unit.net_id]["priority"]])
 				else:
-					p2_units.append([unit,player_orders["player2"][unit]["priority"]])
+					p2_units.append([unit,player_orders["player2"][unit.net_id]["priority"]])
 			p1_units.sort_custom(func(a,b): return a[1] < b[1])
 			p2_units.sort_custom(func(a,b): return a[1] < b[1])
 			
@@ -323,12 +402,12 @@ func _process_move():
 				if p1_units.size() == 0:
 					p2_units[0][0].set_grid_position(tile)
 					for unit in p2_units:
-						player_orders["player2"].erase(unit[0])
+						player_orders["player2"].erase(unit[0].net_id)
 					break
 				if p2_units.size() == 0:
 					p1_units[0][0].set_grid_position(tile)
 					for unit in p1_units:
-						player_orders["player1"].erase(unit[0])
+						player_orders["player1"].erase(unit[0].net_id)
 					break
 				var first_p1 = p1_units[0][0]
 				var first_p2 = p2_units[0][0]
@@ -337,8 +416,8 @@ func _process_move():
 				var p1_melee_str = first_p1.melee_strength * (1 - p1_damaged_penalty)
 				var p2_damaged_penalty = (100 - first_p2.curr_health) * 0.005
 				var p2_melee_str = first_p2.melee_strength * (1- p2_damaged_penalty)
-				var p1_dmg = 30 * exp((p2_melee_str - first_p1.melee_strength)/25 * randf_range(0.75,1.25))
-				var p2_dmg = 30 * exp((p1_melee_str - first_p2.melee_strength)/25 * randf_range(0.75,1.25))
+				var p1_dmg = 30 * exp((p2_melee_str - first_p1.melee_strength)/25 * rng.randf_range(0.75,1.25))
+				var p2_dmg = 30 * exp((p1_melee_str - first_p2.melee_strength)/25 * rng.randf_range(0.75,1.25))
 				first_p1.curr_health -= p1_dmg
 				first_p1.set_health_bar()
 				first_p2.curr_health -= p2_dmg
@@ -347,8 +426,8 @@ func _process_move():
 				# dead unit handling
 				# both dead
 				if first_p1.curr_health <= 0 and first_p2.curr_health <=0:
-					player_orders["player1"].erase(first_p1)
-					player_orders["player2"].erase(first_p2)
+					player_orders["player1"].erase(first_p1.net_id)
+					player_orders["player2"].erase(first_p2.net_id)
 					$GameBoardNode/HexTileMap.set_player_tile(first_p1.grid_pos, "")
 					$GameBoardNode/HexTileMap.set_player_tile(first_p2.grid_pos, "")
 					$GameBoardNode.vacate(first_p1.grid_pos)
@@ -361,7 +440,7 @@ func _process_move():
 				elif first_p1.curr_health <= 0 or first_p2.curr_health <= 0:
 					# p1 unit dead
 					if first_p1.curr_health <= 0:
-						player_orders["player1"].erase(first_p1)
+						player_orders["player1"].erase(first_p1.net_id)
 						$GameBoardNode/HexTileMap.set_player_tile(first_p1.grid_pos, "")
 						$GameBoardNode.vacate(first_p1.grid_pos)
 						first_p1.queue_free()
@@ -369,15 +448,15 @@ func _process_move():
 						if p1_units.size() == 0:
 							first_p2.set_grid_position(tile)
 							for unit in p2_units:
-								player_orders["player2"].erase(unit[0])
+								player_orders["player2"].erase(unit[0].net_id)
 							break
 						else:
-							player_orders["player2"].erase(first_p2)
+							player_orders["player2"].erase(first_p2.net_id)
 							p2_units.pop_front()
 							
 					#p2 unit dead
 					else:
-						player_orders["player2"].erase(first_p2)
+						player_orders["player2"].erase(first_p2.net_id)
 						$GameBoardNode/HexTileMap.set_player_tile(first_p2.grid_pos, "")
 						$GameBoardNode.vacate(first_p2.grid_pos)
 						first_p2.queue_free()
@@ -385,23 +464,26 @@ func _process_move():
 						if p2_units.size() == 0:
 							first_p1.set_grid_position(tile)
 							for unit in p1_units:
-								player_orders["player1"].erase(unit[0])
+								player_orders["player1"].erase(unit[0].net_id)
 							break
 						else:
-							player_orders["player1"].erase(first_p1)
+							player_orders["player1"].erase(first_p1.net_id)
 							p1_units.pop_front()
 				
 				# both still alive
 				else:
-					player_orders["player1"].erase(first_p1)
+					player_orders["player1"].erase(first_p1.net_id)
 					p1_units.pop_front()
-					player_orders["player2"].erase(first_p2)
+					player_orders["player2"].erase(first_p2.net_id)
 					p2_units.pop_front()
 	
 	# check if there are more moves and requeue _process_moves
 	for player in ["player1", "player2"]:
-		for unit in player_orders[player].keys():
-			var order = player_orders[player][unit]
+		for unit_net_id in player_orders[player].keys():
+			if unit_net_id is not int:
+				continue
+			var unit = unit_manager.get_unit_by_net_id(unit_net_id)
+			var order = player_orders[player][unit.net_id]
 			if order["type"] == "move":
 				exec_steps.append(func(): _process_move())
 				$UI._draw_paths()
@@ -421,6 +503,8 @@ func _do_execution() -> void:
 	print("Executing orders...")
 	exec_steps = [
 		func(): _initialize_execution(),
+		func(): _process_defends_heals(),
+		func(): _process_spawns(),
 		func(): _process_ranged(),
 		func(): _process_melee(),
 		func(): _process_move()
@@ -432,7 +516,8 @@ func _do_execution() -> void:
 func _run_next_step():
 	if step_index >= exec_steps.size():
 		emit_signal("execution_complete")
-		call_deferred("_game_loop")
+		if get_tree().get_multiplayer().is_server():
+			call_deferred("_game_loop")
 		return
 	exec_steps[step_index].call()
 	emit_signal("execution_paused", step_index)
@@ -440,6 +525,19 @@ func _run_next_step():
 func resume_execution():
 	step_index += 1
 	_run_next_step()
+
+func start_phase_locally(phase_name: String) -> void:
+	print("[TurnManager] start_phase_locally:", phase_name)
+	player_orders = NetworkManager.player_orders
+	match phase_name:
+		"UPKEEP":
+			NetworkManager._orders_submitted = { "player1": false, "player2": false }
+			_do_upkeep()
+		"ORDERS":
+			# kick off the orders coroutine on the client
+			_do_orders()
+		"EXECUTION":
+			_do_execution()
 
 # --------------------------------------------------------
 # API: attempt to buy and spawn a unit
@@ -469,7 +567,14 @@ func buy_unit(player: String, unit_type: String, grid_pos: Vector2i) -> bool:
 
 	# deduct gold & spawn
 	player_gold[player] -= cost
-	unit_manager.spawn_unit(unit_type, grid_pos, player)
+	var unit = unit_manager.spawn_unit(unit_type, grid_pos, local_player_id)
+	add_order(local_player_id, {
+		"type": "spawn",
+		"unit_type": unit_type,
+		"unit_net_id": unit.net_id,
+		"cell": grid_pos,
+		"owner_id": local_player_id
+	})
 	print("%s bought a %s at %s for %d gold" % [player, unit_type, grid_pos, cost])
 	return true
 
