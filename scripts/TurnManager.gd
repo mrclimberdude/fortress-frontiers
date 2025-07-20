@@ -58,6 +58,8 @@ var special_tiles := {
 var player_orders     := { "player1": {}, "player2": {} }
 var _orders_submitted := { "player1": false, "player2": false }
 
+var local_player_id: String
+
 # --------------------------------------------------------
 # Entry point: start the game loop once the scene is ready
 # --------------------------------------------------------
@@ -66,8 +68,9 @@ func _ready():
 	NetworkManager.turn_mgr = $"."
 	unit_manager.spawn_unit("base", base_positions["player1"], "player1")
 	unit_manager.spawn_unit("base", base_positions["player2"], "player2")
-	if get_tree().get_multiplayer().is_server():
-		call_deferred("_game_loop")
+
+func start_game() -> void:
+	call_deferred("_game_loop")
 
 # --------------------------------------------------------
 # Main loop: Upkeep → Orders → Execution → increment → loop
@@ -118,18 +121,21 @@ func _do_upkeep() -> void:
 func _do_orders() -> void:
 	current_phase = Phase.ORDERS
 	# start with player1
-	current_player = "player1"
-	print("--- Orders Phase for %s ---" % current_player.capitalize())
-	emit_signal("orders_phase_begin", current_player)
+	var me = local_player_id
+	print("--- Orders Phase for %s ---" % me.capitalize())
+	emit_signal("orders_phase_begin", me)
 
 	# wait until both players have submitted
-	await self.orders_phase_end
+	await NetworkManager.orders_ready
 	print("→ Both players submitted orders: %s" % player_orders)
 
 # Called by UIManager to add orders
 func add_order(player: String, order: Dictionary) -> void:
 	# Order is a dictionary with keys: "unit", "type", and "path"
-	player_orders[player][order.unit] = order
+	if order["type"] == "spawn":
+		player_orders[player][order["cell"]] = order
+	else:
+		player_orders[player][order.unit] = order
 
 func get_order(player:String, unit:Node) -> Dictionary:
 	return player_orders[player].get(unit,{})
@@ -154,6 +160,17 @@ func submit_player_order(player: String) -> void:
 	# both submitted: end orders phase
 	if _orders_submitted["player1"] and _orders_submitted["player2"]:
 		emit_signal("orders_phase_end")
+
+func _process_spawns():
+	for player_id in NetworkManager.player_orders.keys():
+		for order in NetworkManager.player_orders[player_id].values():
+			if order["type"] == "spawn":
+				if order.owner_id != local_player_id:
+					unit_manager.spawn_unit(order["unit_type"], order["cell"], order["owner_id"])
+	for player_id in NetworkManager.player_orders.keys():
+		for order in NetworkManager.player_orders[player_id].keys():
+			if NetworkManager.player_orders[player_id][order]["type"] == "spawn":
+				NetworkManager.player_orders[player_id].erase(order)
 
 func _process_ranged():
 	var ranged_dmg: Dictionary = {}
@@ -427,6 +444,7 @@ func _do_execution() -> void:
 	print("Executing orders...")
 	exec_steps = [
 		func(): _initialize_execution(),
+		func(): _process_spawns(),
 		func(): _process_ranged(),
 		func(): _process_melee(),
 		func(): _process_move()
@@ -487,6 +505,12 @@ func buy_unit(player: String, unit_type: String, grid_pos: Vector2i) -> bool:
 	# deduct gold & spawn
 	player_gold[player] -= cost
 	unit_manager.spawn_unit(unit_type, grid_pos, player)
+	add_order(player, {
+		"type": "spawn",
+		"unit_type": unit_type,
+		"cell": grid_pos,
+		"owner_id": local_player_id
+	})
 	print("%s bought a %s at %s for %d gold" % [player, unit_type, grid_pos, cost])
 	return true
 

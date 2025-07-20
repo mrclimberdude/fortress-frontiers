@@ -114,9 +114,11 @@ func _on_scout_pressed():
 
 func _on_host_pressed():
 	NetworkManager.host_game(7777)
+	turn_mgr.local_player_id = "player1"
 
 func _on_join_pressed():
 	NetworkManager.join_game("127.0.0.1", 7777)
+	turn_mgr.local_player_id = "player2"
 
 func _on_unit_selected(unit: Node) -> void:
 	game_board.clear_highlights()
@@ -222,8 +224,9 @@ func _clear_all_drawings():
 func _on_done_pressed():
 	game_board.clear_highlights()
 	_clear_all_drawings()
-	# signal back to TurnManager that this player is finished
-	turn_mgr.submit_player_order(current_player)
+	$Panel.visible = false
+	var my_orders = turn_mgr.get_all_orders(current_player)
+	NetworkManager.submit_orders(current_player, my_orders)
 	# prevent further clicks
 	placing_unit = ""
 	move_priority = 0
@@ -231,7 +234,7 @@ func _on_done_pressed():
 func _on_execution_paused(phase_idx):
 	# Show the panel, update text
 	exec_panel.visible = true
-	var phase_names = ["Iniitialization", "Ranged Attacks","Melee","Movement"]
+	var phase_names = ["Initialization", "Unit Spawns", "Ranged Attacks","Melee","Movement"]
 	if phase_idx >= phase_names.size():
 		for i in range(phase_idx - phase_names.size()+1):
 			phase_names.append("Movement")
