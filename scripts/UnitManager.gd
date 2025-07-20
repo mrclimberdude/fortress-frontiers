@@ -15,11 +15,16 @@ extends Node2D
 @export var turn_manager_path: NodePath
 @onready var turn_mgr = get_node(turn_manager_path) as Node
 
+var _next_net_id_odd: int  = 1
+var _next_net_id_even: int = 2
+
+var unit_by_net_id: Dictionary = {}
+
 func _ready():
 	print("UnitManager: hex_map =", hex_map, "script=", hex_map.get_script())
 
 # spawns a unit by type ("archer" or "soldier") at grid_pos for owner
-func spawn_unit(unit_type: String, cell: Vector2i, owner: String) -> void:
+func spawn_unit(unit_type: String, cell: Vector2i, owner: String) -> Node2D:
 	# 1) Pick the right scene with a match statement
 	var scene: PackedScene
 	match unit_type.to_lower():
@@ -42,17 +47,22 @@ func spawn_unit(unit_type: String, cell: Vector2i, owner: String) -> void:
 		var health_bar = unit.get_node("HealthBar")
 		health_bar.scale = Vector2(-1,1)
 		health_bar.position[0] += health_bar.size[0]
+		unit.net_id = _next_net_id_odd
+		_next_net_id_odd += 2
+	else:
+		unit.net_id = _next_net_id_even
+		_next_net_id_even +=2
 	add_child(unit)
 
 	# 3) Place it using your TileMapLayer’s map_to_world
 	unit.map_layer = hex_map
 	unit.player_id = owner
 	unit.set_grid_position(cell)
-
-	# 4) Color the tile underneath
-	#hex_map.set_player_tile(cell, owner)
-
+	
+	unit_by_net_id[unit.net_id] = unit
+	
 	print("Spawned %s for %s at %s" % [unit_type, owner, cell])
+	return unit
 
 func find_end(unit, path, enemy, enemy_flag):
 	if enemy:
@@ -70,6 +80,9 @@ func find_end(unit, path, enemy, enemy_flag):
 			else:
 				return find_end(obstacle, path, true, enemy_flag)
 	return [path, enemy_flag]
+
+func get_unit_by_net_id(id: int) -> Node:
+	return unit_by_net_id.get(id, null)
 
 func _input(event):
 	if event.is_action_pressed("debug_move"):

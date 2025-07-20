@@ -84,6 +84,7 @@ script = ExtResource("7_rs5it")
 script = ExtResource("6_qxawf")
 turn_manager_path = NodePath("..")
 map_node_path = NodePath("../GameBoardNode")
+unit_manager_path = NodePath("../GameBoardNode/Units")
 
 [node name="HostButton" type="Button" parent="UI"]
 anchors_preset = -1
@@ -111,6 +112,7 @@ offset_bottom = 64.264
 text = "Join Game"
 
 [node name="Panel" type="Panel" parent="UI"]
+visible = false
 custom_minimum_size = Vector2(300, 200)
 offset_right = 40.0
 offset_bottom = 40.0

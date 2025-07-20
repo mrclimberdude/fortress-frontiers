@@ -1,14 +1,16 @@
 extends Node
 
-
 var hex: TileMapLayer
 var turn_mgr: Node2D
 
 var received_map_data: Array = []
 var _orders_submitted := { "player1": false, "player2": false }
 var player_orders := {"player1": {}, "player2": {}}  # map player_id → orders list
+
 var server_peer_id: int
 var client_peer_id: int
+
+var _step_ready_counts := {}
 
 signal orders_ready(all_orders: Dictionary)
 
@@ -36,6 +38,7 @@ func join_game(ip: String, port: int) -> void:
 
 func _on_peer_connected(id: int) -> void:
 	var mp = get_tree().get_multiplayer()
+	set_gold()
 	if mp.is_server():
 		# Host sees a new client
 		client_peer_id = id
@@ -120,7 +123,7 @@ func _buffer_orders(player_id:String, orders:Array) -> void:
 		if order["type"] == "spawn":
 			player_orders[player_id][order["cell"]] = order
 		else:
-			player_orders[player_id][order.unit] = order
+			player_orders[player_id][order["unit_net_id"]] = order
 
 	# once both are in, multicast and signal
 	if _orders_submitted["player1"] and _orders_submitted["player2"]:
@@ -142,3 +145,29 @@ func _peer_id_to_player_id(peer_id: int) -> String:
 		return "player2"
 	else:
 		return ""
+
+@rpc("any_peer", "reliable")
+func rpc_step_ready(step_idx: int) -> void:
+	var mp = get_tree().get_multiplayer()
+	# only the host/server should count these
+	if not mp.is_server():
+		return
+
+	# bump the counter
+	_step_ready_counts[step_idx] = _step_ready_counts.get(step_idx, 0) + 1
+	print("[NM] step_ready for step %d: count = %d" % [step_idx, _step_ready_counts[step_idx]])
+
+	# once both players are in, broadcast resume
+	if _step_ready_counts[step_idx] >= 2:
+		print("[NM] both ready for step %d, resuming…" % step_idx)
+		rpc("rpc_resume_execution", step_idx)
+		rpc_resume_execution(step_idx)
+@rpc("any_peer", "reliable")
+func rpc_resume_execution(step_idx: int) -> void:
+	print("[NM] rpc_resume_execution received for step %d" % step_idx)
+	turn_mgr.resume_execution()
+
+
+func set_gold():
+	turn_mgr.player_gold = { "player1": 0, "player2": 0 }
+	turn_mgr.turn_number = 0
