@@ -20,24 +20,24 @@ Fortress Frontiers is a simultaneous-orders, turn-based strategy game on a hex g
 
 ---
 
+## Setup
+1. **LAN**  
+   - Host enters a port number and clicks host game
+   - Client enters port number and IP address of host
+
+2. **Internet**
+    - Host sets up port forwarding on router
+    - Same setup as LAN from there
+
+---
+
 ## Components & Terminology
 - **Hex Grid**: 18×15 horizontal-offset layout  
 - **Bases**: Each player's home structure  
 - **Mines**: Resource hexes that grant gold  
-- **Units**: Scout, Soldier, Archer  
+- **Units**: Scout, Soldier, Archer, Miner and Tank
 - **Gold**: Currency to purchase units (5 base + 2 per mine each Upkeep)  
 - **Order**: A single action assigned to a unit during the Orders Phase  
-
----
-
-## Setup
-1. **Board Placement**  
-   - Player 1’s base at `(-1, 7)`  
-   - Player 2’s base at `(17, 7)`  
-   - Place the five neutral mines on their designated hex coordinates  
-2. **Starting Resources**  
-   - Each player begins with the gold amount defined in the code  
-   - No units on board at start  
 
 ---
 
@@ -45,7 +45,7 @@ Fortress Frontiers is a simultaneous-orders, turn-based strategy game on a hex g
 Each turn proceeds through three phases:
 
 ### 1. Upkeep Phase
-- Add **5 gold** base + **2 gold** per mine owned  
+- Add **25 gold** base + **10 gold** per mine owned  
 - Apply **Heal** orders from last turn: units gain HP equal to their **Regen** stat  
   - Scouts: +15 HP  
   - Soldiers & Archers: +10 HP  
@@ -64,7 +64,7 @@ Each turn proceeds through three phases:
 ### 3. Execution Phase (simultaneous resolution)
 1. **Ranged Attacks**  
 2. **Melee Attacks**  
-3. **Movement** (up to 2 tiles, resolved one tile per tick)  
+3. **Movement** (resolved one tile per tick)
 
 ---
 
@@ -72,16 +72,17 @@ Each turn proceeds through three phases:
 
 | Type    | Cost | Max HP | Move Range | Melee Str | Ranged Str | Range | Regen | Special                                  |
 |---------|------|--------|------------|-----------|------------|-------|-------|------------------------------------------|
-| Scout   | 5    | 100    | 2          | 1         | —          | —     | 15    | Can **Move** on purchase turn; cannot issue Melee orders (move-into only) |
-| Soldier | 12   | 100    | 2          | 10        | —          | —     | 10    | —                                        |
-| Archer  | 15   | 100    | 2          | 5         | 18         | 2     | 10    | —                                        |
-
+| Scout   | 25   | 100    | 2          | 3         | —          | —     | 15    | Can **Move** on purchase turn; cannot issue Melee orders (move-into only) |
+| Soldier | 60   | 100    | 2          | 10        | —          | —     | 10    | —                                        |
+| Archer  | 75   | 100    | 2          | 5         | 18         | 2     | 10    | —                                        |
+| Miner   | 50   | 100    | 2          | 1         | —          | —     | 10    | Extra 15 gold per turn when on a mine    |
+| Tank    | 100  | 100    | 1          | 5         | —          | —     | 10    | Extra 13 melee strength when defending, no multi defending penalty |
 ---
 
 ## Structures & Territories
 - **Mines**:  
   - Capture by moving a unit into the hex  
-  - Flip ownership immediately; grant +2 gold/turn; indestructible  
+  - Flip ownership immediately; grant +10 gold/turn; indestructible  
 - **Bases**:  
   - 100 HP; passive structure (no counterattack)  
   - Melee Str 10 used when calculating incoming damage  
