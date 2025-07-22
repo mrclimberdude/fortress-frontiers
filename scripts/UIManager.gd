@@ -40,6 +40,7 @@ const DefendScene = preload("res://scenes/Defending.tscn")
 const ArcherScene = preload("res://scenes/Archer.tscn")
 const SoldierScene = preload("res://scenes/Soldier.tscn")
 const ScoutScene = preload("res://scenes/Scout.tscn")
+const MinerScene = preload("res://scenes/Miner.tscn")
 
 const MineScene = preload("res://scenes/GemMine.tscn")
 
@@ -73,18 +74,21 @@ func _ready():
 					 Callable(self, "_on_soldier_pressed"))
 	$Panel/VBoxContainer/ScoutButton.connect("pressed",
 					 Callable(self, "_on_scout_pressed"))
+	$Panel/VBoxContainer/MinerButton.connect("pressed",
+					 Callable(self, "_on_miner_pressed"))
 	$Panel/VBoxContainer/DoneButton.connect("pressed",
 					 Callable(self, "_on_done_pressed"))
 	
 	var temp = ArcherScene.instantiate()
 	$Panel/VBoxContainer/ArcherButton.text = "Buy Archer (%dg)" % temp.cost
-	temp.free()
 	temp = SoldierScene.instantiate()
 	$Panel/VBoxContainer/SoldierButton.text = "Buy Soldier (%dg)" % temp.cost
-	temp.free()
 	temp = ScoutScene.instantiate()
 	$Panel/VBoxContainer/ScoutButton.text = "Buy Scout (%dg)" % temp.cost
+	temp = MinerScene.instantiate()
+	$Panel/VBoxContainer/MinerButton.text = "Buy Miner (%dg)" % temp.cost
 	temp.free()
+	
 	action_menu.connect("id_pressed", Callable(self, "_on_action_selected"))
 	action_menu.hide()
 	
@@ -123,6 +127,11 @@ func _on_soldier_pressed():
 func _on_scout_pressed():
 	placing_unit = "scout"
 	gold_lbl.text = "Click map to place Scout\nGold: %d" % turn_mgr.player_gold[current_player]
+	_find_placeable()
+
+func _on_miner_pressed():
+	placing_unit = "miner"
+	gold_lbl.text = "Click map to place Miner\nGold: %d" % turn_mgr.player_gold[current_player]
 	_find_placeable()
 
 func _find_placeable():
@@ -277,7 +286,7 @@ func _on_done_pressed():
 func _on_execution_paused(phase_idx):
 	_current_exec_step_idx = phase_idx
 	exec_panel.visible = true
-	var phase_names = ["Initialization", "Defends and Heals", "Unit Spawns", "Ranged Attacks","Melee","Movement"]
+	var phase_names = ["Unit Spawns", "Ranged Attacks","Melee","Movement"]
 	if phase_idx >= phase_names.size():
 		for i in range(phase_idx - phase_names.size()+1):
 			phase_names.append("Movement")

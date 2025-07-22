@@ -1,4 +1,4 @@
-[gd_scene load_steps=13 format=4 uid="uid://dnx0cxl4a46lg"]
+[gd_scene load_steps=14 format=4 uid="uid://dnx0cxl4a46lg"]
 
 [ext_resource type="Script" uid="uid://daaph63aiv3vd" path="res://scripts/TurnManager.gd" id="1_xh13x"]
 [ext_resource type="Texture2D" uid="uid://ciitwnd7hxyra" path="res://assets/spritesheet.png" id="2_17g6i"]
@@ -8,6 +8,7 @@
 [ext_resource type="PackedScene" uid="uid://rgm2p8qm0fpu" path="res://scenes/Scout.tscn" id="4_04ve2"]
 [ext_resource type="Script" uid="uid://dbjcmu0pwdism" path="res://scripts/game_board_node.gd" id="4_6lofv"]
 [ext_resource type="Script" uid="uid://cf8rb1kdlfa5q" path="res://scripts/UnitManager.gd" id="4_30eli"]
+[ext_resource type="PackedScene" uid="uid://cjq2ma40uud72" path="res://scenes/Miner.tscn" id="5_c1to4"]
 [ext_resource type="Script" uid="uid://cpvudcuvy1hxc" path="res://scripts/UIManager.gd" id="6_qxawf"]
 [ext_resource type="Script" uid="uid://srlpr2fln13a" path="res://scripts/camera.gd" id="7_rs5it"]
 
@@ -46,6 +47,7 @@ unit_manager_path = NodePath("GameBoardNode/Units")
 archer_scene = ExtResource("2_qkkkq")
 soldier_scene = ExtResource("2_i37i2")
 scout_scene = ExtResource("4_04ve2")
+miner_scene = ExtResource("5_c1to4")
 
 [node name="GameBoardNode" type="Node2D" parent="."]
 script = ExtResource("4_6lofv")
@@ -136,9 +138,9 @@ placeholder_text = "Enter Host Port"
 
 [node name="Panel" type="Panel" parent="UI"]
 visible = false
-custom_minimum_size = Vector2(300, 200)
-offset_right = 40.0
-offset_bottom = 40.0
+custom_minimum_size = Vector2(200, 200)
+offset_right = 213.0
+offset_bottom = 204.0
 
 [node name="VBoxContainer" type="VBoxContainer" parent="UI/Panel"]
 layout_mode = 0
@@ -149,6 +151,9 @@ offset_bottom = 40.0
 layout_mode = 2
 
 [node name="ScoutButton" type="Button" parent="UI/Panel/VBoxContainer"]
+layout_mode = 2
+
+[node name="MinerButton" type="Button" parent="UI/Panel/VBoxContainer"]
 layout_mode = 2
 
 [node name="SoldierButton" type="Button" parent="UI/Panel/VBoxContainer"]

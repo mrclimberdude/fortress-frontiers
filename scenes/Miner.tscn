@@ -1,7 +1,7 @@
-[gd_scene load_steps=5 format=3 uid="uid://chbt4bn7n6ytk"]
+[gd_scene load_steps=5 format=3 uid="uid://cjq2ma40uud72"]
 
-[ext_resource type="PackedScene" uid="uid://c62dn8sldq572" path="res://scenes/Unit.tscn" id="1_av0cm"]
-[ext_resource type="Texture2D" uid="uid://b7bxrfjuaqt2" path="res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Objects Light/HSI_icon_160l.png" id="2_qtvpb"]
+[ext_resource type="PackedScene" uid="uid://c62dn8sldq572" path="res://scenes/Unit.tscn" id="1_lj6gh"]
+[ext_resource type="Texture2D" uid="uid://cyoql3l2dk7dt" path="res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Objects Light/HSI_icon_173l.png" id="2_lj6gh"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_tqf8n"]
 bg_color = Color(0.988235, 0.227451, 0.152941, 0.603922)
@@ -9,12 +9,15 @@ bg_color = Color(0.988235, 0.227451, 0.152941, 0.603922)
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_qtvpb"]
 bg_color = Color(0, 0.843137, 0.0941176, 0.92549)
 
-[node name="Soldier" instance=ExtResource("1_av0cm")]
-cost = 60
-melee_strength = 10
+[node name="Miner" instance=ExtResource("1_lj6gh")]
+cost = 50
+regen = 15
+first_turn_move = true
+can_melee = false
+is_miner = true
 
 [node name="Sprite2D" parent="." index="0"]
-texture = ExtResource("2_qtvpb")
+texture = ExtResource("2_lj6gh")
 
 [node name="HealthBar" type="ProgressBar" parent="." index="1"]
 offset_left = 34.0

@@ -17,6 +17,7 @@ enum Phase { UPKEEP, ORDERS, EXECUTION }
 @export var archer_scene:  PackedScene
 @export var soldier_scene: PackedScene
 @export var scout_scene: PackedScene
+@export var miner_scene: PackedScene
 
 # --- Turn & Phase State ---
 var turn_number:   int    = 0
@@ -26,9 +27,10 @@ var exec_steps: Array     = []
 var step_index: int       = 0
 
 # --- Economy State ---
-var player_gold       := { "player1": 0, "player2": 0 }
-const BASE_INCOME    : int = 5
-const SPECIAL_INCOME : int = 2
+var player_gold       := { "player1": 25, "player2": 25 }
+const BASE_INCOME    : int = 25
+const SPECIAL_INCOME : int = 10
+const MINER_BONUS    : int = 15
 
 @export var structure_positions = [Vector2i(5, 2),
 					Vector2i(12, 2),
@@ -103,6 +105,9 @@ func _do_upkeep() -> void:
 			income += BASE_INCOME
 		for pos in special_tiles[player]:
 			if _controls_tile(player, pos):
+				if $GameBoardNode.is_occupied(pos):
+					if $GameBoardNode.get_unit_at(pos).is_miner:
+						income += MINER_BONUS
 				income += SPECIAL_INCOME
 		player_gold[player] += income
 		print("%s income: %d  → total gold: %d" % [player.capitalize(), income, player_gold[player]])
@@ -188,8 +193,7 @@ func _process_spawns():
 		for order in NetworkManager.player_orders[player_id].keys():
 			if NetworkManager.player_orders[player_id][order]["type"] == "spawn":
 				NetworkManager.player_orders[player_id].erase(order)
-
-func _process_defends_heals():
+	
 	for player in ["player1", "player2"]:
 		var unit_ids = player_orders[player].keys()
 		unit_ids.sort()
@@ -203,8 +207,7 @@ func _process_defends_heals():
 			if order["type"] == "heal":
 				var unit = unit_manager.get_unit_by_net_id(unit_net_id)
 				unit.is_healing = true
-	$UI._draw_heals()
-	$UI._draw_defends()
+	$UI._draw_all()
 
 func _process_ranged():
 	var ranged_dmg: Dictionary = {}
@@ -520,10 +523,6 @@ func _process_move():
 				return
 	$UI._draw_paths()
 
-func _initialize_execution():
-	$UI._draw_attacks()
-	$UI._draw_heals()
-	$UI._draw_defends()
 
 # --------------------------------------------------------
 # Phase 3: Execution — process orders
@@ -532,8 +531,6 @@ func _do_execution() -> void:
 	current_phase = Phase.EXECUTION
 	print("Executing orders...")
 	exec_steps = [
-		func(): _initialize_execution(),
-		func(): _process_defends_heals(),
 		func(): _process_spawns(),
 		func(): _process_ranged(),
 		func(): _process_melee(),
@@ -580,6 +577,8 @@ func buy_unit(player: String, unit_type: String, grid_pos: Vector2i) -> bool:
 		scene = soldier_scene
 	elif unit_type.to_lower() == "scout":
 		scene = scout_scene
+	elif unit_type.to_lower() == "miner":
+		scene = miner_scene
 	else:
 		push_error("Unknown unit type '%s'" % unit_type)
 		return false

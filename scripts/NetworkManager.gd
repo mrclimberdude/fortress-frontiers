@@ -169,5 +169,4 @@ func rpc_resume_execution(step_idx: int) -> void:
 
 
 func set_gold():
-	turn_mgr.player_gold = { "player1": 0, "player2": 0 }
 	turn_mgr.turn_number = 0
