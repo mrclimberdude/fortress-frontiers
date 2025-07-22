@@ -119,10 +119,21 @@ func _on_scout_pressed():
 func _on_host_pressed():
 	NetworkManager.host_game(7777)
 	turn_mgr.local_player_id = "player1"
+	$HostButton.visible = false
+	$JoinButton.visible = false
+	$IPLineEdit.visible = false
+	$PortLineEdit.visible = false
 
 func _on_join_pressed():
-	NetworkManager.join_game("127.0.0.1", 7777)
+	var ip = $"IPLineEdit".text.strip_edges()
+	var port = $"PortLineEdit".text.strip_edges()
+	print("[UI] Joining game at %s:%d" % [ip, port])
+	NetworkManager.join_game(ip, int(port))
 	turn_mgr.local_player_id = "player2"
+	$HostButton.visible = false
+	$JoinButton.visible = false
+	$IPLineEdit.visible = false
+	$PortLineEdit.visible = false
 
 func _on_unit_selected(unit: Node) -> void:
 	game_board.clear_highlights()

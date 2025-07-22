@@ -111,6 +111,20 @@ offset_right = -805.248
 offset_bottom = 64.264
 text = "Join Game"
 
+[node name="IPLineEdit" type="LineEdit" parent="UI"]
+offset_left = 145.0
+offset_top = 598.0
+offset_right = 352.0
+offset_bottom = 637.0
+placeholder_text = "Enter Host IP"
+
+[node name="PortLineEdit" type="LineEdit" parent="UI"]
+offset_left = 373.0
+offset_top = 598.0
+offset_right = 546.0
+offset_bottom = 638.0
+placeholder_text = "Enter Host Port"
+
 [node name="Panel" type="Panel" parent="UI"]
 visible = false
 custom_minimum_size = Vector2(300, 200)
