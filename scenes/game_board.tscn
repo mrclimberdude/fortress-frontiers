@@ -68,6 +68,7 @@ script = ExtResource("3_xh13x")
 [node name="Structures" type="Node2D" parent="GameBoardNode/HexTileMap"]
 
 [node name="HighlightMap" type="TileMapLayer" parent="GameBoardNode"]
+self_modulate = Color(1, 1, 1, 0.588235)
 tile_set = SubResource("TileSet_xh13x")
 script = ExtResource("3_xh13x")
 

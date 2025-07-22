@@ -147,7 +147,8 @@ func _on_host_pressed():
 	$JoinButton.visible = false
 	$IPLineEdit.visible = false
 	$PortLineEdit.visible = false
-	dev_mode_toggle.visible = false
+	if not dev_mode_toggle.button_pressed:
+		dev_mode_toggle.visible = false
 
 func _on_join_pressed():
 	var ip = $"IPLineEdit".text.strip_edges()
@@ -159,7 +160,8 @@ func _on_join_pressed():
 	$JoinButton.visible = false
 	$IPLineEdit.visible = false
 	$PortLineEdit.visible = false
-	dev_mode_toggle.visible = false
+	if not dev_mode_toggle.button_pressed:
+		dev_mode_toggle.visible = false
 
 func _on_unit_selected(unit: Node) -> void:
 	game_board.clear_highlights()
