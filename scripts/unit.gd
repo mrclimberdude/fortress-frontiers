@@ -23,6 +23,7 @@ extends Node2D
 @export var is_base:         bool = false
 @export var just_purchased:  bool = true
 @export var first_turn_move: bool = false
+@export var can_melee:       bool = true
 
 
 # -- grid positioning and reference to the TileMapLayer

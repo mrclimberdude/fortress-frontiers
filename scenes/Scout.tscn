@@ -13,6 +13,7 @@ bg_color = Color(0, 0.843137, 0.0941176, 0.92549)
 cost = 5
 regen = 15
 first_turn_move = true
+can_melee = false
 
 [node name="Sprite2D" parent="." index="0"]
 texture = ExtResource("2_1i25t")

@@ -172,7 +172,7 @@ func _on_unit_selected(unit: Node) -> void:
 	if not unit.just_purchased:
 		if unit.is_ranged:
 			action_menu.add_item("Ranged Attack", 1)
-		else:
+		if unit.can_melee:
 			action_menu.add_item("Melee Attack", 2)
 		#action_menu.add_item("Support", 3)
 		action_menu.add_item("Heal", 4)
