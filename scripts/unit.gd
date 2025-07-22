@@ -25,7 +25,7 @@ extends Node2D
 @export var first_turn_move: bool = false
 @export var can_melee:       bool = true
 @export var is_miner:        bool = false
-
+@export var is_tank:         bool = false
 
 # -- grid positioning and reference to the TileMapLayer
 var grid_pos: Vector2i

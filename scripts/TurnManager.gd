@@ -18,6 +18,7 @@ enum Phase { UPKEEP, ORDERS, EXECUTION }
 @export var soldier_scene: PackedScene
 @export var scout_scene: PackedScene
 @export var miner_scene: PackedScene
+@export var tank_scene: PackedScene
 
 # --- Turn & Phase State ---
 var turn_number:   int    = 0
@@ -31,6 +32,7 @@ var player_gold       := { "player1": 25, "player2": 25 }
 const BASE_INCOME    : int = 25
 const SPECIAL_INCOME : int = 10
 const MINER_BONUS    : int = 15
+const TANK_BONUS     : int = 13
 
 @export var structure_positions = [Vector2i(5, 2),
 					Vector2i(12, 2),
@@ -226,7 +228,13 @@ func _process_ranged():
 				if is_instance_valid(target):
 					var damaged_penalty = (100 - unit.curr_health) * 0.005
 					var ranged_str = unit.ranged_strength * damaged_penalty
-					var def_str = target.melee_strength
+					var def_str
+					if target.is_tank and target.is_defending:
+						def_str = target.melee_strength + TANK_BONUS
+					else:
+						def_str = target.melee_strength
+					damaged_penalty = (100 - target.curr_health) * 0.005
+					def_str *= damaged_penalty
 					var dmg = 30 * exp((ranged_str-def_str)/25 * rng.randf_range(0.75,1.25))
 					ranged_dmg[order["target_unit_net_id"]] = ranged_dmg.get(order["target_unit_net_id"], 0) + dmg
 				player_orders[player].erase(unit.net_id)
@@ -270,7 +278,12 @@ func _process_melee():
 		var target = unit_manager.get_unit_by_net_id(target_unit_net_id)
 		var def_penalty = target.multi_def_penalty * (melee_attacks[target.net_id].size() -1)
 		var def_damaged_penalty = (100 - target.curr_health) * 0.005
-		var def_str = (target.melee_strength - def_penalty) * def_damaged_penalty
+		var def_str
+		if target.is_tank and target.is_defending:
+			def_str = target.melee_strength + TANK_BONUS
+		else:
+			def_str = target.melee_strength
+		def_str = (def_str - def_penalty) * def_damaged_penalty
 		melee_attacks[target.net_id].sort_custom(func(a,b): return a[1] < b[1])
 		for attack in melee_attacks[target.net_id]:
 			var attacker = unit_manager.get_unit_by_net_id(attack[0])
@@ -349,7 +362,10 @@ func _process_move():
 					var atkr_damaged_penalty = (100 - curr_unit.curr_health) * 0.005
 					var atkr_melee_str = curr_unit.melee_strength * (1- atkr_damaged_penalty)
 					var defr_damaged_penalty = (100 - obstacle.curr_health) * 0.005
-					var defr_melee_str = obstacle.melee_strength * (1- defr_damaged_penalty)
+					var defr_melee_str = obstacle.melee_strength
+					if obstacle.is_defending and obstacle.is_tank:
+						defr_melee_str += TANK_BONUS
+					defr_melee_str = defr_melee_str * (1- defr_damaged_penalty)
 					var atkr_dmg = 30 * exp((defr_melee_str - atkr_melee_str)/25 * rng.randf_range(0.75,1.25))
 					var defr_dmg = 30 * exp((atkr_melee_str - defr_melee_str)/25 * rng.randf_range(0.75,1.25))
 					obstacle.curr_health -= defr_dmg
@@ -426,10 +442,20 @@ func _process_move():
 				var first_p1 = p1_units[0][0]
 				var first_p2 = p2_units[0][0]
 				# first priority units of each player fight each other
-				var p1_damaged_penalty = (100 - first_p1.curr_health) * 0.005
-				var p1_melee_str = first_p1.melee_strength * (1 - p1_damaged_penalty)
-				var p2_damaged_penalty = (100 - first_p2.curr_health) * 0.005
-				var p2_melee_str = first_p2.melee_strength * (1- p2_damaged_penalty)
+				var p1_damaged_penalty
+				var p1_melee_str = first_p1.melee_strength
+				if (_is_p1_occupied and first_p1.is_defending) or not _is_p1_occupied:
+					if first_p1.is_defending and first_p1.is_tank:
+						p1_melee_str += TANK_BONUS
+					p1_damaged_penalty = (100 - first_p1.curr_health) * 0.005
+					p1_melee_str = p1_melee_str * (1 - p1_damaged_penalty)
+				var p2_damaged_penalty
+				var p2_melee_str = first_p2.melee_strength
+				if (_is_p2_occupied and first_p2.is_defending) or not _is_p2_occupied:
+					if first_p2.is_defending and first_p2.is_tank:
+						p2_melee_str += TANK_BONUS
+					p2_damaged_penalty = (100 - first_p2.curr_health) * 0.005
+					p2_melee_str = p2_melee_str * (1 - p2_damaged_penalty)
 				var p1_dmg = 30 * exp((p2_melee_str - first_p1.melee_strength)/25 * rng.randf_range(0.75,1.25))
 				var p2_dmg = 30 * exp((p1_melee_str - first_p2.melee_strength)/25 * rng.randf_range(0.75,1.25))
 				first_p1.curr_health -= p1_dmg
@@ -579,6 +605,8 @@ func buy_unit(player: String, unit_type: String, grid_pos: Vector2i) -> bool:
 		scene = scout_scene
 	elif unit_type.to_lower() == "miner":
 		scene = miner_scene
+	elif unit_type.to_lower() == "tank":
+		scene = tank_scene
 	else:
 		push_error("Unknown unit type '%s'" % unit_type)
 		return false

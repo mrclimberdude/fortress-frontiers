@@ -1,0 +1,31 @@
+[gd_scene load_steps=5 format=3 uid="uid://y3gcjhi3ho0o"]
+
+[ext_resource type="PackedScene" uid="uid://c62dn8sldq572" path="res://scenes/Unit.tscn" id="1_cpxye"]
+[ext_resource type="Texture2D" uid="uid://dj7l5khu6nin6" path="res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Objects Light/HSI_icon_183l.png" id="2_cpxye"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_tqf8n"]
+bg_color = Color(0.988235, 0.227451, 0.152941, 0.603922)
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_qtvpb"]
+bg_color = Color(0, 0.843137, 0.0941176, 0.92549)
+
+[node name="Tank" instance=ExtResource("1_cpxye")]
+cost = 100
+melee_strength = 5
+move_range = 1
+multi_def_penalty = 0
+is_tank = true
+
+[node name="Sprite2D" parent="." index="0"]
+texture = ExtResource("2_cpxye")
+
+[node name="HealthBar" type="ProgressBar" parent="." index="1"]
+offset_left = 34.0
+offset_top = -53.0
+offset_right = 73.0
+offset_bottom = 42.0
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+theme_override_styles/background = SubResource("StyleBoxFlat_tqf8n")
+theme_override_styles/fill = SubResource("StyleBoxFlat_qtvpb")
+step = 1.0
+fill_mode = 3
