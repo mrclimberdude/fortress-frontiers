@@ -499,7 +499,7 @@ func _unhandled_input(ev):
 		action_mode = ""
 		return
 	
-	if turn_mgr.current_phase == $"..".Phase.ORDERS:
+	if turn_mgr.current_phase == turn_mgr.Phase.ORDERS:
 		# Unit selection in orders phase
 		var unit = game_board.get_unit_at(cell)
 		if unit:
