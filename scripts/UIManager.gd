@@ -6,6 +6,7 @@ extends CanvasLayer
 @export var turn_manager_path: NodePath
 @export var map_node_path:     NodePath
 @export var unit_manager_path: NodePath
+@export var dev_mode_toggle_path: NodePath
 
 # runtime state
 var current_player : String = ""
@@ -28,6 +29,7 @@ var _current_exec_step_idx: int = 0
 @onready var phase_label   : Label       = exec_panel.get_node("PhaseLabel")
 @onready var next_button   : Button      = exec_panel.get_node("NextButton")
 @onready var unit_mgr = get_node(unit_manager_path) as Node
+@onready var dev_mode_toggle = get_node(dev_mode_toggle_path) as CheckButton
 
 const ArrowScene = preload("res://scenes/Arrow.tscn")
 const AttackArrowScene = preload("res://scenes/AttackArrow.tscn")
@@ -49,6 +51,10 @@ func _ready():
 					Callable(self, "_on_host_pressed"))
 	$JoinButton.connect("pressed",
 					Callable(self, "_on_join_pressed"))
+	
+	dev_mode_toggle.connect("toggled",
+					Callable(self, "_on_dev_mode_toggled"))
+	
 	# connect using Callable(self, "method_name")
 	turn_mgr.connect("orders_phase_begin",
 					Callable(self, "_on_orders_phase_begin"))
@@ -107,22 +113,41 @@ func _on_orders_phase_end() -> void:
 func _on_archer_pressed():
 	placing_unit = "archer"
 	gold_lbl.text = "Click map to place Archer\nGold: %d" % turn_mgr.player_gold[current_player]
+	_find_placeable()
 
 func _on_soldier_pressed():
 	placing_unit = "soldier"
 	gold_lbl.text = "Click map to place Soldier\nGold: %d" % turn_mgr.player_gold[current_player]
+	_find_placeable()
 
 func _on_scout_pressed():
 	placing_unit = "scout"
 	gold_lbl.text = "Click map to place Scout\nGold: %d" % turn_mgr.player_gold[current_player]
+	_find_placeable()
+
+func _find_placeable():
+	var base = game_board.get_unit_at(turn_mgr.base_positions[current_player])
+	if dev_mode_toggle.button_pressed:
+		action_mode = "dev_place"
+	else:
+		action_mode = "place"
+	var result = game_board.get_reachable_tiles(base.grid_pos, 1, action_mode)
+	var tiles = result["tiles"].slice(1)
+	game_board.show_highlights(tiles)
+	current_reachable = result
+
+func _on_dev_mode_toggled(pressed:bool):
+	print("Dev Mode → ", pressed)
 
 func _on_host_pressed():
-	NetworkManager.host_game(7777)
+	var port = $"PortLineEdit".text.strip_edges()
+	NetworkManager.host_game(int(port))
 	turn_mgr.local_player_id = "player1"
 	$HostButton.visible = false
 	$JoinButton.visible = false
 	$IPLineEdit.visible = false
 	$PortLineEdit.visible = false
+	dev_mode_toggle.visible = false
 
 func _on_join_pressed():
 	var ip = $"IPLineEdit".text.strip_edges()
@@ -134,6 +159,7 @@ func _on_join_pressed():
 	$JoinButton.visible = false
 	$IPLineEdit.visible = false
 	$PortLineEdit.visible = false
+	dev_mode_toggle.visible = false
 
 func _on_unit_selected(unit: Node) -> void:
 	game_board.clear_highlights()
@@ -442,14 +468,14 @@ func _unhandled_input(ev):
 
 	if placing_unit != "":
 		# Placement logic
-		if game_board.is_occupied(cell):
-			gold_lbl.text = "Cannot place on occupied tile"
-			return
-		if turn_mgr.buy_unit(turn_mgr.local_player_id, placing_unit, cell):
-			gold_lbl.text = "%s Gold: %d" % [current_player, turn_mgr.player_gold[current_player]]
-			placing_unit = ""
+		if cell in current_reachable["tiles"]:
+			if turn_mgr.buy_unit(turn_mgr.local_player_id, placing_unit, cell):
+				gold_lbl.text = "%s Gold: %d" % [current_player, turn_mgr.player_gold[current_player]]
+				placing_unit = ""
+			else:
+				gold_lbl.text = "[Not enough gold]\nGold: %d" % turn_mgr.player_gold[current_player]
 		else:
-			gold_lbl.text = "[Not enough gold]\nGold: %d" % turn_mgr.player_gold[current_player]
+			gold_lbl.text = "[Can't place there]\nGold: %d" % turn_mgr.player_gold[current_player]
 		return
 	
 	# Order phase: if waiting for destination (move mode)

@@ -57,7 +57,9 @@ func get_reachable_tiles(start: Vector2i, range: int, mode: String) -> Dictionar
 	var prev: Dictionary = {}
 	var visited: Dictionary = {}
 	var queue: Array = []
-
+	
+	if mode == "dev_place":
+		return {"tiles": hex_map.used_cells, "prev": start}
 	# Initialize BFS
 	visited[start] = 0
 	queue.append(start)
@@ -75,6 +77,9 @@ func get_reachable_tiles(start: Vector2i, range: int, mode: String) -> Dictionar
 					continue
 				if visited.has(neighbor):
 					continue
+				if mode == "place":
+					if is_occupied(neighbor):
+						continue
 				# Mark and enqueue
 				visited[neighbor] = dist + 1
 				prev[neighbor] = current
