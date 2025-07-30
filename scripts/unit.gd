@@ -11,6 +11,7 @@ extends Node2D
 @export var ranged_strength: int = 0
 @export var move_range:      int = 2
 @export var ranged_range:    int = 0
+@export var sight_range:     int = 2
 @export var max_health:      int = 100
 @export var curr_health:     int = 100
 @export var regen:           int = 10
