@@ -48,6 +48,7 @@ func is_cell_valid(cell: Vector2i) -> bool:
 func set_player_tile(pos: Vector2i, pid: String) -> void:
 	var src = tile_set.get_source_id(0)
 	var tint
+	structure_tiles = $"../..".structure_positions
 	if pos in structure_tiles:
 		tint = structure_atlas_tiles.get(pid, ground_tile)
 	else:

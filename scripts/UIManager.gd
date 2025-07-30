@@ -551,6 +551,8 @@ func _unhandled_input(ev):
 			if unit.player_id == current_player:
 				if unit.is_base:
 					return
+				if unit.is_tower:
+					return
 				if unit.just_purchased and not unit.first_turn_move:
 					return
 				_on_unit_selected(unit)

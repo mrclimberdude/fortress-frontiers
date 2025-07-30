@@ -26,6 +26,7 @@ extends Node2D
 @export var can_melee:       bool = true
 @export var is_miner:        bool = false
 @export var is_tank:         bool = false
+@export var is_tower:        bool = false
 
 # -- grid positioning and reference to the TileMapLayer
 var grid_pos: Vector2i

@@ -16,6 +16,12 @@ func occupy(tile: Vector2i, unit: Node) -> void:
 
 func vacate(tile: Vector2i) -> void:
 	occupied_tiles.erase(tile)
+	for player in ["player1", "player2"]:
+		if tile in $"..".tower_positions[player]:
+			$"..".tower_positions[player].erase(tile)
+			$"..".structure_positions.erase(tile)
+		if tile in $"..".base_positions:
+			$"..".end_game()
 
 func is_occupied(tile: Vector2i) -> bool:
 	return occupied_tiles.has(tile)
@@ -57,34 +63,42 @@ func get_reachable_tiles(start: Vector2i, range: int, mode: String) -> Dictionar
 	var prev: Dictionary = {}
 	var visited: Dictionary = {}
 	var queue: Array = []
+	var spawns = [start]
 	
 	if mode == "dev_place":
 		return {"tiles": hex_map.used_cells, "prev": start}
-	# Initialize BFS
-	visited[start] = 0
-	queue.append(start)
+	
+	if mode == "place":
+		var player = get_unit_at(start).player_id
+		for tile in $"..".tower_positions[player]:
+			spawns.append(tile)
+	
+	for spawn in spawns:
+		# Initialize BFS
+		visited[spawn] = 0
+		queue.append(spawn)
+		
+		while queue.size() > 0:
+			var current: Vector2i = queue.pop_front()
+			var dist: int = visited[current]
+			reachable.append(current)
 
-	while queue.size() > 0:
-		var current: Vector2i = queue.pop_front()
-		var dist: int = visited[current]
-		reachable.append(current)
-
-		# Expand neighbors if under move range
-		if dist < range:
-			for neighbor in get_offset_neighbors(current):
-				# Bounds check
-				if not hex_map.is_cell_valid(neighbor):
-					continue
-				if visited.has(neighbor):
-					continue
-				if mode == "place":
-					if is_occupied(neighbor):
+			# Expand neighbors if under move range
+			if dist < range:
+				for neighbor in get_offset_neighbors(current):
+					# Bounds check
+					if not hex_map.is_cell_valid(neighbor):
 						continue
-				# Mark and enqueue
-				visited[neighbor] = dist + 1
-				prev[neighbor] = current
-				queue.append(neighbor)
-
+					if visited.has(neighbor):
+						continue
+					if mode == "place":
+						if is_occupied(neighbor):
+							continue
+					# Mark and enqueue
+					visited[neighbor] = dist + 1
+					prev[neighbor] = current
+					queue.append(neighbor)
+	
 	# Return both the reachable set and the back-pointer map
 	return {"tiles": reachable, "prev": prev}
 

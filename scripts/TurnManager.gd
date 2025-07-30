@@ -28,8 +28,9 @@ var exec_steps: Array     = []
 var step_index: int       = 0
 
 # --- Economy State ---
-var player_gold       := { "player1": 25, "player2": 25 }
-const BASE_INCOME    : int = 25
+var player_gold       := { "player1": 0, "player2": 0 }
+const BASE_INCOME    : int = 10
+const TOWER_INCOME   : int = 5
 const SPECIAL_INCOME : int = 10
 const MINER_BONUS    : int = 15
 const TANK_BONUS     : int = 13
@@ -46,6 +47,15 @@ const TANK_BONUS     : int = 13
 var base_positions := {
 	"player1": Vector2i(-1, 7),
 	"player2": Vector2i(17, 7)
+}
+
+var tower_positions := {
+	"player1": [Vector2i(1,4),
+				Vector2i(2,7),
+				Vector2i(1,10)],
+	"player2": [Vector2i(16,4),
+				Vector2i(14,7),
+				Vector2i(16,10)]
 }
 var special_tiles := {
 	"unclaimed": [Vector2i(5, 2),
@@ -73,9 +83,16 @@ func _ready():
 	NetworkManager.turn_mgr = $"."
 	unit_manager.spawn_unit("base", base_positions["player1"], "player1")
 	unit_manager.spawn_unit("base", base_positions["player2"], "player2")
+	for player in tower_positions.keys():
+		for tile in tower_positions[player]:
+			structure_positions.append(tile)
+			unit_manager.spawn_unit("tower", tile, player)
 
 func start_game() -> void:
 	call_deferred("_game_loop")
+
+func end_game():
+	print("the game has ended")
 
 # --------------------------------------------------------
 # Main loop: Upkeep → Orders → Execution → increment → loop
@@ -105,6 +122,8 @@ func _do_upkeep() -> void:
 		var income = 0
 		if _controls_tile(player, base_positions[player]):
 			income += BASE_INCOME
+		for tower in tower_positions[player]:
+			income += TOWER_INCOME
 		for pos in special_tiles[player]:
 			if _controls_tile(player, pos):
 				if $GameBoardNode.is_occupied(pos):
@@ -247,8 +266,9 @@ func _process_ranged():
 		if target.curr_health <= 0:
 			for player in ["player1", "player2"]:
 				player_orders[player].erase(target_net_id)
-			$GameBoardNode/HexTileMap.set_player_tile(target.grid_pos, "")
 			$GameBoardNode.vacate(target.grid_pos)
+			$GameBoardNode/HexTileMap.set_player_tile(target.grid_pos, "")
+			
 			target.queue_free()
 		else:
 			target.set_health_bar()
@@ -303,8 +323,9 @@ func _process_melee():
 		if target.curr_health <= 0:
 			for player in ["player1", "player2"]:
 				player_orders[player].erase(target.net_id)
-			$GameBoardNode/HexTileMap.set_player_tile(target.grid_pos, "")
 			$GameBoardNode.vacate(target.grid_pos)
+			$GameBoardNode/HexTileMap.set_player_tile(target.grid_pos, "")
+			
 			if target_unit_net_id in melee_attacks.keys():
 				melee_attacks[target].sort_custom(func(a,b): return a[1] < b[1])
 				melee_attacks[target][0][0].set_grid_position(target.grid_pos)
@@ -379,15 +400,17 @@ func _process_move():
 						player_orders[obstacle.player_id].erase(obstacle.net_id)
 					if obstacle.curr_health <= 0:
 						player_orders[obstacle.player_id].erase(obstacle.net_id)
-						$GameBoardNode/HexTileMap.set_player_tile(obstacle.grid_pos, "")
 						$GameBoardNode.vacate(obstacle.grid_pos)
+						$GameBoardNode/HexTileMap.set_player_tile(obstacle.grid_pos, "")
+						
 						obstacle.queue_free()
 						if curr_unit.curr_health > 0:
 							curr_unit.set_grid_position(tile)
 					player_orders[curr_unit.player_id].erase(curr_unit.net_id)
 					if curr_unit.curr_health <= 0:
-						$GameBoardNode/HexTileMap.set_player_tile(curr_unit.grid_pos, "")
 						$GameBoardNode.vacate(curr_unit.grid_pos)
+						$GameBoardNode/HexTileMap.set_player_tile(curr_unit.grid_pos, "")
+						
 						if obstacle.moving_to == curr_unit.grid_pos:
 							obstacle.set_grid_position(curr_unit.grid_pos)
 							player_orders[obstacle.player_id].erase(obstacle.net_id)
@@ -430,12 +453,14 @@ func _process_move():
 				
 				# all of one players entering units have acted or died
 				if p1_units.size() == 0:
-					p2_units[0][0].set_grid_position(tile)
+					if not _is_p2_occupied:
+						p2_units[0][0].set_grid_position(tile)
 					for unit in p2_units:
 						player_orders["player2"].erase(unit[0].net_id)
 					break
 				if p2_units.size() == 0:
-					p1_units[0][0].set_grid_position(tile)
+					if not _is_p1_occupied:
+						p1_units[0][0].set_grid_position(tile)
 					for unit in p1_units:
 						player_orders["player1"].erase(unit[0].net_id)
 					break
@@ -458,10 +483,12 @@ func _process_move():
 					p2_melee_str = p2_melee_str * (1 - p2_damaged_penalty)
 				var p1_dmg = 30 * exp((p2_melee_str - first_p1.melee_strength)/25 * rng.randf_range(0.75,1.25))
 				var p2_dmg = 30 * exp((p1_melee_str - first_p2.melee_strength)/25 * rng.randf_range(0.75,1.25))
-				first_p1.curr_health -= p1_dmg
-				first_p1.set_health_bar()
-				first_p2.curr_health -= p2_dmg
-				first_p2.set_health_bar()
+				if (_is_p2_occupied and first_p2.is_defending) or not _is_p2_occupied:
+					first_p1.curr_health -= p1_dmg
+					first_p1.set_health_bar()
+				if (_is_p1_occupied and first_p1.is_defending) or not _is_p1_occupied:
+					first_p2.curr_health -= p2_dmg
+					first_p2.set_health_bar()
 				
 				# dead unit handling
 				# both dead
@@ -472,10 +499,10 @@ func _process_move():
 						_is_p2_occupied = false
 					player_orders["player1"].erase(first_p1.net_id)
 					player_orders["player2"].erase(first_p2.net_id)
-					$GameBoardNode/HexTileMap.set_player_tile(first_p1.grid_pos, "")
-					$GameBoardNode/HexTileMap.set_player_tile(first_p2.grid_pos, "")
 					$GameBoardNode.vacate(first_p1.grid_pos)
 					$GameBoardNode.vacate(first_p2.grid_pos)
+					$GameBoardNode/HexTileMap.set_player_tile(first_p1.grid_pos, "")
+					$GameBoardNode/HexTileMap.set_player_tile(first_p2.grid_pos, "")
 					first_p1.queue_free()
 					first_p2.queue_free()
 					p1_units.pop_front()
@@ -487,8 +514,8 @@ func _process_move():
 						if _is_p1_occupied:
 							_is_p1_occupied = false
 						player_orders["player1"].erase(first_p1.net_id)
-						$GameBoardNode/HexTileMap.set_player_tile(first_p1.grid_pos, "")
 						$GameBoardNode.vacate(first_p1.grid_pos)
+						$GameBoardNode/HexTileMap.set_player_tile(first_p1.grid_pos, "")
 						first_p1.queue_free()
 						p1_units.pop_front()
 						if p1_units.size() == 0:
@@ -507,8 +534,8 @@ func _process_move():
 						if _is_p2_occupied:
 							_is_p2_occupied = false
 						player_orders["player2"].erase(first_p2.net_id)
-						$GameBoardNode/HexTileMap.set_player_tile(first_p2.grid_pos, "")
 						$GameBoardNode.vacate(first_p2.grid_pos)
+						$GameBoardNode/HexTileMap.set_player_tile(first_p2.grid_pos, "")
 						first_p2.queue_free()
 						p2_units.pop_front()
 						if p2_units.size() == 0:

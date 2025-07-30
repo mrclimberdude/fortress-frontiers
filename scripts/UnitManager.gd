@@ -3,11 +3,13 @@ extends Node2D
 
 # preload your two unit scenes
 @export var base_scene: PackedScene    = preload("res://scenes/Base.tscn")
+@export var tower_scene: PackedScene = preload("res://scenes/Tower.tscn")
 @export var archer_scene: PackedScene  = preload("res://scenes/Archer.tscn")
 @export var soldier_scene: PackedScene = preload("res://scenes/Soldier.tscn")
 @export var scout_scene: PackedScene = preload("res://scenes/Scout.tscn")
 @export var miner_scene: PackedScene = preload("res://scenes/Miner.tscn")
 @export var tank_scene: PackedScene = preload("res://scenes/Tank.tscn")
+
 
 @export var tile_size: Vector2 = Vector2(170, 192)   # width, height of one hex
 
@@ -32,6 +34,8 @@ func spawn_unit(unit_type: String, cell: Vector2i, owner: String) -> Node2D:
 	match unit_type.to_lower():
 		"base":
 			scene = base_scene
+		"tower":
+			scene = tower_scene
 		"archer":
 			scene = archer_scene
 		"soldier":
