@@ -1,4 +1,4 @@
-[gd_scene load_steps=15 format=4 uid="uid://dnx0cxl4a46lg"]
+[gd_scene load_steps=16 format=4 uid="uid://dnx0cxl4a46lg"]
 
 [ext_resource type="Script" uid="uid://daaph63aiv3vd" path="res://scripts/TurnManager.gd" id="1_xh13x"]
 [ext_resource type="Texture2D" uid="uid://ciitwnd7hxyra" path="res://assets/spritesheet.png" id="2_17g6i"]
@@ -12,6 +12,7 @@
 [ext_resource type="Script" uid="uid://cpvudcuvy1hxc" path="res://scripts/UIManager.gd" id="6_qxawf"]
 [ext_resource type="PackedScene" uid="uid://y3gcjhi3ho0o" path="res://scenes/Tank.tscn" id="6_w5uqb"]
 [ext_resource type="Script" uid="uid://srlpr2fln13a" path="res://scripts/camera.gd" id="7_rs5it"]
+[ext_resource type="Script" uid="uid://cvqvvdw265adw" path="res://scripts/fog.gd" id="10_sax53"]
 
 [sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_17g6i"]
 texture = ExtResource("2_17g6i")
@@ -22,7 +23,10 @@ texture_region_size = Vector2i(170, 192)
 1:0/0 = 0
 2:0/0 = 0
 3:0/0 = 0
+4:0/next_alternative_id = 3
 4:0/0 = 0
+4:0/1 = 1
+4:0/1/modulate = Color(1, 1, 1, 0.745098)
 0:1/0 = 0
 1:1/0 = 0
 2:1/0 = 0
@@ -75,6 +79,12 @@ script = ExtResource("3_xh13x")
 self_modulate = Color(1, 1, 1, 0.588235)
 tile_set = SubResource("TileSet_xh13x")
 script = ExtResource("3_xh13x")
+
+[node name="FogOfWar" type="TileMapLayer" parent="GameBoardNode"]
+top_level = true
+z_index = 100
+tile_set = SubResource("TileSet_xh13x")
+script = ExtResource("10_sax53")
 
 [node name="Units" type="Node2D" parent="GameBoardNode"]
 script = ExtResource("4_30eli")
