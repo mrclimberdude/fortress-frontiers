@@ -403,6 +403,7 @@ func _process_move():
 						curr_unit.curr_health -= atkr_dmg
 						curr_unit.set_health_bar()
 						player_orders[obstacle.player_id].erase(obstacle.net_id)
+						obstacle.is_moving = false
 					if obstacle.curr_health <= 0:
 						player_orders[obstacle.player_id].erase(obstacle.net_id)
 						$GameBoardNode.vacate(obstacle.grid_pos)
@@ -412,6 +413,7 @@ func _process_move():
 						if curr_unit.curr_health > 0:
 							curr_unit.set_grid_position(tile)
 					player_orders[curr_unit.player_id].erase(curr_unit.net_id)
+					curr_unit.is_moving = false
 					if curr_unit.curr_health <= 0:
 						$GameBoardNode.vacate(curr_unit.grid_pos)
 						$GameBoardNode/HexTileMap.set_player_tile(curr_unit.grid_pos, "")
@@ -419,14 +421,17 @@ func _process_move():
 						if obstacle.moving_to == curr_unit.grid_pos:
 							obstacle.set_grid_position(curr_unit.grid_pos)
 							player_orders[obstacle.player_id].erase(obstacle.net_id)
+							obstacle.is_moving = false
 						curr_unit.queue_free()
 					break
 				else:
 					player_orders[curr_unit.player_id].erase(curr_unit.net_id)
+					curr_unit.is_moving = false
 			else:
 				curr_unit.set_grid_position(tile)
 				if player_orders[curr_unit.player_id][curr_unit.net_id]["path"].size() <= 2:
 					player_orders[curr_unit.player_id].erase(curr_unit.net_id)
+					curr_unit.is_moving = false
 				else:
 					player_orders[curr_unit.player_id][curr_unit.net_id]["path"].pop_front()
 			
