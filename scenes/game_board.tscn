@@ -167,6 +167,9 @@ offset_bottom = 40.0
 [node name="GoldLabel" type="Label" parent="UI/Panel/VBoxContainer"]
 layout_mode = 2
 
+[node name="IncomeLabel" type="Label" parent="UI/Panel/VBoxContainer"]
+layout_mode = 2
+
 [node name="ScoutButton" type="Button" parent="UI/Panel/VBoxContainer"]
 layout_mode = 2
 

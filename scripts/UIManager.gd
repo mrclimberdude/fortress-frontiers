@@ -24,6 +24,7 @@ var _current_exec_step_idx: int = 0
 @onready var turn_mgr = get_node(turn_manager_path) as Node
 @onready var hex = $"../GameBoardNode/HexTileMap"
 @onready var gold_lbl = $Panel/VBoxContainer/GoldLabel as Label
+@onready var income_lbl = $Panel/VBoxContainer/IncomeLabel as Label
 @onready var game_board: Node = get_node("../GameBoardNode")
 @onready var action_menu: PopupMenu      = $Panel/ActionMenu as PopupMenu
 @onready var exec_panel: PanelContainer  = $ExecutionPanel
@@ -113,6 +114,7 @@ func _on_orders_phase_begin(player: String) -> void:
 	# show the UI and reset state
 	current_player = player
 	gold_lbl.text = "%s Gold: %d" % [current_player, turn_mgr.player_gold[current_player]]
+	income_lbl.text = "Income: %d" % turn_mgr.player_income[current_player]
 	placing_unit  = ""
 	$Panel.visible = true
 	allow_clicks = true

@@ -29,6 +29,7 @@ var step_index: int       = 0
 
 # --- Economy State ---
 var player_gold       := { "player1": 0, "player2": 0 }
+var player_income    := { "player1": 0, "player2": 0 }
 const BASE_INCOME    : int = 10
 const TOWER_INCOME   : int = 5
 const SPECIAL_INCOME : int = 10
@@ -132,6 +133,7 @@ func _do_upkeep() -> void:
 						income += MINER_BONUS
 				income += SPECIAL_INCOME
 		player_gold[player] += income
+		player_income[player] = income
 		print("%s income: %d  → total gold: %d" % [player.capitalize(), income, player_gold[player]])
 	
 	# reset orders and unit states
