@@ -9,7 +9,7 @@ bg_color = Color(0.988235, 0.227451, 0.152941, 0.603922)
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_qtvpb"]
 bg_color = Color(0, 0.843137, 0.0941176, 0.92549)
 
-[node name="Base" instance=ExtResource("1_kl3vk")]
+[node name="Tower" instance=ExtResource("1_kl3vk")]
 melee_strength = 10
 move_range = 0
 is_tower = true

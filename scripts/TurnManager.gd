@@ -87,6 +87,7 @@ func _ready():
 		for tile in tower_positions[player]:
 			structure_positions.append(tile)
 			unit_manager.spawn_unit("tower", tile, player)
+	$GameBoardNode/FogOfWar._update_fog()
 
 func start_game() -> void:
 	call_deferred("_game_loop")
@@ -135,6 +136,7 @@ func _do_upkeep() -> void:
 	
 	# reset orders and unit states
 	$UI._clear_all_drawings()
+	$GameBoardNode/FogOfWar._update_fog()
 	var all_units = $GameBoardNode.get_all_units()
 	for p in ["player1", "player2"]:
 		player_orders[p].clear()
@@ -229,6 +231,7 @@ func _process_spawns():
 				var unit = unit_manager.get_unit_by_net_id(unit_net_id)
 				unit.is_healing = true
 	$UI._draw_all()
+	$GameBoardNode/FogOfWar._update_fog()
 
 func _process_ranged():
 	var ranged_dmg: Dictionary = {}
@@ -273,6 +276,7 @@ func _process_ranged():
 		else:
 			target.set_health_bar()
 	$UI._draw_attacks()
+	$GameBoardNode/FogOfWar._update_fog()
 
 func _process_melee():
 	var melee_attacks: Dictionary = {} # key: target, value: array[[attacker, priority]]
@@ -335,6 +339,7 @@ func _process_melee():
 	$UI._draw_attacks()
 	$UI._draw_paths()
 	$UI._draw_supports()
+	$GameBoardNode/FogOfWar._update_fog()
 
 func _process_move():
 	var tiles_entering: Dictionary = {} # key: tile, value: [unit]
@@ -573,8 +578,10 @@ func _process_move():
 			if order["type"] == "move":
 				exec_steps.append(func(): _process_move())
 				$UI._draw_paths()
+				$GameBoardNode/FogOfWar._update_fog()
 				return
 	$UI._draw_paths()
+	$GameBoardNode/FogOfWar._update_fog()
 
 
 # --------------------------------------------------------
@@ -594,6 +601,7 @@ func _do_execution() -> void:
 	_run_next_step()
 
 func _run_next_step():
+	$GameBoardNode/FogOfWar._update_fog()
 	if step_index >= exec_steps.size():
 		emit_signal("execution_complete")
 		if get_tree().get_multiplayer().is_server():
@@ -652,6 +660,7 @@ func buy_unit(player: String, unit_type: String, grid_pos: Vector2i) -> bool:
 	# deduct gold & spawn
 	player_gold[player] -= cost
 	var unit = unit_manager.spawn_unit(unit_type, grid_pos, local_player_id)
+	$GameBoardNode/FogOfWar._update_fog()
 	add_order(local_player_id, {
 		"type": "spawn",
 		"unit_type": unit_type,

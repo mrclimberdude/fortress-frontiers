@@ -1,6 +1,8 @@
-[gd_scene load_steps=2 format=3 uid="uid://dnd6dmdcjjq3t"]
+[gd_scene load_steps=3 format=3 uid="uid://dnd6dmdcjjq3t"]
 
 [ext_resource type="Texture2D" uid="uid://b11uwxq7t7ncp" path="res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Crystals/HSI_icon_066.png" id="1_5xb6r"]
+[ext_resource type="Script" uid="uid://chy6an6ordyra" path="res://scripts/gem_mine.gd" id="2_cnklp"]
 
 [node name="Sprite2D" type="Sprite2D"]
 texture = ExtResource("1_5xb6r")
+script = ExtResource("2_cnklp")

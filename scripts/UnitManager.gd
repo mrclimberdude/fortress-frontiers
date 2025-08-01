@@ -71,6 +71,9 @@ func spawn_unit(unit_type: String, cell: Vector2i, owner: String) -> Node2D:
 	
 	unit_by_net_id[unit.net_id] = unit
 	
+	if unit_type == "base" or unit_type == "tower":
+		$"..".set_structure_at(cell, unit)
+	
 	print("Spawned %s for %s at %s" % [unit_type, owner, cell])
 	return unit
 
