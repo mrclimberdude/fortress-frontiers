@@ -12,7 +12,6 @@ bg_color = Color(0, 0.843137, 0.0941176, 0.92549)
 [node name="Miner" instance=ExtResource("1_lj6gh")]
 cost = 50
 regen = 15
-first_turn_move = true
 can_melee = false
 is_miner = true
 
