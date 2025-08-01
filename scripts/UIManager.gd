@@ -17,6 +17,7 @@ var enemy_tiles: Array = []
 var support_tiles = []
 var action_mode:       String   = ""     # "move", "ranged", "melee", "support", "hold"
 var move_priority: int = 0
+var allow_clicks: bool = true
 
 var _current_exec_step_idx: int = 0
 
@@ -114,6 +115,7 @@ func _on_orders_phase_begin(player: String) -> void:
 	gold_lbl.text = "%s Gold: %d" % [current_player, turn_mgr.player_gold[current_player]]
 	placing_unit  = ""
 	$Panel.visible = true
+	allow_clicks = true
 
 func _on_orders_phase_end() -> void:
 	game_board.clear_highlights()
@@ -292,6 +294,7 @@ func _on_done_pressed():
 	# prevent further clicks
 	placing_unit = ""
 	move_priority = 0
+	allow_clicks = false
 
 func _on_execution_paused(phase_idx):
 	_current_exec_step_idx = phase_idx
@@ -482,7 +485,8 @@ func _draw_all():
 func _unhandled_input(ev):
 	if not (ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT):
 		return
-	
+	if not allow_clicks:
+		return
 	game_board.clear_highlights()
 	var world_pos = get_viewport().get_camera_2d().get_global_mouse_position()
 	var cell = hex.world_to_map(world_pos)
