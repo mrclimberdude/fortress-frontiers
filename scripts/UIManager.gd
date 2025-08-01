@@ -104,6 +104,8 @@ func _ready():
 		var mine = MineScene.instantiate() as Sprite2D
 		mine.position = hex.map_to_world(tile) + hex.tile_size * 0.5
 		mine.z_index = 0
+		mine.grid_pos = tile
+		$"../GameBoardNode".set_structure_at(tile, mine)
 		root.add_child(mine)
 
 func _on_orders_phase_begin(player: String) -> void:

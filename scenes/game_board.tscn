@@ -26,7 +26,7 @@ texture_region_size = Vector2i(170, 192)
 4:0/next_alternative_id = 3
 4:0/0 = 0
 4:0/1 = 1
-4:0/1/modulate = Color(1, 1, 1, 0.745098)
+4:0/1/modulate = Color(1, 1, 1, 0.392157)
 0:1/0 = 0
 1:1/0 = 0
 2:1/0 = 0
@@ -80,15 +80,20 @@ self_modulate = Color(1, 1, 1, 0.588235)
 tile_set = SubResource("TileSet_xh13x")
 script = ExtResource("3_xh13x")
 
+[node name="Units" type="Node2D" parent="GameBoardNode"]
+script = ExtResource("4_30eli")
+turn_manager_path = NodePath("../..")
+
+[node name="ExploredFog" type="TileMapLayer" parent="GameBoardNode"]
+top_level = true
+z_index = 98
+tile_set = SubResource("TileSet_xh13x")
+
 [node name="FogOfWar" type="TileMapLayer" parent="GameBoardNode"]
 top_level = true
 z_index = 100
 tile_set = SubResource("TileSet_xh13x")
 script = ExtResource("10_sax53")
-
-[node name="Units" type="Node2D" parent="GameBoardNode"]
-script = ExtResource("4_30eli")
-turn_manager_path = NodePath("../..")
 
 [node name="GameCamera" type="Camera2D" parent="."]
 position = Vector2(1641, 1073)

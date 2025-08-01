@@ -6,6 +6,7 @@ extends Node2D
 
 # Maps a Vector2i tile coordinate → the Unit node standing there
 var occupied_tiles: Dictionary = {}
+var structure_tiles: Dictionary = {}
 
 func _ready() -> void:
 	pass
@@ -29,6 +30,12 @@ func is_occupied(tile: Vector2i) -> bool:
 func get_unit_at(tile: Vector2i) -> Node:
 	return occupied_tiles.get(tile, null)
 
+func set_structure_at(tile: Vector2i, structure: Node):
+	structure_tiles[tile] = structure
+
+func get_structure_at(tile: Vector2i):
+	return structure_tiles[tile]
+
 func get_all_units():
 	var units: Dictionary = {"player1": [], "player2": []}
 	for unit in occupied_tiles.values():
@@ -37,6 +44,12 @@ func get_all_units():
 		else:
 			units["player2"].append(unit)
 	return units
+
+func get_all_structures():
+	var structures = []
+	for structure in structure_tiles.values():
+		structures.append(structure)
+	return structures
 # ────────────────────────────────────────────────────────────────────────────────
 
 # ─── Hex neighbor & reachability ───────────────────────────────────────────────
