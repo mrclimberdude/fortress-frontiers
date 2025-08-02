@@ -33,6 +33,7 @@ var _current_exec_step_idx: int = 0
 @onready var next_button   : Button      = exec_panel.get_node("NextButton")
 @onready var cancel_done_button = $CancelDoneButton as Button
 @onready var dev_mode_toggle = get_node(dev_mode_toggle_path) as CheckButton
+@onready var dev_panel = $DevPanel
 
 const ArrowScene = preload("res://scenes/Arrow.tscn")
 const AttackArrowScene = preload("res://scenes/AttackArrow.tscn")
@@ -57,10 +58,15 @@ func _ready():
 	$JoinButton.connect("pressed",
 					Callable(self, "_on_join_pressed"))
 	
+	# dev mode connections
 	dev_mode_toggle.connect("toggled",
 					Callable(self, "_on_dev_mode_toggled"))
+	$DevPanel/VBoxContainer/FogCheckButton.connect("toggled",
+					 Callable(self, "_on_fog_toggled"))
+	$DevPanel/VBoxContainer/GiveIncomeButton.connect("pressed",
+					 Callable(self, "_on_give_income_pressed"))
 	
-	# connect using Callable(self, "method_name")
+	# turn flow connections
 	turn_mgr.connect("orders_phase_begin",
 					Callable(self, "_on_orders_phase_begin"))
 	turn_mgr.connect("orders_phase_end",
@@ -71,7 +77,8 @@ func _ready():
 					Callable(self, "_on_execution_complete"))
 	next_button.connect("pressed",
 					Callable(self, "_on_next_pressed"))
-
+	
+	# order button connections
 	$Panel/VBoxContainer/ArcherButton.connect("pressed",
 					 Callable(self, "_on_archer_pressed"))
 	$Panel/VBoxContainer/SoldierButton.connect("pressed",
@@ -87,6 +94,7 @@ func _ready():
 	$CancelDoneButton.connect("pressed",
 					 Callable(self, "_on_cancel_pressed"))
 	
+	# setting gold labels for units
 	var temp = ArcherScene.instantiate()
 	$Panel/VBoxContainer/ArcherButton.text = "Buy Archer (%dg)" % temp.cost
 	temp = SoldierScene.instantiate()
@@ -99,9 +107,11 @@ func _ready():
 	$Panel/VBoxContainer/TankButton.text = "Buy Tank (%dg)" % temp.cost
 	temp.free()
 	
+	# unit order menu
 	action_menu.connect("id_pressed", Callable(self, "_on_action_selected"))
 	action_menu.hide()
 	
+	# spawn mines
 	var structures_node = hex.get_node("Structures")
 	for tile in turn_mgr.special_tiles["unclaimed"]:
 		var root = Node2D.new()
@@ -166,6 +176,25 @@ func _find_placeable():
 
 func _on_dev_mode_toggled(pressed:bool):
 	print("Dev Mode → ", pressed)
+	if pressed:
+		dev_panel.visible = true
+	else:
+		dev_panel.visible = false
+
+func _on_fog_toggled(pressed:bool):
+	print("Fog of War -> ", pressed)
+	if pressed:
+		$"../GameBoardNode/FogOfWar".visible = true
+		$"../GameBoardNode/ExploredFog".visible = true
+	else:
+		$"../GameBoardNode/FogOfWar".visible = false
+		$"../GameBoardNode/ExploredFog".visible = false
+
+func _on_give_income_pressed():
+	for player in ["player1", "player2"]:
+		turn_mgr.player_gold[player] += turn_mgr.player_income[player]
+	gold_lbl.text = "%s Gold: %d" % [current_player, turn_mgr.player_gold[current_player]]
+	
 
 func _on_host_pressed():
 	var port = $"PortLineEdit".text.strip_edges()

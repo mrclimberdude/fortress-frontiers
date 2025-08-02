@@ -73,3 +73,7 @@ func _update_fog():
 						structure.z_index = 0
 					if $"..".is_occupied(cell):
 						$"..".get_unit_at(cell).visible = true
+	for player in ["player1", "player2"]:
+		if not $"../../UI/DevPanel/VBoxContainer/FogCheckButton".button_pressed:
+			for unit in units[player]:
+				unit.visible = true
