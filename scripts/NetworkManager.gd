@@ -9,14 +9,17 @@ var player_orders := {"player1": {}, "player2": {}}  # map player_id → orders 
 
 var server_peer_id: int
 var client_peer_id: int
+var mp
+
 
 var _step_ready_counts := {}
 
 signal orders_ready(all_orders: Dictionary)
+signal orders_cancelled(player_id: String)
 
 func _ready() -> void:
 	print("NetworkManager _ready() fired")
-	var mp = get_tree().get_multiplayer()
+	mp = get_tree().get_multiplayer()
 	mp.connect("peer_connected", Callable(self, "_on_peer_connected"))
 	mp.connect("peer_disconnected", Callable(self, "_on_peer_disconnected"))
 	if mp.is_server():
@@ -37,7 +40,7 @@ func join_game(ip: String, port: int) -> void:
 	print("Joining game at %s:%d" % [ip, port])
 
 func _on_peer_connected(id: int) -> void:
-	var mp = get_tree().get_multiplayer()
+	mp = get_tree().get_multiplayer()
 	set_gold()
 	if mp.is_server():
 		# Host sees a new client
@@ -136,6 +139,28 @@ func rpc_orders_ready(all_orders: Dictionary) -> void:
 	player_orders = all_orders
 	print("[NM] rpc_orders_ready received with keys:", all_orders.keys())
 	emit_signal("orders_ready", all_orders)
+
+func cancel_orders(player_id: String):
+	if not mp.is_server():
+		rpc_id(1, "rpc_cancel_orders", player_id)
+	else:
+		rpc_cancel_orders(player_id)
+
+@rpc("any_peer", "call_local")
+func rpc_cancel_orders(player_id: String):
+	var mp := get_tree().get_multiplayer()
+	if not mp.is_server():
+		return
+	print("[NetworkManager] Player ", player_id, " cancelled their orders.")
+	if _orders_submitted[player_id]:
+		_orders_submitted[player_id] = false
+		rpc("rpc_orders_cancelled", player_id)
+
+@rpc("any_peer", "call_local")
+func rpc_orders_cancelled(player_id: String):
+	print("[NetworkManager] Received cancellation from ", player_id)
+	_orders_submitted[player_id] = false
+	orders_cancelled.emit(player_id)
 
 # Helper to translate a peer ID into your player‐ID string
 func _peer_id_to_player_id(peer_id: int) -> String:

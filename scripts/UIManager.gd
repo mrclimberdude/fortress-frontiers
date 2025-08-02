@@ -22,15 +22,16 @@ var allow_clicks: bool = true
 var _current_exec_step_idx: int = 0
 
 @onready var turn_mgr = get_node(turn_manager_path) as Node
+@onready var unit_mgr = get_node(unit_manager_path) as Node
+@onready var game_board: Node = get_node("../GameBoardNode")
 @onready var hex = $"../GameBoardNode/HexTileMap"
 @onready var gold_lbl = $Panel/VBoxContainer/GoldLabel as Label
 @onready var income_lbl = $Panel/VBoxContainer/IncomeLabel as Label
-@onready var game_board: Node = get_node("../GameBoardNode")
 @onready var action_menu: PopupMenu      = $Panel/ActionMenu as PopupMenu
 @onready var exec_panel: PanelContainer  = $ExecutionPanel
 @onready var phase_label   : Label       = exec_panel.get_node("PhaseLabel")
 @onready var next_button   : Button      = exec_panel.get_node("NextButton")
-@onready var unit_mgr = get_node(unit_manager_path) as Node
+@onready var cancel_done_button = $CancelDoneButton as Button
 @onready var dev_mode_toggle = get_node(dev_mode_toggle_path) as CheckButton
 
 const ArrowScene = preload("res://scenes/Arrow.tscn")
@@ -83,6 +84,8 @@ func _ready():
 					 Callable(self, "_on_tank_pressed"))
 	$Panel/VBoxContainer/DoneButton.connect("pressed",
 					 Callable(self, "_on_done_pressed"))
+	$CancelDoneButton.connect("pressed",
+					 Callable(self, "_on_cancel_pressed"))
 	
 	var temp = ArcherScene.instantiate()
 	$Panel/VBoxContainer/ArcherButton.text = "Buy Archer (%dg)" % temp.cost
@@ -118,10 +121,12 @@ func _on_orders_phase_begin(player: String) -> void:
 	placing_unit  = ""
 	$Panel.visible = true
 	allow_clicks = true
+	move_priority = 0
 
 func _on_orders_phase_end() -> void:
 	game_board.clear_highlights()
 	$Panel.visible = false
+	cancel_done_button.visible = false
 
 func _on_archer_pressed():
 	placing_unit = "archer"
@@ -289,14 +294,21 @@ func _clear_all_drawings():
 
 func _on_done_pressed():
 	game_board.clear_highlights()
-	_clear_all_drawings()
+	#_clear_all_drawings()
 	$Panel.visible = false
+	cancel_done_button.visible = true
 	var my_orders = turn_mgr.get_all_orders(current_player)
 	NetworkManager.submit_orders(current_player, my_orders)
 	# prevent further clicks
 	placing_unit = ""
-	move_priority = 0
 	allow_clicks = false
+
+func _on_cancel_pressed():
+	NetworkManager.cancel_orders(current_player)
+	_draw_all()
+	allow_clicks = true
+	$Panel.visible = true
+	cancel_done_button.visible = false
 
 func _on_execution_paused(phase_idx):
 	_current_exec_step_idx = phase_idx

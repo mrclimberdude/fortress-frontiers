@@ -443,6 +443,7 @@ func _process_move():
 					curr_unit.is_moving = false
 				else:
 					player_orders[curr_unit.player_id][curr_unit.net_id]["path"].pop_front()
+					curr_unit.moving_to = player_orders[curr_unit.player_id][curr_unit.net_id]["path"][1]
 			
 		
 		# conflict handling
@@ -616,7 +617,7 @@ func _process_move():
 func _do_execution() -> void:
 	current_phase = Phase.EXECUTION
 	print("Executing orders...")
-
+	$UI/CancelDoneButton.visible = false
 	exec_steps = [
 		func(): _process_spawns(),
 		func(): _process_ranged(),
