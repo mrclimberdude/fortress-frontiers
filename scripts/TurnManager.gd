@@ -616,7 +616,7 @@ func _process_move():
 func _do_execution() -> void:
 	current_phase = Phase.EXECUTION
 	print("Executing orders...")
-
+	$UI/CancelDoneButton.visible = false
 	exec_steps = [
 		func(): _process_spawns(),
 		func(): _process_ranged(),
