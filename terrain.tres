@@ -1,0 +1,33 @@
+[gd_resource type="TileSet" load_steps=7 format=3 uid="uid://vpqqir5dxo6"]
+
+[ext_resource type="Texture2D" uid="uid://bpva5jepboiki" path="res://assets/terrain/forest.png" id="1_76y57"]
+[ext_resource type="Texture2D" uid="uid://btoevs0pefav" path="res://assets/terrain/mountains.png" id="2_o5fmc"]
+[ext_resource type="Texture2D" uid="uid://cdkxqhrtvv5d8" path="res://assets/terrain/river.png" id="3_0nxkq"]
+
+[sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_cg5es"]
+texture = ExtResource("1_76y57")
+margins = Vector2i(21, 6)
+separation = Vector2i(42, 21)
+texture_region_size = Vector2i(170, 192)
+0:0/0 = 0
+
+[sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_hlu1x"]
+texture = ExtResource("2_o5fmc")
+margins = Vector2i(21, 6)
+separation = Vector2i(42, 21)
+texture_region_size = Vector2i(170, 192)
+0:0/0 = 0
+
+[sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_c8yqh"]
+texture = ExtResource("3_0nxkq")
+margins = Vector2i(21, 6)
+separation = Vector2i(42, 21)
+texture_region_size = Vector2i(170, 192)
+0:0/0 = 0
+
+[resource]
+tile_shape = 3
+tile_size = Vector2i(170, 192)
+sources/1 = SubResource("TileSetAtlasSource_cg5es")
+sources/2 = SubResource("TileSetAtlasSource_hlu1x")
+sources/3 = SubResource("TileSetAtlasSource_c8yqh")

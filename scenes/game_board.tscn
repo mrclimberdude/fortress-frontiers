@@ -1,4 +1,4 @@
-[gd_scene load_steps=16 format=4 uid="uid://dnx0cxl4a46lg"]
+[gd_scene load_steps=17 format=4 uid="uid://dnx0cxl4a46lg"]
 
 [ext_resource type="Script" uid="uid://daaph63aiv3vd" path="res://scripts/TurnManager.gd" id="1_xh13x"]
 [ext_resource type="Texture2D" uid="uid://ciitwnd7hxyra" path="res://assets/spritesheet.png" id="2_17g6i"]
@@ -12,6 +12,7 @@
 [ext_resource type="Script" uid="uid://cpvudcuvy1hxc" path="res://scripts/UIManager.gd" id="6_qxawf"]
 [ext_resource type="PackedScene" uid="uid://y3gcjhi3ho0o" path="res://scenes/Tank.tscn" id="6_w5uqb"]
 [ext_resource type="Script" uid="uid://srlpr2fln13a" path="res://scripts/camera.gd" id="7_rs5it"]
+[ext_resource type="TileSet" uid="uid://vpqqir5dxo6" path="res://terrain.tres" id="10_axant"]
 [ext_resource type="Script" uid="uid://cvqvvdw265adw" path="res://scripts/fog.gd" id="10_sax53"]
 
 [sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_17g6i"]
@@ -74,6 +75,10 @@ script = ExtResource("3_xh13x")
 [node name="DefendingSprites" type="Node2D" parent="GameBoardNode/HexTileMap"]
 
 [node name="Structures" type="Node2D" parent="GameBoardNode/HexTileMap"]
+
+[node name="TerrainMap" type="TileMapLayer" parent="GameBoardNode"]
+self_modulate = Color(1, 1, 1, 0.588235)
+tile_set = ExtResource("10_axant")
 
 [node name="HighlightMap" type="TileMapLayer" parent="GameBoardNode"]
 self_modulate = Color(1, 1, 1, 0.588235)
