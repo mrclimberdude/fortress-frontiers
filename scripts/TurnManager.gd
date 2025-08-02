@@ -443,6 +443,7 @@ func _process_move():
 					curr_unit.is_moving = false
 				else:
 					player_orders[curr_unit.player_id][curr_unit.net_id]["path"].pop_front()
+					curr_unit.moving_to = player_orders[curr_unit.player_id][curr_unit.net_id]["path"][1]
 			
 		
 		# conflict handling
