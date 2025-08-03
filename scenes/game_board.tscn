@@ -123,10 +123,10 @@ unit_manager_path = NodePath("../GameBoardNode/Units")
 dev_mode_toggle_path = NodePath("DevModeCheckButton")
 
 [node name="DevModeCheckButton" type="CheckButton" parent="UI"]
-offset_left = 1.0
-offset_top = 479.0
-offset_right = 132.0
-offset_bottom = 528.0
+offset_left = 814.0
+offset_top = 1.0
+offset_right = 945.0
+offset_bottom = 50.0
 text = "Dev Mode"
 
 [node name="HostButton" type="Button" parent="UI"]
@@ -135,10 +135,10 @@ anchor_left = 0.227
 anchor_top = 0.544
 anchor_right = 0.84
 anchor_bottom = 0.659
-offset_left = -257.504
-offset_top = 176.488
-offset_right = -821.68
-offset_bottom = 162.968
+offset_left = -259.504
+offset_top = 167.488
+offset_right = -823.68
+offset_bottom = 153.968
 text = "Host Game
 "
 
@@ -149,30 +149,30 @@ anchor_top = 0.782
 anchor_right = 0.824
 anchor_bottom = 0.907
 offset_left = -275.784
-offset_top = 86.264
+offset_top = 78.264
 offset_right = -805.248
-offset_bottom = 64.264
+offset_bottom = 56.264
 text = "Join Game"
 
 [node name="IPLineEdit" type="LineEdit" parent="UI"]
 offset_left = 147.0
-offset_top = 603.0
+offset_top = 596.0
 offset_right = 354.0
-offset_bottom = 642.0
+offset_bottom = 635.0
 placeholder_text = "Enter Host IP"
 
 [node name="PortLineEdit" type="LineEdit" parent="UI"]
-offset_left = 148.0
-offset_top = 545.0
-offset_right = 321.0
-offset_bottom = 585.0
+offset_left = 149.0
+offset_top = 531.0
+offset_right = 322.0
+offset_bottom = 571.0
 placeholder_text = "Enter Host Port"
 
 [node name="Panel" type="Panel" parent="UI"]
 visible = false
 custom_minimum_size = Vector2(200, 200)
-offset_right = 213.0
-offset_bottom = 204.0
+offset_right = 206.0
+offset_bottom = 261.0
 
 [node name="VBoxContainer" type="VBoxContainer" parent="UI/Panel"]
 layout_mode = 0
@@ -187,9 +187,11 @@ layout_mode = 2
 
 [node name="ScoutButton" type="Button" parent="UI/Panel/VBoxContainer"]
 layout_mode = 2
+text = "Buy Scout"
 
 [node name="MinerButton" type="Button" parent="UI/Panel/VBoxContainer"]
 layout_mode = 2
+text = "Buy Miner"
 
 [node name="SoldierButton" type="Button" parent="UI/Panel/VBoxContainer"]
 custom_minimum_size = Vector2(200, 30)
@@ -204,7 +206,7 @@ text = "Buy Archer (5g)"
 [node name="PhalanxButton" type="Button" parent="UI/Panel/VBoxContainer"]
 custom_minimum_size = Vector2(200, 30)
 layout_mode = 2
-text = "Buy Archer (5g)"
+text = "Buy Phalanx (5g)"
 
 [node name="DoneButton" type="Button" parent="UI/Panel/VBoxContainer"]
 custom_minimum_size = Vector2(200, 30)
@@ -259,3 +261,29 @@ text = "Fog of war"
 [node name="GiveIncomeButton" type="Button" parent="UI/DevPanel/VBoxContainer"]
 layout_mode = 2
 text = "Gold += Income"
+
+[node name="DamagePanel" type="Panel" parent="UI"]
+visible = false
+offset_left = 1.0
+offset_top = 281.0
+offset_right = 325.0
+offset_bottom = 643.0
+
+[node name="Label" type="Label" parent="UI/DamagePanel"]
+layout_mode = 0
+offset_left = 5.0
+offset_right = 233.0
+offset_bottom = 26.0
+text = "Damage Report"
+
+[node name="ScrollContainer" type="ScrollContainer" parent="UI/DamagePanel"]
+layout_mode = 0
+offset_left = 2.0
+offset_top = 24.0
+offset_right = 320.0
+offset_bottom = 323.0
+
+[node name="VBoxContainer" type="VBoxContainer" parent="UI/DamagePanel/ScrollContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3

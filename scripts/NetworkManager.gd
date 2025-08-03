@@ -123,10 +123,7 @@ func _buffer_orders(player_id:String, orders:Array) -> void:
 			return
 	_orders_submitted[player_id] = true
 	for order in orders:
-		if order["type"] == "spawn":
-			player_orders[player_id][order["cell"]] = order
-		else:
-			player_orders[player_id][order["unit_net_id"]] = order
+		player_orders[player_id][order["unit_net_id"]] = order
 
 	# once both are in, multicast and signal
 	if _orders_submitted["player1"] and _orders_submitted["player2"]:

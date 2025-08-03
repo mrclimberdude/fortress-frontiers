@@ -28,8 +28,14 @@ func _ready():
 	print("UnitManager: hex_map =", hex_map, "script=", hex_map.get_script())
 
 # spawns a unit by type ("archer" or "soldier") at grid_pos for owner
-func spawn_unit(unit_type: String, cell: Vector2i, owner: String) -> Node2D:
+func spawn_unit(unit_type: String, cell: Vector2i, owner: String, undo: bool) -> Node2D:
 	# 1) Pick the right scene with a match statement
+	if undo:
+		if owner == "player1":
+			_next_net_id_odd += 2
+		else:
+			_next_net_id_even +=2
+		return
 	var scene: PackedScene
 	match unit_type.to_lower():
 		"base":
@@ -68,6 +74,7 @@ func spawn_unit(unit_type: String, cell: Vector2i, owner: String) -> Node2D:
 		_next_net_id_even +=2
 		var net_id_label = unit.get_node("NetIDLabel")
 		net_id_label.text = str(unit.net_id)
+	unit.unit_type = unit_type
 	add_child(unit)
 
 	# 3) Place it using your TileMapLayer’s map_to_world

@@ -13,6 +13,7 @@ enum Phase { UPKEEP, ORDERS, EXECUTION }
 # --- Exports & References for Unit Spawning ---
 @export var unit_manager_path: NodePath
 @onready var unit_manager = get_node(unit_manager_path) as Node
+@onready var dmg_report = $UI/DamagePanel/ScrollContainer/VBoxContainer
 
 @export var archer_scene:  PackedScene
 @export var soldier_scene: PackedScene
@@ -82,12 +83,12 @@ var rng: RandomNumberGenerator = RandomNumberGenerator.new()
 func _ready():
 	NetworkManager.hex = $GameBoardNode/HexTileMap
 	NetworkManager.turn_mgr = $"."
-	unit_manager.spawn_unit("base", base_positions["player1"], "player1")
-	unit_manager.spawn_unit("base", base_positions["player2"], "player2")
+	unit_manager.spawn_unit("base", base_positions["player1"], "player1", false)
+	unit_manager.spawn_unit("base", base_positions["player2"], "player2", false)
 	for player in tower_positions.keys():
 		for tile in tower_positions[player]:
 			structure_positions.append(tile)
-			unit_manager.spawn_unit("tower", tile, player)
+			unit_manager.spawn_unit("tower", tile, player, false)
 	$GameBoardNode/FogOfWar._update_fog()
 
 func start_game() -> void:
@@ -146,11 +147,14 @@ func _do_upkeep() -> void:
 		for unit in all_units[p]:
 			unit.is_defending = false
 			unit.just_purchased = false
+			unit.ordered = false
 			if unit.is_healing:
 				unit.curr_health += unit.regen
 				unit.set_health_bar()
 				unit.is_healing = false
 	$GameBoardNode/FogOfWar._update_fog()
+	$UI/DamagePanel.visible = true
+	$GameBoardNode/OrderReminderMap.highlight_unordered_units(local_player_id)
 # --------------------------------------------------------
 # Phase 2: Orders — async per-player input
 # --------------------------------------------------------
@@ -168,10 +172,7 @@ func _do_orders() -> void:
 # Called by UIManager to add orders
 func add_order(player: String, order: Dictionary) -> void:
 	# Order is a dictionary with keys: "unit", "type", and "path"
-	if order["type"] == "spawn":
-		player_orders[player][order["cell"]] = order
-	else:
-		player_orders[player][order["unit_net_id"]] = order
+	player_orders[player][order["unit_net_id"]] = order
 
 func get_order(player:String, unit_net_id:int) -> Dictionary:
 	return player_orders[player].get(unit_net_id,{})
@@ -209,11 +210,15 @@ func submit_player_order(player: String) -> void:
 		emit_signal("orders_phase_end")
 
 func _process_spawns():
+	var spawn_orders = []
 	for player_id in NetworkManager.player_orders.keys():
 		for order in NetworkManager.player_orders[player_id].values():
 			if order["type"] == "spawn":
-				if order["owner_id"] != local_player_id:
-					unit_manager.spawn_unit(order["unit_type"], order["cell"], order["owner_id"])
+				spawn_orders.append(order)
+	spawn_orders.sort_custom(func(order1, order2): order1["unit_net_id"] < order2["unit_net_id"])
+	for order in spawn_orders:
+		if order["owner_id"] != local_player_id:
+			unit_manager.spawn_unit(order["unit_type"], order["cell"], order["owner_id"], order["undo"])
 	for player_id in NetworkManager.player_orders.keys():
 		for order in NetworkManager.player_orders[player_id].keys():
 			if NetworkManager.player_orders[player_id][order]["type"] == "spawn":
@@ -268,6 +273,10 @@ func _process_ranged():
 					def_str *= damaged_penalty
 					var dmg = 30 * exp((ranged_str-def_str)/25)
 					ranged_dmg[order["target_unit_net_id"]] = ranged_dmg.get(order["target_unit_net_id"], 0) + dmg
+					var report_label = Label.new()
+					if target.player_id == local_player_id:
+						report_label.text = "%s #%d took %d ranged damage from %s #%d" % [target.unit_type, target.net_id, dmg, unit.unit_type, unit.net_id]
+						dmg_report.add_child(report_label)
 				player_orders[player].erase(unit.net_id)
 	var target_ids = ranged_dmg.keys()
 	target_ids.sort()
@@ -278,6 +287,10 @@ func _process_ranged():
 		if target.curr_health <= 0:
 			for player in ["player1", "player2"]:
 				player_orders[player].erase(target_net_id)
+				if target.player_id == local_player_id:
+					var report_label = Label.new()
+					report_label.text = "%s #%d died at %s" % [target.unit_type, target.net_id, target.grid_pos]
+					dmg_report.add_child(report_label)
 			$GameBoardNode.vacate(target.grid_pos)
 			$GameBoardNode/HexTileMap.set_player_tile(target.grid_pos, "")
 			
@@ -324,9 +337,18 @@ func _process_melee():
 			var melee_str = attacker.melee_strength * damaged_penalty
 			var def_dmg = 30 * exp((melee_str-def_str)/25)
 			melee_dmg[target.net_id] = melee_dmg.get(target, 0) + def_dmg
+			var atk_dmg
 			if target.is_defending:
-				var atk_dmg = 30 * exp((melee_str-def_str)/25)
+				atk_dmg = 30 * exp((def_str-melee_str)/25)
 				melee_dmg[attacker.net_id] = melee_dmg.get(attacker, 0) + atk_dmg
+			if target.player_id == local_player_id:
+				var report_label = Label.new()
+				report_label.text = "%s #%d took %d melee damage from %s #%d" % [target.unit_type, target.net_id, def_dmg, attacker.unit_type, attacker.net_id]
+				dmg_report.add_child(report_label)
+				if target.is_defending:
+					report_label = Label.new()
+					report_label.text = "%s #%d retaliated and dealt %d damage" % [target.unit_type, target.net_id, atk_dmg]
+					dmg_report.add_child(report_label)
 	target_ids = melee_dmg.keys()
 	target_ids.sort()
 	for target_unit_net_id in target_ids:
@@ -336,6 +358,10 @@ func _process_melee():
 		if target.curr_health <= 0:
 			for player in ["player1", "player2"]:
 				player_orders[player].erase(target.net_id)
+			if target.player_id == local_player_id:
+				var report_label = Label.new()
+				report_label.text = "%s #%d died at %s" % [target.unit_type, target.net_id, target.grid_pos]
+				dmg_report.add_child(report_label)
 			$GameBoardNode.vacate(target.grid_pos)
 			$GameBoardNode/HexTileMap.set_player_tile(target.grid_pos, "")
 			
@@ -413,11 +439,22 @@ func _process_move():
 						curr_unit.set_health_bar()
 						player_orders[obstacle.player_id].erase(obstacle.net_id)
 						obstacle.is_moving = false
+					if obstacle.player_id == local_player_id:
+						var report_label = Label.new()
+						report_label.text = "%s #%d took %d melee damage from %s #%d" % [obstacle.unit_type, obstacle.net_id, defr_dmg, curr_unit.unit_type, curr_unit.net_id]
+						dmg_report.add_child(report_label)
+						if obstacle.is_defending or obstacle.moving_to == curr_unit.grid_pos:
+							report_label = Label.new()
+							report_label.text = "%s #%d retaliated and dealt %d damage" % [obstacle.unit_type, obstacle.net_id, atkr_dmg]
+							dmg_report.add_child(report_label)
 					if obstacle.curr_health <= 0:
 						player_orders[obstacle.player_id].erase(obstacle.net_id)
 						$GameBoardNode.vacate(obstacle.grid_pos)
 						$GameBoardNode/HexTileMap.set_player_tile(obstacle.grid_pos, "")
-						
+						if obstacle.player_id == local_player_id:
+							var report_label = Label.new()
+							report_label.text = "%s #%d died at %s" % [obstacle.unit_type, obstacle.net_id, obstacle.grid_pos]
+							dmg_report.add_child(report_label)
 						obstacle.queue_free()
 						if curr_unit.curr_health > 0:
 							curr_unit.set_grid_position(tile)
@@ -619,6 +656,8 @@ func _do_execution() -> void:
 	print("Executing orders...")
 	$UI/CancelDoneButton.visible = false
 	$GameBoardNode/OrderReminderMap.clear()
+	for child in dmg_report.get_children():
+		child.queue_free()
 	exec_steps = [
 		func(): _process_spawns(),
 		func(): _process_ranged(),
@@ -690,14 +729,15 @@ func buy_unit(player: String, unit_type: String, grid_pos: Vector2i) -> bool:
 
 	# deduct gold & spawn
 	player_gold[player] -= cost
-	var unit = unit_manager.spawn_unit(unit_type, grid_pos, local_player_id)
+	var unit = unit_manager.spawn_unit(unit_type, grid_pos, local_player_id, false)
 	$GameBoardNode/FogOfWar._update_fog()
 	add_order(local_player_id, {
 		"type": "spawn",
 		"unit_type": unit_type,
 		"unit_net_id": unit.net_id,
 		"cell": grid_pos,
-		"owner_id": local_player_id
+		"owner_id": local_player_id,
+		"undo": false
 	})
 	print("%s bought a %s at %s for %d gold" % [player, unit_type, grid_pos, cost])
 	return true

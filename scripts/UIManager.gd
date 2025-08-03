@@ -247,8 +247,8 @@ func _on_action_selected(id: int) -> void:
 		0:
 			turn_mgr.player_gold[currently_selected_unit.player_id] += currently_selected_unit.cost
 			gold_lbl.text = "%s Gold: %d" % [current_player, turn_mgr.player_gold[current_player]]
-			turn_mgr.player_orders[currently_selected_unit.player_id].erase(currently_selected_unit.net_id)
-			turn_mgr.player_orders[currently_selected_unit.player_id].erase(currently_selected_unit.grid_pos)
+			turn_mgr.player_orders[currently_selected_unit.player_id][currently_selected_unit.net_id]["undo"] = true
+			$"../GameBoardNode/Units".unit_by_net_id.erase(currently_selected_unit.net_id)
 			$"../GameBoardNode".vacate(currently_selected_unit.grid_pos)
 			$"../GameBoardNode/HexTileMap".set_player_tile(currently_selected_unit.grid_pos, "")
 			currently_selected_unit.ordered = true
