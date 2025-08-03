@@ -16,15 +16,18 @@ extends Node2D
 @export var curr_health:     int = 100
 @export var regen:           int = 10
 @export var multi_def_penalty:int = 2
+@export var can_melee:       bool = true
 
+@export var ordered:         bool = false
 @export var is_defending:    bool = false
 @export var is_healing:      bool = false
 @export var is_moving:       bool = false
 @export var moving_to:       Vector2i
-@export var is_base:         bool = false
+
 @export var just_purchased:  bool = true
 @export var first_turn_move: bool = false
-@export var can_melee:       bool = true
+
+@export var is_base:         bool = false
 @export var is_miner:        bool = false
 @export var is_tank:         bool = false
 @export var is_tower:        bool = false

@@ -266,7 +266,7 @@ func _process_ranged():
 						def_str = target.melee_strength
 					damaged_penalty = (100 - target.curr_health) * 0.005
 					def_str *= damaged_penalty
-					var dmg = 30 * exp((ranged_str-def_str)/25 * rng.randf_range(0.75,1.25))
+					var dmg = 30 * exp((ranged_str-def_str)/25)
 					ranged_dmg[order["target_unit_net_id"]] = ranged_dmg.get(order["target_unit_net_id"], 0) + dmg
 				player_orders[player].erase(unit.net_id)
 	var target_ids = ranged_dmg.keys()
@@ -322,10 +322,10 @@ func _process_melee():
 			var attacker = unit_manager.get_unit_by_net_id(attack[0])
 			var damaged_penalty = (100 - attacker.curr_health) * 0.005
 			var melee_str = attacker.melee_strength * damaged_penalty
-			var def_dmg = 30 * exp((melee_str-def_str)/25 * rng.randf_range(0.75,1.25))
+			var def_dmg = 30 * exp((melee_str-def_str)/25)
 			melee_dmg[target.net_id] = melee_dmg.get(target, 0) + def_dmg
 			if target.is_defending:
-				var atk_dmg = 30 * exp((melee_str-def_str)/25 * rng.randf_range(0.75,1.25))
+				var atk_dmg = 30 * exp((melee_str-def_str)/25)
 				melee_dmg[attacker.net_id] = melee_dmg.get(attacker, 0) + atk_dmg
 	target_ids = melee_dmg.keys()
 	target_ids.sort()
@@ -401,8 +401,8 @@ func _process_move():
 					if obstacle.is_defending and obstacle.is_tank:
 						defr_melee_str += TANK_BONUS
 					defr_melee_str = defr_melee_str * (1- defr_damaged_penalty)
-					var atkr_dmg = 30 * exp((defr_melee_str - atkr_melee_str)/25 * rng.randf_range(0.75,1.25))
-					var defr_dmg = 30 * exp((atkr_melee_str - defr_melee_str)/25 * rng.randf_range(0.75,1.25))
+					var atkr_dmg = 30 * exp((defr_melee_str - atkr_melee_str)/25)
+					var defr_dmg = 30 * exp((atkr_melee_str - defr_melee_str)/25)
 					obstacle.curr_health -= defr_dmg
 					obstacle.set_health_bar()
 					if obstacle.is_defending:
@@ -503,8 +503,8 @@ func _process_move():
 						p2_melee_str += TANK_BONUS
 					p2_damaged_penalty = (100 - first_p2.curr_health) * 0.005
 					p2_melee_str = p2_melee_str * (1 - p2_damaged_penalty)
-				var p1_dmg = 30 * exp((p2_melee_str - first_p1.melee_strength)/25 * rng.randf_range(0.75,1.25))
-				var p2_dmg = 30 * exp((p1_melee_str - first_p2.melee_strength)/25 * rng.randf_range(0.75,1.25))
+				var p1_dmg = 30 * exp((p2_melee_str - first_p1.melee_strength)/25)
+				var p2_dmg = 30 * exp((p1_melee_str - first_p2.melee_strength)/25)
 				if (_is_p2_occupied and first_p2.is_defending) or not _is_p2_occupied:
 					first_p1.curr_health -= p1_dmg
 					first_p1.set_health_bar()
@@ -618,6 +618,7 @@ func _do_execution() -> void:
 	current_phase = Phase.EXECUTION
 	print("Executing orders...")
 	$UI/CancelDoneButton.visible = false
+	$GameBoardNode/OrderReminderMap.clear()
 	exec_steps = [
 		func(): _process_spawns(),
 		func(): _process_ranged(),

@@ -135,6 +135,7 @@ func _on_orders_phase_begin(player: String) -> void:
 
 func _on_orders_phase_end() -> void:
 	game_board.clear_highlights()
+	$"../GameBoardNode/OrderReminderMap".clear()
 	$Panel.visible = false
 	cancel_done_button.visible = false
 
@@ -247,7 +248,7 @@ func _on_action_selected(id: int) -> void:
 			game_board.show_highlights(tiles)
 			current_reachable = result
 			print("Move selected for %s" % currently_selected_unit.name)
-
+		
 		1:
 			action_mode = "ranged"
 			var result = game_board.get_reachable_tiles(currently_selected_unit.grid_pos, currently_selected_unit.ranged_range, action_mode)
@@ -260,7 +261,7 @@ func _on_action_selected(id: int) -> void:
 						enemy_tiles.append(tile)
 			game_board.show_highlights(enemy_tiles)
 			print("Ranged Attack selected for %s" % currently_selected_unit.name)
-
+		
 		2:
 			action_mode = "melee"
 			var result = game_board.get_reachable_tiles(currently_selected_unit.grid_pos, 1, action_mode)
@@ -273,32 +274,17 @@ func _on_action_selected(id: int) -> void:
 						enemy_tiles.append(tile)
 			game_board.show_highlights(enemy_tiles)
 			print("Melee Attack selected for %s" % currently_selected_unit.name)
-
-		3:
-			action_mode = "support"
-			var result: Dictionary = {}
-			if currently_selected_unit.is_ranged:
-				result = game_board.get_reachable_tiles(currently_selected_unit.grid_pos, currently_selected_unit.ranged_range, action_mode)
-			else:
-				result = game_board.get_reachable_tiles(currently_selected_unit.grid_pos, 1, action_mode)
-			var tiles = result["tiles"]
-			support_tiles = []
-			var orders = turn_mgr.get_all_orders(current_player)
-			for order in orders:
-				if order["type"] == "move":
-					for tile in order["path"].slice(1):
-						if tile in tiles:
-							support_tiles.append(tile)
-			game_board.show_highlights(support_tiles)
-			print("Support selected for %s" % currently_selected_unit.name)
+		
 		4:
 			print("Heal selected for %s" % currently_selected_unit.name)
 			currently_selected_unit.is_healing = true
+			currently_selected_unit.ordered = true
 			turn_mgr.add_order(current_player, {
 				"unit_net_id": currently_selected_unit.net_id,
 				"type": "heal",
 			})
 			_draw_all()
+		
 		5:
 			print("Defend selected for %s" % currently_selected_unit.name)
 			turn_mgr.add_order(current_player, {
@@ -306,6 +292,7 @@ func _on_action_selected(id: int) -> void:
 				"type": "defend",
 			})
 			currently_selected_unit.is_defending = true
+			currently_selected_unit.ordered = true
 			_draw_all()
 	action_menu.hide()
 
@@ -540,6 +527,7 @@ func _unhandled_input(ev):
 			if turn_mgr.buy_unit(turn_mgr.local_player_id, placing_unit, cell):
 				gold_lbl.text = "%s Gold: %d" % [current_player, turn_mgr.player_gold[current_player]]
 				placing_unit = ""
+				$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
 			else:
 				gold_lbl.text = "[Not enough gold]\nGold: %d" % turn_mgr.player_gold[current_player]
 		else:
@@ -555,6 +543,8 @@ func _unhandled_input(ev):
 			move_priority += 1
 			currently_selected_unit.is_moving = true
 			currently_selected_unit.moving_to = path[1]
+			currently_selected_unit.ordered = true
+			$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
 			turn_mgr.add_order(current_player, {
 				"unit_net_id": currently_selected_unit.net_id,
 				"type": "move",
@@ -571,23 +561,14 @@ func _unhandled_input(ev):
 			if action_mode == "melee":
 				currently_selected_unit.is_moving = true
 				currently_selected_unit.moving_to = cell
+			currently_selected_unit.ordered = true
+			$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
 			turn_mgr.add_order(current_player, {
 				"unit_net_id": currently_selected_unit.net_id,
 				"type": action_mode,
 				"target_tile": cell,
 				"target_unit_net_id": game_board.get_unit_at(cell).net_id,
 				"priority": move_priority
-			})
-		_draw_all()
-		action_mode = ""
-		return
-	
-	if action_mode == "support" and currently_selected_unit:
-		if cell in support_tiles:
-			turn_mgr.add_order(current_player, {
-				"unit_net_id": currently_selected_unit.net_id,
-				"type": action_mode,
-				"target_tile": cell
 			})
 		_draw_all()
 		action_mode = ""

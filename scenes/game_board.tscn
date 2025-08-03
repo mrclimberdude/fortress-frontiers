@@ -1,4 +1,4 @@
-[gd_scene load_steps=17 format=4 uid="uid://dnx0cxl4a46lg"]
+[gd_scene load_steps=18 format=4 uid="uid://dnx0cxl4a46lg"]
 
 [ext_resource type="Script" uid="uid://daaph63aiv3vd" path="res://scripts/TurnManager.gd" id="1_xh13x"]
 [ext_resource type="Texture2D" uid="uid://ciitwnd7hxyra" path="res://assets/spritesheet.png" id="2_17g6i"]
@@ -14,6 +14,7 @@
 [ext_resource type="Script" uid="uid://srlpr2fln13a" path="res://scripts/camera.gd" id="7_rs5it"]
 [ext_resource type="TileSet" uid="uid://vpqqir5dxo6" path="res://terrain.tres" id="10_axant"]
 [ext_resource type="Script" uid="uid://cvqvvdw265adw" path="res://scripts/fog.gd" id="10_sax53"]
+[ext_resource type="Script" uid="uid://cojvvohyejpxa" path="res://scenes/order_reminder.gd" id="11_cac7a"]
 
 [sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_17g6i"]
 texture = ExtResource("2_17g6i")
@@ -29,8 +30,12 @@ texture_region_size = Vector2i(170, 192)
 4:0/1 = 1
 4:0/1/modulate = Color(1, 1, 1, 0.392157)
 0:1/0 = 0
+1:1/next_alternative_id = 2
 1:1/0 = 0
+1:1/1 = 1
+1:1/1/modulate = Color(1, 1, 1, 0.588235)
 2:1/0 = 0
+3:1/next_alternative_id = 2
 3:1/0 = 0
 4:1/0 = 0
 0:2/0 = 0
@@ -79,6 +84,11 @@ script = ExtResource("3_xh13x")
 [node name="TerrainMap" type="TileMapLayer" parent="GameBoardNode"]
 self_modulate = Color(1, 1, 1, 0.588235)
 tile_set = ExtResource("10_axant")
+
+[node name="OrderReminderMap" type="TileMapLayer" parent="GameBoardNode"]
+self_modulate = Color(1, 1, 1, 0.588235)
+tile_set = SubResource("TileSet_xh13x")
+script = ExtResource("11_cac7a")
 
 [node name="HighlightMap" type="TileMapLayer" parent="GameBoardNode"]
 self_modulate = Color(1, 1, 1, 0.588235)
