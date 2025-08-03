@@ -12,8 +12,9 @@ bg_color = Color(0, 0.843137, 0.0941176, 0.92549)
 [node name="Scout" instance=ExtResource("1_1i25t")]
 cost = 25
 melee_strength = 3
+move_range = 3
+sight_range = 3
 regen = 15
-first_turn_move = true
 
 [node name="Sprite2D" parent="." index="0"]
 texture = ExtResource("2_1i25t")

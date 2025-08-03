@@ -34,7 +34,11 @@ func _update_fog():
 				visiblity[player][cell] = 1
 		# set all cells within sight range of all of a players units to visible
 		for unit in units[player]:
-			var in_sight = $"..".get_reachable_tiles(unit.grid_pos, unit.sight_range, "visibility")
+			var in_sight
+			if unit.just_purchased and not unit.is_base and not unit.is_tower:
+				in_sight = $"..".get_reachable_tiles(unit.grid_pos, 0, "visibility")
+			else:
+				in_sight = $"..".get_reachable_tiles(unit.grid_pos, unit.sight_range, "visibility")
 			for cell in in_sight["tiles"]:
 				visiblity[player][cell] = 2
 		if player == $"../..".local_player_id:

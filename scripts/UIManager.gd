@@ -226,15 +226,18 @@ func _on_unit_selected(unit: Node) -> void:
 	currently_selected_unit = unit
 	# Show action selection menu
 	action_menu.clear()
-	action_menu.add_item("Move", 0)
-	if not unit.just_purchased:
-		if unit.is_ranged:
-			action_menu.add_item("Ranged Attack", 1)
-		if unit.can_melee:
-			action_menu.add_item("Melee Attack", 2)
-		#action_menu.add_item("Support", 3)
-		action_menu.add_item("Heal", 4)
-		action_menu.add_item("Defend", 5)
+	if unit.just_purchased:
+		action_menu.add_item("Undo Buy", 0)
+		if unit.first_turn_move:
+			action_menu.add_item("Move", 1)
+		return
+	action_menu.add_item("Move", 1)
+	if unit.is_ranged:
+		action_menu.add_item("Ranged Attack", 2)
+	if unit.can_melee:
+		action_menu.add_item("Melee Attack", 3)
+	action_menu.add_item("Heal", 4)
+	action_menu.add_item("Defend", 5)
 
 func _on_action_selected(id: int) -> void:
 	currently_selected_unit.is_defending = false
@@ -242,6 +245,16 @@ func _on_action_selected(id: int) -> void:
 	currently_selected_unit.is_moving = false
 	match id:
 		0:
+			turn_mgr.player_gold[currently_selected_unit.player_id] += currently_selected_unit.cost
+			gold_lbl.text = "%s Gold: %d" % [current_player, turn_mgr.player_gold[current_player]]
+			turn_mgr.player_orders[currently_selected_unit.player_id].erase(currently_selected_unit.net_id)
+			turn_mgr.player_orders[currently_selected_unit.player_id].erase(currently_selected_unit.grid_pos)
+			$"../GameBoardNode".vacate(currently_selected_unit.grid_pos)
+			$"../GameBoardNode/HexTileMap".set_player_tile(currently_selected_unit.grid_pos, "")
+			currently_selected_unit.ordered = true
+			currently_selected_unit.queue_free()
+			$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
+		1:
 			action_mode = "move"
 			var result = game_board.get_reachable_tiles(currently_selected_unit.grid_pos, currently_selected_unit.move_range, action_mode)
 			var tiles = result["tiles"].slice(1)
@@ -249,7 +262,7 @@ func _on_action_selected(id: int) -> void:
 			current_reachable = result
 			print("Move selected for %s" % currently_selected_unit.name)
 		
-		1:
+		2:
 			action_mode = "ranged"
 			var result = game_board.get_reachable_tiles(currently_selected_unit.grid_pos, currently_selected_unit.ranged_range, action_mode)
 			var tiles = result["tiles"]
@@ -262,7 +275,7 @@ func _on_action_selected(id: int) -> void:
 			game_board.show_highlights(enemy_tiles)
 			print("Ranged Attack selected for %s" % currently_selected_unit.name)
 		
-		2:
+		3:
 			action_mode = "melee"
 			var result = game_board.get_reachable_tiles(currently_selected_unit.grid_pos, 1, action_mode)
 			var tiles = result["tiles"]
@@ -582,8 +595,6 @@ func _unhandled_input(ev):
 				if unit.is_base:
 					return
 				if unit.is_tower:
-					return
-				if unit.just_purchased and not unit.first_turn_move:
 					return
 				_on_unit_selected(unit)
 				action_menu.set_position(ev.position)

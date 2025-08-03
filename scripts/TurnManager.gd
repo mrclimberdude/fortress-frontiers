@@ -150,7 +150,7 @@ func _do_upkeep() -> void:
 				unit.curr_health += unit.regen
 				unit.set_health_bar()
 				unit.is_healing = false
-	
+	$GameBoardNode/FogOfWar._update_fog()
 # --------------------------------------------------------
 # Phase 2: Orders — async per-player input
 # --------------------------------------------------------
