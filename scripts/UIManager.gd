@@ -45,7 +45,7 @@ const ArcherScene = preload("res://scenes/Archer.tscn")
 const SoldierScene = preload("res://scenes/Soldier.tscn")
 const ScoutScene = preload("res://scenes/Scout.tscn")
 const MinerScene = preload("res://scenes/Miner.tscn")
-const TankScene = preload("res://scenes/Tank.tscn")
+const PhalanxScene = preload("res://scenes/Tank.tscn")
 
 const MineScene = preload("res://scenes/GemMine.tscn")
 
@@ -87,7 +87,7 @@ func _ready():
 					 Callable(self, "_on_scout_pressed"))
 	$Panel/VBoxContainer/MinerButton.connect("pressed",
 					 Callable(self, "_on_miner_pressed"))
-	$Panel/VBoxContainer/TankButton.connect("pressed",
+	$Panel/VBoxContainer/PhalanxButton.connect("pressed",
 					 Callable(self, "_on_tank_pressed"))
 	$Panel/VBoxContainer/DoneButton.connect("pressed",
 					 Callable(self, "_on_done_pressed"))
@@ -103,8 +103,8 @@ func _ready():
 	$Panel/VBoxContainer/ScoutButton.text = "Buy Scout (%dg)" % temp.cost
 	temp = MinerScene.instantiate()
 	$Panel/VBoxContainer/MinerButton.text = "Buy Miner (%dg)" % temp.cost
-	temp = TankScene.instantiate()
-	$Panel/VBoxContainer/TankButton.text = "Buy Tank (%dg)" % temp.cost
+	temp = PhalanxScene.instantiate()
+	$Panel/VBoxContainer/PhalanxButton.text = "Buy Phalanx (%dg)" % temp.cost
 	temp.free()
 	
 	# unit order menu
@@ -160,8 +160,8 @@ func _on_miner_pressed():
 	_find_placeable()
 
 func _on_tank_pressed():
-	placing_unit = "tank"
-	gold_lbl.text = "Click map to place Tank\nGold: %d" % turn_mgr.player_gold[current_player]
+	placing_unit = "phalanx"
+	gold_lbl.text = "Click map to place Phalanx\nGold: %d" % turn_mgr.player_gold[current_player]
 	_find_placeable()
 
 func _find_placeable():

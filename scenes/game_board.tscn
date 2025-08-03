@@ -59,7 +59,7 @@ archer_scene = ExtResource("2_qkkkq")
 soldier_scene = ExtResource("2_i37i2")
 scout_scene = ExtResource("4_04ve2")
 miner_scene = ExtResource("5_c1to4")
-tank_scene = ExtResource("6_w5uqb")
+phalanx_scene = ExtResource("6_w5uqb")
 
 [node name="GameBoardNode" type="Node2D" parent="."]
 script = ExtResource("4_6lofv")
@@ -201,7 +201,7 @@ custom_minimum_size = Vector2(200, 30)
 layout_mode = 2
 text = "Buy Archer (5g)"
 
-[node name="TankButton" type="Button" parent="UI/Panel/VBoxContainer"]
+[node name="PhalanxButton" type="Button" parent="UI/Panel/VBoxContainer"]
 custom_minimum_size = Vector2(200, 30)
 layout_mode = 2
 text = "Buy Archer (5g)"

@@ -18,7 +18,7 @@ enum Phase { UPKEEP, ORDERS, EXECUTION }
 @export var soldier_scene: PackedScene
 @export var scout_scene: PackedScene
 @export var miner_scene: PackedScene
-@export var tank_scene: PackedScene
+@export var phalanx_scene: PackedScene
 
 # --- Turn & Phase State ---
 var turn_number:   int    = 0
@@ -34,7 +34,7 @@ const BASE_INCOME    : int = 10
 const TOWER_INCOME   : int = 5
 const SPECIAL_INCOME : int = 10
 const MINER_BONUS    : int = 15
-const TANK_BONUS     : int = 25
+const PHALANX_BONUS     : int = 25
 
 @export var structure_positions = [Vector2i(5, 2),
 					Vector2i(12, 2),
@@ -260,8 +260,8 @@ func _process_ranged():
 					var damaged_penalty = (100 - unit.curr_health) * 0.005
 					var ranged_str = unit.ranged_strength * damaged_penalty
 					var def_str
-					if target.is_tank and target.is_defending:
-						def_str = target.melee_strength + TANK_BONUS
+					if target.is_phalanx and target.is_defending:
+						def_str = target.melee_strength + PHALANX_BONUS
 					else:
 						def_str = target.melee_strength
 					damaged_penalty = (100 - target.curr_health) * 0.005
@@ -312,8 +312,8 @@ func _process_melee():
 		var def_penalty = target.multi_def_penalty * (melee_attacks[target.net_id].size() -1)
 		var def_damaged_penalty = (100 - target.curr_health) * 0.005
 		var def_str
-		if target.is_tank and target.is_defending:
-			def_str = target.melee_strength + TANK_BONUS
+		if target.is_phalanx and target.is_defending:
+			def_str = target.melee_strength + PHALANX_BONUS
 		else:
 			def_str = target.melee_strength
 		def_str = (def_str - def_penalty) * def_damaged_penalty
@@ -398,8 +398,8 @@ func _process_move():
 					var atkr_melee_str = curr_unit.melee_strength * (1- atkr_damaged_penalty)
 					var defr_damaged_penalty = (100 - obstacle.curr_health) * 0.005
 					var defr_melee_str = obstacle.melee_strength
-					if obstacle.is_defending and obstacle.is_tank:
-						defr_melee_str += TANK_BONUS
+					if obstacle.is_defending and obstacle.is_phalanx:
+						defr_melee_str += PHALANX_BONUS
 					defr_melee_str = defr_melee_str * (1- defr_damaged_penalty)
 					var atkr_dmg = 30 * exp((defr_melee_str - atkr_melee_str)/25)
 					var defr_dmg = 30 * exp((atkr_melee_str - defr_melee_str)/25)
@@ -492,15 +492,15 @@ func _process_move():
 				var p1_damaged_penalty
 				var p1_melee_str = first_p1.melee_strength
 				if (_is_p1_occupied and first_p1.is_defending) or not _is_p1_occupied:
-					if first_p1.is_defending and first_p1.is_tank:
-						p1_melee_str += TANK_BONUS
+					if first_p1.is_defending and first_p1.is_phalanx:
+						p1_melee_str += PHALANX_BONUS
 					p1_damaged_penalty = (100 - first_p1.curr_health) * 0.005
 					p1_melee_str = p1_melee_str * (1 - p1_damaged_penalty)
 				var p2_damaged_penalty
 				var p2_melee_str = first_p2.melee_strength
 				if (_is_p2_occupied and first_p2.is_defending) or not _is_p2_occupied:
-					if first_p2.is_defending and first_p2.is_tank:
-						p2_melee_str += TANK_BONUS
+					if first_p2.is_defending and first_p2.is_phalanx:
+						p2_melee_str += PHALANX_BONUS
 					p2_damaged_penalty = (100 - first_p2.curr_health) * 0.005
 					p2_melee_str = p2_melee_str * (1 - p2_damaged_penalty)
 				var p1_dmg = 30 * exp((p2_melee_str - first_p1.melee_strength)/25)
@@ -669,13 +669,15 @@ func buy_unit(player: String, unit_type: String, grid_pos: Vector2i) -> bool:
 		scene = scout_scene
 	elif unit_type.to_lower() == "miner":
 		scene = miner_scene
-	elif unit_type.to_lower() == "tank":
-		scene = tank_scene
+	elif unit_type.to_lower() == "phalanx":
+		scene = phalanx_scene
 	else:
 		push_error("Unknown unit type '%s'" % unit_type)
+		print("Unknown unit type '%s'" % unit_type)
 		return false
 	if scene == null:
 		push_error("Unit scene for '%s' not assigned in Inspector" % unit_type)
+		print("Unit scene for '%s' not assigned in Inspector" % unit_type)
 		return false
 
 	# check cost

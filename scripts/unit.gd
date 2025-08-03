@@ -29,7 +29,7 @@ extends Node2D
 
 @export var is_base:         bool = false
 @export var is_miner:        bool = false
-@export var is_tank:         bool = false
+@export var is_phalanx:      bool = false
 @export var is_tower:        bool = false
 
 # -- grid positioning and reference to the TileMapLayer
