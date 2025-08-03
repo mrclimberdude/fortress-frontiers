@@ -10,8 +10,8 @@ bg_color = Color(0.988235, 0.227451, 0.152941, 0.603922)
 bg_color = Color(0, 0.843137, 0.0941176, 0.92549)
 
 [node name="Soldier" instance=ExtResource("1_av0cm")]
-cost = 60
-melee_strength = 10
+cost = 85
+melee_strength = 20
 
 [node name="Sprite2D" parent="." index="0"]
 texture = ExtResource("2_qtvpb")

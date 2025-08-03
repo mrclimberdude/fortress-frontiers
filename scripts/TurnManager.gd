@@ -28,13 +28,13 @@ var exec_steps: Array     = []
 var step_index: int       = 0
 
 # --- Economy State ---
-var player_gold       := { "player1": 0, "player2": 0 }
+var player_gold       := { "player1": 25, "player2": 25 }
 var player_income    := { "player1": 0, "player2": 0 }
 const BASE_INCOME    : int = 10
 const TOWER_INCOME   : int = 5
 const SPECIAL_INCOME : int = 10
 const MINER_BONUS    : int = 15
-const TANK_BONUS     : int = 13
+const TANK_BONUS     : int = 25
 
 @export var structure_positions = [Vector2i(5, 2),
 					Vector2i(12, 2),

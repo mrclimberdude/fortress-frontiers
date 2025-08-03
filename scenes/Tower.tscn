@@ -10,7 +10,7 @@ bg_color = Color(0.988235, 0.227451, 0.152941, 0.603922)
 bg_color = Color(0, 0.843137, 0.0941176, 0.92549)
 
 [node name="Tower" instance=ExtResource("1_kl3vk")]
-melee_strength = 10
+melee_strength = 20
 move_range = 0
 is_tower = true
 

@@ -10,7 +10,7 @@ bg_color = Color(0.988235, 0.227451, 0.152941, 0.603922)
 bg_color = Color(0, 0.843137, 0.0941176, 0.92549)
 
 [node name="Miner" instance=ExtResource("1_lj6gh")]
-cost = 50
+cost = 75
 regen = 15
 is_miner = true
 
