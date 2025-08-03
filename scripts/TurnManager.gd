@@ -262,16 +262,16 @@ func _process_ranged():
 				var target = unit_manager.get_unit_by_net_id(order["target_unit_net_id"])
 				# check to make sure target unit still exists
 				if is_instance_valid(target):
-					var damaged_penalty = (100 - unit.curr_health) * 0.005
+					var damaged_penalty = 1 - ((100 - unit.curr_health) * 0.005)
 					var ranged_str = unit.ranged_strength * damaged_penalty
 					var def_str
 					if target.is_phalanx and target.is_defending:
 						def_str = target.melee_strength + PHALANX_BONUS
 					else:
 						def_str = target.melee_strength
-					damaged_penalty = (100 - target.curr_health) * 0.005
+					damaged_penalty = 1-((100 - target.curr_health) * 0.005)
 					def_str *= damaged_penalty
-					var dmg = 30 * exp((ranged_str-def_str)/25)
+					var dmg = 30 * (1.041**(ranged_str-def_str))
 					ranged_dmg[order["target_unit_net_id"]] = ranged_dmg.get(order["target_unit_net_id"], 0) + dmg
 					var report_label = Label.new()
 					if target.player_id == local_player_id:
@@ -323,7 +323,7 @@ func _process_melee():
 	for target_unit_net_id in target_ids:
 		var target = unit_manager.get_unit_by_net_id(target_unit_net_id)
 		var def_penalty = target.multi_def_penalty * (melee_attacks[target.net_id].size() -1)
-		var def_damaged_penalty = (100 - target.curr_health) * 0.005
+		var def_damaged_penalty = 1- ((100 - target.curr_health) * 0.005)
 		var def_str
 		if target.is_phalanx and target.is_defending:
 			def_str = target.melee_strength + PHALANX_BONUS
@@ -333,13 +333,13 @@ func _process_melee():
 		melee_attacks[target.net_id].sort_custom(func(a,b): return a[1] < b[1])
 		for attack in melee_attacks[target.net_id]:
 			var attacker = unit_manager.get_unit_by_net_id(attack[0])
-			var damaged_penalty = (100 - attacker.curr_health) * 0.005
+			var damaged_penalty = 1 - ((100 - attacker.curr_health) * 0.005)
 			var melee_str = attacker.melee_strength * damaged_penalty
-			var def_dmg = 30 * exp((melee_str-def_str)/25)
+			var def_dmg = 30 * (1.041**(melee_str-def_str))
 			melee_dmg[target.net_id] = melee_dmg.get(target, 0) + def_dmg
 			var atk_dmg
 			if target.is_defending:
-				atk_dmg = 30 * exp((def_str-melee_str)/25)
+				atk_dmg = 30 * (1.041**(def_str-melee_str))
 				melee_dmg[attacker.net_id] = melee_dmg.get(attacker, 0) + atk_dmg
 			if target.player_id == local_player_id:
 				var report_label = Label.new()
@@ -366,8 +366,9 @@ func _process_melee():
 			$GameBoardNode/HexTileMap.set_player_tile(target.grid_pos, "")
 			
 			if target_unit_net_id in melee_attacks.keys():
-				melee_attacks[target].sort_custom(func(a,b): return a[1] < b[1])
-				melee_attacks[target][0][0].set_grid_position(target.grid_pos)
+				melee_attacks[target.net_id].sort_custom(func(a,b): return a[1] < b[1])
+				unit_manager.get_unit_by_net_id(melee_attacks[target.net_id][0][0]).set_grid_position(target.grid_pos)
+				pass
 			target.queue_free()
 		else:
 			target.set_health_bar()
@@ -420,15 +421,15 @@ func _process_move():
 							units[i].set_grid_position(dependency_path[0][i+1])
 						break
 				if obstacle.player_id != curr_unit.player_id:
-					var atkr_damaged_penalty = (100 - curr_unit.curr_health) * 0.005
+					var atkr_damaged_penalty = 1- ((100 - curr_unit.curr_health) * 0.005)
 					var atkr_melee_str = curr_unit.melee_strength * (1- atkr_damaged_penalty)
-					var defr_damaged_penalty = (100 - obstacle.curr_health) * 0.005
+					var defr_damaged_penalty = 1- ((100 - obstacle.curr_health) * 0.005)
 					var defr_melee_str = obstacle.melee_strength
 					if obstacle.is_defending and obstacle.is_phalanx:
 						defr_melee_str += PHALANX_BONUS
-					defr_melee_str = defr_melee_str * (1- defr_damaged_penalty)
-					var atkr_dmg = 30 * exp((defr_melee_str - atkr_melee_str)/25)
-					var defr_dmg = 30 * exp((atkr_melee_str - defr_melee_str)/25)
+					defr_melee_str = defr_melee_str * defr_damaged_penalty
+					var atkr_dmg = 30 * (1.041**(defr_melee_str - atkr_melee_str))
+					var defr_dmg = 30 * (1.041**(atkr_melee_str - defr_melee_str))
 					obstacle.curr_health -= defr_dmg
 					obstacle.set_health_bar()
 					if obstacle.is_defending:
@@ -514,14 +515,14 @@ func _process_move():
 						p2_units[0][0].set_grid_position(tile)
 					for unit in p2_units:
 						player_orders["player2"].erase(unit[0].net_id)
-						unit.is_moving = false
+						unit[0].is_moving = false
 					break
 				if p2_units.size() == 0:
 					if not _is_p1_occupied:
 						p1_units[0][0].set_grid_position(tile)
 					for unit in p1_units:
 						player_orders["player1"].erase(unit[0].net_id)
-						unit.is_moving = false
+						unit[0].is_moving = false
 					break
 				var first_p1 = p1_units[0][0]
 				var first_p2 = p2_units[0][0]
@@ -531,17 +532,17 @@ func _process_move():
 				if (_is_p1_occupied and first_p1.is_defending) or not _is_p1_occupied:
 					if first_p1.is_defending and first_p1.is_phalanx:
 						p1_melee_str += PHALANX_BONUS
-					p1_damaged_penalty = (100 - first_p1.curr_health) * 0.005
-					p1_melee_str = p1_melee_str * (1 - p1_damaged_penalty)
+					p1_damaged_penalty = 1 - ((100 - first_p1.curr_health) * 0.005)
+					p1_melee_str = p1_melee_str * p1_damaged_penalty
 				var p2_damaged_penalty
 				var p2_melee_str = first_p2.melee_strength
 				if (_is_p2_occupied and first_p2.is_defending) or not _is_p2_occupied:
 					if first_p2.is_defending and first_p2.is_phalanx:
 						p2_melee_str += PHALANX_BONUS
-					p2_damaged_penalty = (100 - first_p2.curr_health) * 0.005
-					p2_melee_str = p2_melee_str * (1 - p2_damaged_penalty)
-				var p1_dmg = 30 * exp((p2_melee_str - first_p1.melee_strength)/25)
-				var p2_dmg = 30 * exp((p1_melee_str - first_p2.melee_strength)/25)
+					p2_damaged_penalty = 1 - ((100 - first_p2.curr_health) * 0.005)
+					p2_melee_str = p2_melee_str * p2_damaged_penalty
+				var p1_dmg = 30 * (1.041**(p2_melee_str - first_p1.melee_strength))
+				var p2_dmg = 30 * (1.041**(p1_melee_str - first_p2.melee_strength))
 				if (_is_p2_occupied and first_p2.is_defending) or not _is_p2_occupied:
 					first_p1.curr_health -= p1_dmg
 					first_p1.set_health_bar()
@@ -582,7 +583,7 @@ func _process_move():
 							first_p2.set_grid_position(tile)
 							for unit in p2_units:
 								player_orders["player2"].erase(unit[0].net_id)
-								unit.is_moving = false
+								unit[0].is_moving = false
 							break
 						elif _is_p2_occupied:
 							continue
@@ -605,7 +606,7 @@ func _process_move():
 							first_p1.set_grid_position(tile)
 							for unit in p1_units:
 								player_orders["player1"].erase(unit[0].net_id)
-								unit.is_moving = false
+								unit[0].is_moving = false
 							break
 						elif _is_p1_occupied:
 							continue

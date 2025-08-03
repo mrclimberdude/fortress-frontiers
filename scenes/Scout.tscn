@@ -15,7 +15,7 @@ font_color = Color(0.989583, 0.989583, 0, 1)
 
 [node name="Scout" instance=ExtResource("1_1i25t")]
 cost = 50
-melee_strength = 3
+melee_strength = 4
 move_range = 3
 sight_range = 3
 regen = 15
