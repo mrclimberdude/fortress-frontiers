@@ -12,12 +12,12 @@ var used_cells = get_used_cells_by_id()
 var valid_cells := {}
 
 # Coloring API you already have:
-@export var ground_tile: Vector2i = Vector2i(2, 0)
-@export var player_atlas_tiles := {
+var ground_tile: Vector2i = Vector2i(2, 0)
+var player_atlas_tiles := {
 	"player1": Vector2i(0, 1),
-	"player2": Vector2i(2, 1)
+	"player2": Vector2i(2, 2)
 }
-@export var structure_atlas_tiles:= {
+var structure_atlas_tiles:= {
 	"player1": Vector2i(1, 3),
 	"player2": Vector2i(3, 3)
 }

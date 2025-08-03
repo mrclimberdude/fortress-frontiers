@@ -170,7 +170,7 @@ func _find_placeable():
 	else:
 		action_mode = "place"
 	var result = game_board.get_reachable_tiles(base.grid_pos, 1, action_mode)
-	var tiles = result["tiles"].slice(1)
+	var tiles = result["tiles"]
 	game_board.show_highlights(tiles)
 	current_reachable = result
 
@@ -346,7 +346,7 @@ func _on_execution_paused(phase_idx):
 	if phase_idx >= phase_names.size():
 		for i in range(phase_idx - phase_names.size()+1):
 			phase_names.append("Movement")
-	phase_label.text = "Processed: %s\n(Click Next to continue)" % phase_names[phase_idx]
+	phase_label.text = "Processed: %s\n(Click here to continue)" % phase_names[phase_idx]
 
 func _on_next_pressed():
 	exec_panel.visible = false

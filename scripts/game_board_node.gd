@@ -111,7 +111,10 @@ func get_reachable_tiles(start: Vector2i, range: int, mode: String) -> Dictionar
 					visited[neighbor] = dist + 1
 					prev[neighbor] = current
 					queue.append(neighbor)
-	
+	if mode == "place":
+		for spawn in spawns:
+			if spawn in reachable:
+				reachable.erase(spawn)
 	# Return both the reachable set and the back-pointer map
 	return {"tiles": reachable, "prev": prev}
 
