@@ -59,9 +59,15 @@ func spawn_unit(unit_type: String, cell: Vector2i, owner: String) -> Node2D:
 		health_bar.position[0] += health_bar.size[0]
 		unit.net_id = _next_net_id_odd
 		_next_net_id_odd += 2
+		var net_id_label = unit.get_node("NetIDLabel")
+		net_id_label.scale = Vector2(-1,1)
+		net_id_label.position[0] += net_id_label.size[0]
+		net_id_label.text = str(unit.net_id)
 	else:
 		unit.net_id = _next_net_id_even
 		_next_net_id_even +=2
+		var net_id_label = unit.get_node("NetIDLabel")
+		net_id_label.text = str(unit.net_id)
 	add_child(unit)
 
 	# 3) Place it using your TileMapLayer’s map_to_world

@@ -1,4 +1,4 @@
-[gd_scene load_steps=5 format=3 uid="uid://rgm2p8qm0fpu"]
+[gd_scene load_steps=6 format=3 uid="uid://rgm2p8qm0fpu"]
 
 [ext_resource type="PackedScene" uid="uid://c62dn8sldq572" path="res://scenes/Unit.tscn" id="1_1i25t"]
 [ext_resource type="Texture2D" uid="uid://b7e60w0ngv3yd" path="res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Objects Light/HSI_icon_148l.png" id="2_1i25t"]
@@ -8,6 +8,10 @@ bg_color = Color(0.988235, 0.227451, 0.152941, 0.603922)
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_qtvpb"]
 bg_color = Color(0, 0.843137, 0.0941176, 0.92549)
+
+[sub_resource type="LabelSettings" id="LabelSettings_1i25t"]
+font_size = 30
+font_color = Color(0.989583, 0.989583, 0, 1)
 
 [node name="Scout" instance=ExtResource("1_1i25t")]
 cost = 50
@@ -29,3 +33,11 @@ theme_override_styles/background = SubResource("StyleBoxFlat_tqf8n")
 theme_override_styles/fill = SubResource("StyleBoxFlat_qtvpb")
 step = 1.0
 fill_mode = 3
+
+[node name="NetIDLabel" type="Label" parent="." index="2"]
+offset_left = -20.0
+offset_top = -81.0
+offset_right = 20.0
+offset_bottom = -39.0
+label_settings = SubResource("LabelSettings_1i25t")
+horizontal_alignment = 1
