@@ -35,7 +35,7 @@ const BASE_INCOME    : int = 10
 const TOWER_INCOME   : int = 5
 const SPECIAL_INCOME : int = 10
 const MINER_BONUS    : int = 15
-const PHALANX_BONUS     : int = 25
+const PHALANX_BONUS     : int = 20
 
 @export var structure_positions = [Vector2i(5, 2),
 					Vector2i(12, 2),
@@ -275,7 +275,10 @@ func _process_ranged():
 					ranged_dmg[order["target_unit_net_id"]] = ranged_dmg.get(order["target_unit_net_id"], 0) + dmg
 					var report_label = Label.new()
 					if target.player_id == local_player_id:
-						report_label.text = "%s #%d took %d ranged damage from %s #%d" % [target.unit_type, target.net_id, dmg, unit.unit_type, unit.net_id]
+						report_label.text = "Your %s #%d took %d ranged damage from %s #%d" % [target.unit_type, target.net_id, dmg, unit.unit_type, unit.net_id]
+						dmg_report.add_child(report_label)
+					else:
+						report_label.text = "Your %s #%d dealt %d ranged damage to %s #%d" % [unit.unit_type, unit.net_id, dmg, target.unit_type, target.net_id]
 						dmg_report.add_child(report_label)
 				player_orders[player].erase(unit.net_id)
 	var target_ids = ranged_dmg.keys()
@@ -287,9 +290,12 @@ func _process_ranged():
 		if target.curr_health <= 0:
 			for player in ["player1", "player2"]:
 				player_orders[player].erase(target_net_id)
+				var report_label = Label.new()
 				if target.player_id == local_player_id:
-					var report_label = Label.new()
-					report_label.text = "%s #%d died at %s" % [target.unit_type, target.net_id, target.grid_pos]
+					report_label.text = "Your %s #%d died at %s" % [target.unit_type, target.net_id, target.grid_pos]
+					dmg_report.add_child(report_label)
+				else:
+					report_label.text = "Enemy %s #%d died at %s" % [target.unit_type, target.net_id, target.grid_pos]
 					dmg_report.add_child(report_label)
 			$GameBoardNode.vacate(target.grid_pos)
 			$GameBoardNode/HexTileMap.set_player_tile(target.grid_pos, "")
@@ -343,11 +349,19 @@ func _process_melee():
 				melee_dmg[attacker.net_id] = melee_dmg.get(attacker, 0) + atk_dmg
 			if target.player_id == local_player_id:
 				var report_label = Label.new()
-				report_label.text = "%s #%d took %d melee damage from %s #%d" % [target.unit_type, target.net_id, def_dmg, attacker.unit_type, attacker.net_id]
+				report_label.text = "Your %s #%d took %d melee damage from %s #%d" % [target.unit_type, target.net_id, def_dmg, attacker.unit_type, attacker.net_id]
 				dmg_report.add_child(report_label)
 				if target.is_defending:
 					report_label = Label.new()
-					report_label.text = "%s #%d retaliated and dealt %d damage" % [target.unit_type, target.net_id, atk_dmg]
+					report_label.text = "Your %s #%d retaliated and dealt %d damage" % [target.unit_type, target.net_id, atk_dmg]
+					dmg_report.add_child(report_label)
+			else:
+				var report_label = Label.new()
+				report_label.text = "Your %s #%d dealt %d melee damage to %s #%d" % [attacker.unit_type, attacker.net_id, def_dmg, target.unit_type, target.net_id]
+				dmg_report.add_child(report_label)
+				if target.is_defending:
+					report_label = Label.new()
+					report_label.text = "Enemy %s #%d retaliated and dealt %d damage" % [target.unit_type, target.net_id, atk_dmg]
 					dmg_report.add_child(report_label)
 	target_ids = melee_dmg.keys()
 	target_ids.sort()
@@ -360,7 +374,11 @@ func _process_melee():
 				player_orders[player].erase(target.net_id)
 			if target.player_id == local_player_id:
 				var report_label = Label.new()
-				report_label.text = "%s #%d died at %s" % [target.unit_type, target.net_id, target.grid_pos]
+				report_label.text = "Your %s #%d died at %s" % [target.unit_type, target.net_id, target.grid_pos]
+				dmg_report.add_child(report_label)
+			else:
+				var report_label = Label.new()
+				report_label.text = "Enemy %s #%d died at %s" % [target.unit_type, target.net_id, target.grid_pos]
 				dmg_report.add_child(report_label)
 			$GameBoardNode.vacate(target.grid_pos)
 			$GameBoardNode/HexTileMap.set_player_tile(target.grid_pos, "")
@@ -442,11 +460,19 @@ func _process_move():
 						obstacle.is_moving = false
 					if obstacle.player_id == local_player_id:
 						var report_label = Label.new()
-						report_label.text = "%s #%d took %d melee damage from %s #%d" % [obstacle.unit_type, obstacle.net_id, defr_dmg, curr_unit.unit_type, curr_unit.net_id]
+						report_label.text = "Your %s #%d took %d melee damage from %s #%d" % [obstacle.unit_type, obstacle.net_id, defr_dmg, curr_unit.unit_type, curr_unit.net_id]
 						dmg_report.add_child(report_label)
 						if obstacle.is_defending or obstacle.moving_to == curr_unit.grid_pos:
 							report_label = Label.new()
-							report_label.text = "%s #%d retaliated and dealt %d damage" % [obstacle.unit_type, obstacle.net_id, atkr_dmg]
+							report_label.text = "Your %s #%d retaliated and dealt %d damage" % [obstacle.unit_type, obstacle.net_id, atkr_dmg]
+							dmg_report.add_child(report_label)
+					else:
+						var report_label = Label.new()
+						report_label.text = "Your %s #%d dealt %d melee damage to %s #%d" % [curr_unit.unit_type, curr_unit.net_id, defr_dmg, obstacle.unit_type, obstacle.net_id]
+						dmg_report.add_child(report_label)
+						if obstacle.is_defending or obstacle.moving_to == curr_unit.grid_pos:
+							report_label = Label.new()
+							report_label.text = "Enemy %s #%d retaliated and dealt %d damage" % [obstacle.unit_type, obstacle.net_id, atkr_dmg]
 							dmg_report.add_child(report_label)
 					if obstacle.curr_health <= 0:
 						player_orders[obstacle.player_id].erase(obstacle.net_id)
@@ -454,7 +480,11 @@ func _process_move():
 						$GameBoardNode/HexTileMap.set_player_tile(obstacle.grid_pos, "")
 						if obstacle.player_id == local_player_id:
 							var report_label = Label.new()
-							report_label.text = "%s #%d died at %s" % [obstacle.unit_type, obstacle.net_id, obstacle.grid_pos]
+							report_label.text = "Your %s #%d died at %s" % [obstacle.unit_type, obstacle.net_id, obstacle.grid_pos]
+							dmg_report.add_child(report_label)
+						else:
+							var report_label = Label.new()
+							report_label.text = "Your %s #%d died at %s" % [obstacle.unit_type, obstacle.net_id, obstacle.grid_pos]
 							dmg_report.add_child(report_label)
 						obstacle.queue_free()
 						if curr_unit.curr_health > 0:
@@ -546,10 +576,23 @@ func _process_move():
 				if (_is_p2_occupied and first_p2.is_defending) or not _is_p2_occupied:
 					first_p1.curr_health -= p1_dmg
 					first_p1.set_health_bar()
+					var report_label = Label.new()
+					if local_player_id == "player1":
+						report_label.text = "Your %s #%d took %d melee damage from %s #%d" % [first_p1.unit_type, first_p1.net_id, p1_dmg, first_p2.unit_type, first_p2.net_id]
+						dmg_report.add_child(report_label)
+					else:
+						report_label.text = "Your %s #%d dealt %d melee damage to %s #%d" % [first_p2.unit_type, first_p2.net_id, p1_dmg, first_p1.unit_type, first_p1.net_id]
+						dmg_report.add_child(report_label)
 				if (_is_p1_occupied and first_p1.is_defending) or not _is_p1_occupied:
 					first_p2.curr_health -= p2_dmg
 					first_p2.set_health_bar()
-				
+					var report_label = Label.new()
+					if local_player_id == "player1":
+						report_label.text = "Your %s #%d dealt %d melee damage to %s #%d" % [first_p1.unit_type, first_p1.net_id, p1_dmg, first_p2.unit_type, first_p2.net_id]
+						dmg_report.add_child(report_label)
+					else:
+						report_label.text = "Your %s #%d took %d melee damage from %s #%d" % [first_p2.unit_type, first_p2.net_id, p1_dmg, first_p1.unit_type, first_p1.net_id]
+						dmg_report.add_child(report_label)
 				# dead unit handling
 				# both dead
 				if first_p1.curr_health <= 0 and first_p2.curr_health <=0:
@@ -557,6 +600,21 @@ func _process_move():
 						_is_p1_occupied = false
 					if _is_p2_occupied:
 						_is_p2_occupied = false
+					var report_label
+					if local_player_id == "player1":
+						report_label = Label.new()
+						report_label.text = "Your %s #%d died at %s" % [first_p1.unit_type, first_p1.net_id, first_p1.grid_pos]
+						dmg_report.add_child(report_label)
+						report_label = Label.new()
+						report_label.text = "Enemy %s #%d died at %s" % [first_p2.unit_type, first_p2.net_id, first_p2.grid_pos]
+						dmg_report.add_child(report_label)
+					else:
+						report_label = Label.new()
+						report_label.text = "Enemy %s #%d died at %s" % [first_p1.unit_type, first_p1.net_id, first_p1.grid_pos]
+						dmg_report.add_child(report_label)
+						report_label = Label.new()
+						report_label.text = "Your %s #%d died at %s" % [first_p2.unit_type, first_p2.net_id, first_p2.grid_pos]
+						dmg_report.add_child(report_label)
 					player_orders["player1"].erase(first_p1.net_id)
 					player_orders["player2"].erase(first_p2.net_id)
 					$GameBoardNode.vacate(first_p1.grid_pos)
@@ -573,6 +631,15 @@ func _process_move():
 					if first_p1.curr_health <= 0:
 						if _is_p1_occupied:
 							_is_p1_occupied = false
+						var report_label
+						if local_player_id == "player1":
+							report_label = Label.new()
+							report_label.text = "Your %s #%d died at %s" % [first_p1.unit_type, first_p1.net_id, first_p1.grid_pos]
+							dmg_report.add_child(report_label)
+						else:
+							report_label = Label.new()
+							report_label.text = "Enemy %s #%d died at %s" % [first_p1.unit_type, first_p1.net_id, first_p1.grid_pos]
+							dmg_report.add_child(report_label)
 						player_orders["player1"].erase(first_p1.net_id)
 						first_p1.is_moving = false
 						$GameBoardNode.vacate(first_p1.grid_pos)
@@ -596,6 +663,15 @@ func _process_move():
 					else:
 						if _is_p2_occupied:
 							_is_p2_occupied = false
+						var report_label
+						if local_player_id == "player1":
+							report_label = Label.new()
+							report_label.text = "Enemy %s #%d died at %s" % [first_p1.unit_type, first_p1.net_id, first_p1.grid_pos]
+							dmg_report.add_child(report_label)
+						else:
+							report_label = Label.new()
+							report_label.text = "Your %s #%d died at %s" % [first_p1.unit_type, first_p1.net_id, first_p1.grid_pos]
+							dmg_report.add_child(report_label)
 						player_orders["player2"].erase(first_p2.net_id)
 						first_p2.is_moving = false
 						$GameBoardNode.vacate(first_p2.grid_pos)
