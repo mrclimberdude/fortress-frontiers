@@ -1,4 +1,4 @@
-[gd_scene load_steps=18 format=4 uid="uid://dnx0cxl4a46lg"]
+[gd_scene load_steps=19 format=4 uid="uid://dnx0cxl4a46lg"]
 
 [ext_resource type="Script" uid="uid://daaph63aiv3vd" path="res://scripts/TurnManager.gd" id="1_xh13x"]
 [ext_resource type="Texture2D" uid="uid://ciitwnd7hxyra" path="res://assets/spritesheet.png" id="2_17g6i"]
@@ -11,6 +11,7 @@
 [ext_resource type="PackedScene" uid="uid://cjq2ma40uud72" path="res://scenes/Miner.tscn" id="5_c1to4"]
 [ext_resource type="Script" uid="uid://cpvudcuvy1hxc" path="res://scripts/UIManager.gd" id="6_qxawf"]
 [ext_resource type="PackedScene" uid="uid://y3gcjhi3ho0o" path="res://scenes/Tank.tscn" id="6_w5uqb"]
+[ext_resource type="PackedScene" uid="uid://bj1f1demforgr" path="res://scenes/Cavalry.tscn" id="7_hl2y5"]
 [ext_resource type="Script" uid="uid://srlpr2fln13a" path="res://scripts/camera.gd" id="7_rs5it"]
 [ext_resource type="TileSet" uid="uid://vpqqir5dxo6" path="res://terrain.tres" id="10_axant"]
 [ext_resource type="Script" uid="uid://cvqvvdw265adw" path="res://scripts/fog.gd" id="10_sax53"]
@@ -60,6 +61,7 @@ soldier_scene = ExtResource("2_i37i2")
 scout_scene = ExtResource("4_04ve2")
 miner_scene = ExtResource("5_c1to4")
 phalanx_scene = ExtResource("6_w5uqb")
+cavalry_scene = ExtResource("7_hl2y5")
 
 [node name="GameBoardNode" type="Node2D" parent="."]
 script = ExtResource("4_6lofv")
@@ -172,7 +174,7 @@ placeholder_text = "Enter Host Port"
 visible = false
 custom_minimum_size = Vector2(200, 200)
 offset_right = 206.0
-offset_bottom = 261.0
+offset_bottom = 297.0
 
 [node name="VBoxContainer" type="VBoxContainer" parent="UI/Panel"]
 layout_mode = 0
@@ -207,6 +209,10 @@ text = "Buy Archer (5g)"
 custom_minimum_size = Vector2(200, 30)
 layout_mode = 2
 text = "Buy Phalanx (5g)"
+
+[node name="CavalryButton" type="Button" parent="UI/Panel/VBoxContainer"]
+layout_mode = 2
+text = "Buy Cavalry"
 
 [node name="DoneButton" type="Button" parent="UI/Panel/VBoxContainer"]
 custom_minimum_size = Vector2(200, 30)
@@ -265,7 +271,7 @@ text = "Gold += Income"
 [node name="DamagePanel" type="Panel" parent="UI"]
 visible = false
 offset_left = 1.0
-offset_top = 281.0
+offset_top = 301.0
 offset_right = 325.0
 offset_bottom = 643.0
 

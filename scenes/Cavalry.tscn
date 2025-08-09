@@ -1,0 +1,42 @@
+[gd_scene load_steps=6 format=3 uid="uid://bj1f1demforgr"]
+
+[ext_resource type="PackedScene" uid="uid://c62dn8sldq572" path="res://scenes/Unit.tscn" id="1_xk0ng"]
+[ext_resource type="Texture2D" uid="uid://ch5ap2on35ptr" path="res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Animals Light/HSI_icon_040l.png" id="2_xk0ng"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_tqf8n"]
+bg_color = Color(0.988235, 0.227451, 0.152941, 0.603922)
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_qtvpb"]
+bg_color = Color(0, 0.843137, 0.0941176, 0.92549)
+
+[sub_resource type="LabelSettings" id="LabelSettings_qtvpb"]
+font_size = 30
+font_color = Color(0.989583, 0.989583, 0, 1)
+
+[node name="Cavalry" instance=ExtResource("1_xk0ng")]
+cost = 125
+melee_strength = 20
+move_range = 3
+sight_range = 3
+
+[node name="Sprite2D" parent="." index="0"]
+texture = ExtResource("2_xk0ng")
+
+[node name="HealthBar" type="ProgressBar" parent="." index="1"]
+offset_left = 34.0
+offset_top = -53.0
+offset_right = 73.0
+offset_bottom = 42.0
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+theme_override_styles/background = SubResource("StyleBoxFlat_tqf8n")
+theme_override_styles/fill = SubResource("StyleBoxFlat_qtvpb")
+step = 1.0
+fill_mode = 3
+
+[node name="NetIDLabel" type="Label" parent="." index="2"]
+offset_left = -20.0
+offset_top = -67.0
+offset_right = 20.0
+offset_bottom = -44.0
+label_settings = SubResource("LabelSettings_qtvpb")
+horizontal_alignment = 1

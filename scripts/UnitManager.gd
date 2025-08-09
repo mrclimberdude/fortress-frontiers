@@ -9,7 +9,7 @@ extends Node2D
 @export var scout_scene: PackedScene = preload("res://scenes/Scout.tscn")
 @export var miner_scene: PackedScene = preload("res://scenes/Miner.tscn")
 @export var phalanx_scene: PackedScene = preload("res://scenes/Tank.tscn")
-
+@export var cavalry_scene: PackedScene = preload("res://scenes/Cavalry.tscn")
 
 @export var tile_size: Vector2 = Vector2(170, 192)   # width, height of one hex
 
@@ -52,6 +52,8 @@ func spawn_unit(unit_type: String, cell: Vector2i, owner: String, undo: bool) ->
 			scene = miner_scene
 		"phalanx":
 			scene = phalanx_scene
+		"cavalry":
+			scene = cavalry_scene
 		_:
 			push_error("Unknown unit type '%s'" % unit_type)
 			return

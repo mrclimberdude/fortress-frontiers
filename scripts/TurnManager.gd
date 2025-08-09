@@ -20,6 +20,7 @@ enum Phase { UPKEEP, ORDERS, EXECUTION }
 @export var scout_scene: PackedScene
 @export var miner_scene: PackedScene
 @export var phalanx_scene: PackedScene
+@export var cavalry_scene: PackedScene
 
 # --- Turn & Phase State ---
 var turn_number:   int    = 0
@@ -787,6 +788,8 @@ func buy_unit(player: String, unit_type: String, grid_pos: Vector2i) -> bool:
 		scene = miner_scene
 	elif unit_type.to_lower() == "phalanx":
 		scene = phalanx_scene
+	elif unit_type.to_lower() == "cavalry":
+		scene = cavalry_scene
 	else:
 		push_error("Unknown unit type '%s'" % unit_type)
 		print("Unknown unit type '%s'" % unit_type)
