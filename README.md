@@ -53,10 +53,11 @@ All units inherit default properties from scripts/unit.gd. Default stats include
 | Unit | Cost (gold) | Key traits and overrides |
 | --- | --- | --- |
 | **Archer** | 100 | Ranged unit; melee 10; ranged 30; ranged range 2[\[18\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scenes/Archer.tscn#L16-L22). |
-| **Soldier** | 85  | Melee strength 20[\[19\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scenes/Soldier.tscn#L16-L19); no ranged attack. |
+| **Soldier** | 75  | Melee strength 20[\[19\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scenes/Soldier.tscn#L16-L19); no ranged attack. |
 | **Scout** | 50  | Melee strength 4; move range 3; sight range 3; regeneration 15[\[20\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scenes/Scout.tscn#L16-L21). |
 | **Miner** | 75  | Regeneration 15; provides +15 income bonus when starting a turn on a mine. |
-| **Phalanx** | 100 | Melee strength 10; move range 1; multi_def_penalty = 0[\[22\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scenes/Tank.tscn#L16-L21); receives a +20 defence bonus when defending[\[7\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scripts/TurnManager.gd#L32-L39). |
+| **Phalanx** | 100 | Melee strength 10; multi_def_penalty = 0[\[22\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scenes/Tank.tscn#L16-L21); receives a +20 defense bonus when defending[\[7\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scripts/TurnManager.gd#L32-L39). |
+| **Cavalry** | 125  | Move range 3; melee strength 20|
 | **Tower** | –   | Static structure; melee strength 20; cannot move[\[23\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scenes/Tower.tscn#L16-L19). Generates 5 gold per turn when controlled[\[6\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scripts/TurnManager.gd#L32-L36).; Player can spawn units adjacent to Tower |
 | **Base** | –   | Player’s headquarters; melee strength 20; cannot move; maximum health 500[\[24\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scenes/Base.tscn#L16-L20);Player can spawn units adjacent to Tower; Generates 10 gold per turn; Losing your base means losing the game. |
 
