@@ -456,7 +456,7 @@ func _process_move():
 					if obstacle.is_defending:
 						curr_unit.curr_health -= atkr_dmg
 						curr_unit.set_health_bar()
-					if obstacle.moving_to == curr_unit.grid_pos:
+					if obstacle.moving_to == curr_unit.grid_pos and obstacle.is_moving:
 						curr_unit.curr_health -= atkr_dmg
 						curr_unit.set_health_bar()
 						player_orders[obstacle.player_id].erase(obstacle.net_id)
@@ -465,7 +465,7 @@ func _process_move():
 						var report_label = Label.new()
 						report_label.text = "Your %s #%d took %d melee damage from %s #%d" % [obstacle.unit_type, obstacle.net_id, defr_dmg, curr_unit.unit_type, curr_unit.net_id]
 						dmg_report.add_child(report_label)
-						if obstacle.is_defending or obstacle.moving_to == curr_unit.grid_pos:
+						if obstacle.is_defending or (obstacle.moving_to == curr_unit.grid_pos and obstacle.is_moving):
 							report_label = Label.new()
 							report_label.text = "Your %s #%d retaliated and dealt %d damage" % [obstacle.unit_type, obstacle.net_id, atkr_dmg]
 							dmg_report.add_child(report_label)
@@ -473,7 +473,7 @@ func _process_move():
 						var report_label = Label.new()
 						report_label.text = "Your %s #%d dealt %d melee damage to %s #%d" % [curr_unit.unit_type, curr_unit.net_id, defr_dmg, obstacle.unit_type, obstacle.net_id]
 						dmg_report.add_child(report_label)
-						if obstacle.is_defending or obstacle.moving_to == curr_unit.grid_pos:
+						if obstacle.is_defending or (obstacle.moving_to == curr_unit.grid_pos and obstacle.is_moving):
 							report_label = Label.new()
 							report_label.text = "Enemy %s #%d retaliated and dealt %d damage" % [obstacle.unit_type, obstacle.net_id, atkr_dmg]
 							dmg_report.add_child(report_label)
@@ -490,7 +490,7 @@ func _process_move():
 							report_label.text = "Your %s #%d died at %s" % [obstacle.unit_type, obstacle.net_id, obstacle.grid_pos]
 							dmg_report.add_child(report_label)
 						obstacle.queue_free()
-						if curr_unit.curr_health > 0:
+						if curr_unit.curr_health > 0 and curr_unit.is_moving:
 							curr_unit.set_grid_position(tile)
 							#$GameBoardNode/HexTileMap.set_player_tile(tile, curr_unit.player_id)
 					player_orders[curr_unit.player_id].erase(curr_unit.net_id)
@@ -499,7 +499,7 @@ func _process_move():
 						$GameBoardNode.vacate(curr_unit.grid_pos)
 						$GameBoardNode/HexTileMap.set_player_tile(curr_unit.grid_pos, "")
 						
-						if obstacle.moving_to == curr_unit.grid_pos:
+						if obstacle.moving_to == curr_unit.grid_pos and obstacle.is_moving:
 							obstacle.set_grid_position(curr_unit.grid_pos)
 							player_orders[obstacle.player_id].erase(obstacle.net_id)
 							obstacle.is_moving = false
