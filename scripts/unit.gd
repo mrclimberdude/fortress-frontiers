@@ -73,7 +73,6 @@ func set_grid_position(pos: Vector2i) -> void:
 	# 4) Register the new tile & recolor it for our player
 	if board and board.has_method("occupy"):
 		board.occupy(pos, self)
-		map_layer.set_player_tile(pos, player_id)
 		if pos in structure_tiles:
 			if pos in turn_mgr.special_tiles["unclaimed"]:
 				var idx = turn_mgr.special_tiles["unclaimed"].find(pos)
@@ -87,6 +86,7 @@ func set_grid_position(pos: Vector2i) -> void:
 				var idx = turn_mgr.special_tiles["player2"].find(pos)
 				turn_mgr.special_tiles["player2"].remove_at(idx)
 				turn_mgr.special_tiles[player_id].append(pos)
+		map_layer.set_player_tile(pos, player_id)
 	else:
 		push_error("Unit.gd: could not find GameBoardNode to occupy()")
 

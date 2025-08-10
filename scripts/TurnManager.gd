@@ -149,6 +149,7 @@ func _do_upkeep() -> void:
 			unit.is_defending = false
 			unit.just_purchased = false
 			unit.ordered = false
+			unit.is_moving = false
 			if unit.is_healing:
 				unit.curr_health += unit.regen
 				unit.set_health_bar()
@@ -387,6 +388,7 @@ func _process_melee():
 			if target_unit_net_id in melee_attacks.keys():
 				melee_attacks[target.net_id].sort_custom(func(a,b): return a[1] < b[1])
 				unit_manager.get_unit_by_net_id(melee_attacks[target.net_id][0][0]).set_grid_position(target.grid_pos)
+				#$GameBoardNode/HexTileMap.set_player_tile(target.grid_pos, melee_attacks[target.net_id][0][0].player_id)
 				pass
 			target.queue_free()
 		else:
@@ -490,6 +492,7 @@ func _process_move():
 						obstacle.queue_free()
 						if curr_unit.curr_health > 0:
 							curr_unit.set_grid_position(tile)
+							#$GameBoardNode/HexTileMap.set_player_tile(tile, curr_unit.player_id)
 					player_orders[curr_unit.player_id].erase(curr_unit.net_id)
 					curr_unit.is_moving = false
 					if curr_unit.curr_health <= 0:

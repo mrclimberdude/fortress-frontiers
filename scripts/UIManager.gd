@@ -582,8 +582,9 @@ func _unhandled_input(ev):
 		if cell in enemy_tiles:
 			move_priority += 1
 			if action_mode == "melee":
-				currently_selected_unit.is_moving = true
-				currently_selected_unit.moving_to = cell
+				#currently_selected_unit.is_moving = true
+				#currently_selected_unit.moving_to = cell
+				pass
 			currently_selected_unit.ordered = true
 			$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
 			turn_mgr.add_order(current_player, {
