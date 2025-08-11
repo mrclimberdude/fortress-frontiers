@@ -105,6 +105,12 @@ func _ready():
 	var base_font: FontFile = load("res://fonts/JetBrainsMono-Medium.ttf")
 	var unit_scenes = [ScoutScene, SoldierScene, MinerScene, ArcherScene, PhalanxScene, CavalryScene]
 	var unit_names = ["Scout", "Soldier", "Miner", "Archer", "Phalanx", "Cavalry"]
+	var unit_buy_buttons = [$Panel/VBoxContainer/ScoutButton,
+							$Panel/VBoxContainer/SoldierButton,
+							$Panel/VBoxContainer/MinerButton,
+							$Panel/VBoxContainer/ArcherButton,
+							$Panel/VBoxContainer/PhalanxButton,
+							$Panel/VBoxContainer/CavalryButton]
 	var stats_string = "%-7s|%-6s|%-6s|%-6s|%-6s|%s"
 	var label = Label.new()
 	label.add_theme_font_override("font", base_font)
@@ -113,7 +119,7 @@ func _ready():
 	var temp
 	for i in range(unit_scenes.size()):
 		temp = unit_scenes[i].instantiate()
-		$Panel/VBoxContainer/ArcherButton.text = "Buy %s (%dg)" % [unit_names[i], temp.cost]
+		unit_buy_buttons[i].text = "Buy %s (%dG)" % [unit_names[i], temp.cost]
 		label = Label.new()
 		label.add_theme_font_override("font", base_font)
 		label.text = stats_string % [unit_names[i], temp.melee_strength, temp.ranged_strength, temp.move_range, temp.regen, temp.special_skills]
