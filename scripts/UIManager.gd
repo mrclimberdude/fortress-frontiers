@@ -352,7 +352,7 @@ func _on_cancel_pressed():
 func _on_execution_paused(phase_idx):
 	_current_exec_step_idx = phase_idx
 	exec_panel.visible = true
-	var phase_names = ["Unit Spawns", "Ranged Attacks","Melee","Movement"]
+	var phase_names = ["Unit Spawns", "Attacks","Movement"]
 	if phase_idx >= phase_names.size():
 		for i in range(phase_idx - phase_names.size()+1):
 			phase_names.append("Movement")
