@@ -19,6 +19,7 @@ melee_strength = 4
 move_range = 3
 sight_range = 3
 regen = 15
+special_skills = "None"
 
 [node name="Sprite2D" parent="." index="0"]
 texture = ExtResource("2_1i25t")

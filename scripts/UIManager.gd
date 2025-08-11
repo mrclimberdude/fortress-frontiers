@@ -98,20 +98,26 @@ func _ready():
 					 Callable(self, "_on_done_pressed"))
 	$CancelDoneButton.connect("pressed",
 					 Callable(self, "_on_cancel_pressed"))
+	$UnitStatsCheckButton.connect("toggled",
+					Callable(self, "_on_stats_toggled"))
 	
-	# setting gold labels for units
-	var temp = ArcherScene.instantiate()
-	$Panel/VBoxContainer/ArcherButton.text = "Buy Archer (%dg)" % temp.cost
-	temp = SoldierScene.instantiate()
-	$Panel/VBoxContainer/SoldierButton.text = "Buy Soldier (%dg)" % temp.cost
-	temp = ScoutScene.instantiate()
-	$Panel/VBoxContainer/ScoutButton.text = "Buy Scout (%dg)" % temp.cost
-	temp = MinerScene.instantiate()
-	$Panel/VBoxContainer/MinerButton.text = "Buy Miner (%dg)" % temp.cost
-	temp = PhalanxScene.instantiate()
-	$Panel/VBoxContainer/PhalanxButton.text = "Buy Phalanx (%dg)" % temp.cost
-	temp = CavalryScene.instantiate()
-	$Panel/VBoxContainer/CavalryButton.text = "Buy Cavalry (%dg)" % temp.cost
+	# setting gold labels and stats for units
+	var base_font: FontFile = load("res://fonts/JetBrainsMono-Medium.ttf")
+	var unit_scenes = [ScoutScene, SoldierScene, MinerScene, ArcherScene, PhalanxScene, CavalryScene]
+	var unit_names = ["Scout", "Soldier", "Miner", "Archer", "Phalanx", "Cavalry"]
+	var stats_string = "%-7s|%-6s|%-6s|%-6s|%-6s|%s"
+	var label = Label.new()
+	label.add_theme_font_override("font", base_font)
+	label.text = stats_string % ["Unit", "Melee", "Ranged", "Move", "Regen", "Special"]
+	$StatsPanel/VBoxContainer.add_child(label)
+	var temp
+	for i in range(unit_scenes.size()):
+		temp = unit_scenes[i].instantiate()
+		$Panel/VBoxContainer/ArcherButton.text = "Buy %s (%dg)" % [unit_names[i], temp.cost]
+		label = Label.new()
+		label.add_theme_font_override("font", base_font)
+		label.text = stats_string % [unit_names[i], temp.melee_strength, temp.ranged_strength, temp.move_range, temp.regen, temp.special_skills]
+		$StatsPanel/VBoxContainer.add_child(label)
 	temp.free()
 	
 	# unit order menu
@@ -133,8 +139,8 @@ func _ready():
 func _on_orders_phase_begin(player: String) -> void:
 	# show the UI and reset state
 	current_player = player
-	gold_lbl.text = "%s Gold: %d" % [current_player, turn_mgr.player_gold[current_player]]
-	income_lbl.text = "Income: %d" % turn_mgr.player_income[current_player]
+	gold_lbl.text = "Current Gold: %d" % [turn_mgr.player_gold[current_player]]
+	income_lbl.text = "Income: %d per turn" % turn_mgr.player_income[current_player]
 	placing_unit  = ""
 	$Panel.visible = true
 	allow_clicks = true
@@ -243,6 +249,12 @@ func _on_cancel_game_pressed():
 	$CancelGameButton.visible = false
 	dev_mode_toggle.visible = true
 	NetworkManager.close_connection()
+
+func _on_stats_toggled(toggled):
+	if toggled:
+		$StatsPanel.visible = true
+	else:
+		$StatsPanel.visible = false
 
 func _on_unit_selected(unit: Node) -> void:
 	game_board.clear_highlights()

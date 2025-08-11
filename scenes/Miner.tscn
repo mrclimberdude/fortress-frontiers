@@ -17,6 +17,7 @@ font_color = Color(0.989583, 0.989583, 0, 1)
 cost = 75
 regen = 15
 is_miner = true
+special_skills = "+15 GPT if on mine"
 
 [node name="Sprite2D" parent="." index="0"]
 texture = ExtResource("2_lj6gh")

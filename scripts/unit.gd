@@ -32,6 +32,7 @@ extends Node2D
 @export var is_phalanx:      bool = false
 @export var is_tower:        bool = false
 @export var unit_type:       String = ""
+@export var special_skills:  String = ""
 
 # -- grid positioning and reference to the TileMapLayer
 var grid_pos: Vector2i

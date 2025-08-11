@@ -18,6 +18,7 @@ cost = 100
 melee_strength = 10
 multi_def_penalty = 0
 is_phalanx = true
+special_skills = "+20 str when defending, No multi-defender penalty"
 
 [node name="Sprite2D" parent="." index="0"]
 texture = ExtResource("2_cpxye")

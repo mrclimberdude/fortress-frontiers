@@ -18,6 +18,7 @@ cost = 125
 melee_strength = 20
 move_range = 3
 sight_range = 3
+special_skills = "None"
 
 [node name="Sprite2D" parent="." index="0"]
 texture = ExtResource("2_xk0ng")

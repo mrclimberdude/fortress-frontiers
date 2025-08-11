@@ -16,6 +16,7 @@ font_color = Color(0.989583, 0.989583, 0, 1)
 [node name="Soldier" instance=ExtResource("1_av0cm")]
 cost = 75
 melee_strength = 20
+special_skills = "None"
 
 [node name="Sprite2D" parent="." index="0"]
 texture = ExtResource("2_qtvpb")
