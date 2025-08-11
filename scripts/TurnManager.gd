@@ -370,6 +370,8 @@ func _process_melee():
 	for target_unit_net_id in target_ids:
 		var target = unit_manager.get_unit_by_net_id(target_unit_net_id)
 		target.curr_health -= melee_dmg[target.net_id]
+	for target_unit_net_id in target_ids:
+		var target = unit_manager.get_unit_by_net_id(target_unit_net_id)
 		# dead unit, remove from all orders and remove node from game
 		if target.curr_health <= 0:
 			for player in ["player1", "player2"]:
@@ -387,8 +389,11 @@ func _process_melee():
 			
 			if target_unit_net_id in melee_attacks.keys():
 				melee_attacks[target.net_id].sort_custom(func(a,b): return a[1] < b[1])
-				unit_manager.get_unit_by_net_id(melee_attacks[target.net_id][0][0]).set_grid_position(target.grid_pos)
-				#$GameBoardNode/HexTileMap.set_player_tile(target.grid_pos, melee_attacks[target.net_id][0][0].player_id)
+				for unit_priority_pair in melee_attacks[target.net_id]:
+					var unit = unit_manager.get_unit_by_net_id(unit_priority_pair[0])
+					if unit.curr_health > 0:
+						unit.set_grid_position(target.grid_pos)
+						break
 				pass
 			target.queue_free()
 		else:
@@ -499,7 +504,7 @@ func _process_move():
 						$GameBoardNode.vacate(curr_unit.grid_pos)
 						$GameBoardNode/HexTileMap.set_player_tile(curr_unit.grid_pos, "")
 						
-						if obstacle.moving_to == curr_unit.grid_pos and obstacle.is_moving:
+						if obstacle.moving_to == curr_unit.grid_pos and obstacle.is_moving and obstacle.curr_health > 0:
 							obstacle.set_grid_position(curr_unit.grid_pos)
 							player_orders[obstacle.player_id].erase(obstacle.net_id)
 							obstacle.is_moving = false
