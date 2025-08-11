@@ -73,6 +73,8 @@ script = ExtResource("3_xh13x")
 
 [node name="PathArrows" type="Node2D" parent="GameBoardNode/HexTileMap"]
 
+[node name="PreviewPathArrows" type="Node2D" parent="GameBoardNode/HexTileMap"]
+
 [node name="AttackArrows" type="Node2D" parent="GameBoardNode/HexTileMap"]
 
 [node name="SupportArrows" type="Node2D" parent="GameBoardNode/HexTileMap"]
@@ -229,6 +231,12 @@ text = "Done With Orders"
 
 [node name="ActionMenu" type="PopupMenu" parent="UI/Panel"]
 mouse_passthrough = true
+
+[node name="FinishMoveButton" type="Button" parent="UI/Panel"]
+layout_mode = 0
+offset_right = 8.0
+offset_bottom = 8.0
+text = "Finalize move"
 
 [node name="UnitStatsCheckButton" type="CheckButton" parent="UI"]
 offset_left = 215.0

@@ -15,6 +15,8 @@ var currently_selected_unit: Node = null
 var current_reachable: Dictionary = {}
 var enemy_tiles: Array = []
 var support_tiles = []
+var current_path: Array = []
+var remaining_moves: int = 0
 var action_mode:       String   = ""     # "move", "ranged", "melee", "support", "hold"
 var move_priority: int = 0
 var allow_clicks: bool = true
@@ -34,6 +36,7 @@ var _current_exec_step_idx: int = 0
 @onready var cancel_done_button = $CancelDoneButton as Button
 @onready var dev_mode_toggle = get_node(dev_mode_toggle_path) as CheckButton
 @onready var dev_panel = $DevPanel
+@onready var finish_move_button = $Panel/FinishMoveButton
 
 const ArrowScene = preload("res://scenes/Arrow.tscn")
 const AttackArrowScene = preload("res://scenes/AttackArrow.tscn")
@@ -100,6 +103,8 @@ func _ready():
 					 Callable(self, "_on_cancel_pressed"))
 	$UnitStatsCheckButton.connect("toggled",
 					Callable(self, "_on_stats_toggled"))
+	$Panel/FinishMoveButton.connect("pressed",
+					Callable(self, "_on_finish_move_button_pressed"))
 	
 	# setting gold labels and stats for units
 	var base_font: FontFile = load("res://fonts/JetBrainsMono-Medium.ttf")
@@ -256,6 +261,9 @@ func _on_cancel_game_pressed():
 	dev_mode_toggle.visible = true
 	NetworkManager.close_connection()
 
+func _on_finish_move_button_pressed():
+	finish_current_path()
+
 func _on_stats_toggled(toggled):
 	if toggled:
 		$StatsPanel.visible = true
@@ -297,6 +305,8 @@ func _on_action_selected(id: int) -> void:
 			$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
 		1:
 			action_mode = "move"
+			current_path = [currently_selected_unit.grid_pos]
+			remaining_moves = currently_selected_unit.move_range
 			var result = game_board.get_reachable_tiles(currently_selected_unit.grid_pos, currently_selected_unit.move_range, action_mode)
 			var tiles = result["tiles"].slice(1)
 			game_board.show_highlights(tiles)
@@ -402,19 +412,6 @@ func _on_next_pressed():
 func _on_execution_complete():
 	exec_panel.visible = false
 
-func calculate_path(dest: Vector2i) -> Array:
-	# Build path array
-	var path = []
-	var prev = current_reachable["prev"]
-	var cur = dest
-	while cur in prev:
-		path.insert(0, cur)
-		cur = prev[cur]
-	# include start
-	path.insert(0, currently_selected_unit.grid_pos)
-	return path
-	
-
 # Backtrack and draw arrow sprites along the path to `dest`
 func _draw_paths() -> void:
 	var path_arrows_node = hex.get_node("PathArrows")
@@ -454,6 +451,32 @@ func _draw_paths() -> void:
 					
 					arrow.z_index = 10
 					root.add_child(arrow)
+
+func _draw_partial_path() -> void:
+	var preview_node = hex.get_node("PreviewPathArrows")
+	# clear previous preview arrows
+	for child in preview_node.get_children():
+		child.queue_free()
+	# draw arrows along current_path
+	if current_path.size() > 1:
+		var root = Node2D.new()
+		preview_node.add_child(root)
+		for i in range(current_path.size() - 1):
+			var a = current_path[i]
+			var b = current_path[i + 1]
+			var p1 = hex.map_to_world(a) + hex.tile_size * 0.5
+			var p2 = hex.map_to_world(b) + hex.tile_size * 0.5
+			var arrow = ArrowScene.instantiate() as Sprite2D
+			var dir = (p2 - p1).normalized()
+			var tex_size = arrow.texture.get_size()
+			var distance: float = (p2 - p1).length()
+			var scale_x: float = distance / tex_size.x
+			arrow.scale = Vector2(scale_x, 1)
+			var half_length = tex_size.x * scale_x * 0.5
+			arrow.position = p1 + dir * half_length
+			arrow.rotation = (p2 - p1).angle()
+			arrow.z_index = 10
+			root.add_child(arrow)
 
 func _draw_attacks():
 	var attack_arrows_node = hex.get_node("AttackArrows")
@@ -568,6 +591,31 @@ func _draw_all():
 	_draw_supports()
 	_draw_defends()
 
+func finish_current_path():
+	if current_path.size() ==1:
+		return
+	move_priority +=1
+	currently_selected_unit.is_moving = true
+	currently_selected_unit.moving_to = current_path[1]
+	currently_selected_unit.ordered = true
+	turn_mgr.add_order(current_player, {
+				"unit_net_id": currently_selected_unit.net_id,
+				"type": "move",
+				"path": current_path,
+				"priority": move_priority
+			})
+	_draw_all()
+	var preview_node = hex.get_node("PreviewPathArrows")
+	for child in preview_node.get_children():
+		child.queue_free()
+	finish_move_button.visible = false
+	action_mode = ""
+	current_path = []
+	remaining_moves = 0
+	game_board.clear_highlights()
+	$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
+	
+
 func _unhandled_input(ev):
 	if not (ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT):
 		return
@@ -592,23 +640,33 @@ func _unhandled_input(ev):
 	
 	# Order phase: if waiting for destination (move mode)
 	if action_mode == "move" and currently_selected_unit:
+		if cell not in current_reachable["tiles"] or cell == currently_selected_unit.grid_pos:
+			finish_current_path()
+			return
 		var path = []
-		# Only allow valid reachable cells
-		if cell in current_reachable["tiles"] and cell != currently_selected_unit.grid_pos:
-			path = calculate_path(cell)
-			move_priority += 1
-			currently_selected_unit.is_moving = true
-			currently_selected_unit.moving_to = path[1]
-			currently_selected_unit.ordered = true
-			$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
-			turn_mgr.add_order(current_player, {
-				"unit_net_id": currently_selected_unit.net_id,
-				"type": "move",
-				"path": path,
-				"priority": move_priority
-			})
-			_draw_all()
-		action_mode = ""
+		var prev = current_reachable["prev"]
+		var cur = cell
+		while cur in prev:
+			path.insert(0, cur)
+			cur = prev[cur]
+		
+		current_path += path
+		var steps_used = path.size()
+		remaining_moves -= steps_used
+		
+		_draw_partial_path()
+		finish_move_button.set_position(ev.position)
+		finish_move_button.visible = true
+		if remaining_moves <= 0:
+			finish_current_path()
+			return
+		
+		var result = game_board.get_reachable_tiles(cell, remaining_moves, action_mode)
+		var tiles = result["tiles"]
+		if tiles.has(cell):
+			tiles.erase(cell)
+		game_board.show_highlights(tiles)
+		current_reachable = result
 		return
 	
 	if action_mode == "ranged" or action_mode == "melee" and currently_selected_unit:
