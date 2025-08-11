@@ -221,13 +221,13 @@ func calculate_damage(attacker, defender, atk_mode, num_atkrs):
 	else:
 		atkr_str = attacker.melee_strength * atkr_damaged_penalty
 	var defr_damaged_penalty = 1- ((100 - defender.curr_health) * 0.005)
-	var defr_str = defender.melee_strength - (num_atkrs -1) * defender.multi_def_penalty
+	var defr_str = defender.melee_strength - ((num_atkrs -1) * defender.multi_def_penalty)
 	if defender.is_defending and defender.is_phalanx:
 		defr_str += PHALANX_BONUS + (num_atkrs -1) * defender.multi_def_penalty
 	defr_str = defr_str * defr_damaged_penalty
 	var atkr_in_dmg
 	if defender.is_ranged and atk_mode == "ranged":
-		var defr_ranged_str = defender.ranged_strength * defr_damaged_penalty
+		var defr_ranged_str = (defender.ranged_strength - ((num_atkrs -1) * defender.multi_def_penalty)) * defr_damaged_penalty
 		atkr_in_dmg = 30 * (1.041**(defr_ranged_str - attacker.melee_strength * atkr_damaged_penalty))
 	else:
 		atkr_in_dmg = 30 * (1.041**(defr_str - attacker.melee_strength * atkr_damaged_penalty))
