@@ -215,23 +215,23 @@ func calculate_damage(attacker, defender, atk_mode, num_atkrs):
 	# NOTE: Whenever this function is updated, also update all manually calculated damage sections
 	# search: MANUAL_DMG
 	var atkr_damaged_penalty = 1- ((100 - attacker.curr_health) * 0.005)
-	var atkr_melee_str
+	var atkr_str
 	if atk_mode == "ranged":
-		atkr_melee_str = attacker.ranged_strength * atkr_damaged_penalty
+		atkr_str = attacker.ranged_strength * atkr_damaged_penalty
 	else:
-		atkr_melee_str = attacker.melee_strength * atkr_damaged_penalty
+		atkr_str = attacker.melee_strength * atkr_damaged_penalty
 	var defr_damaged_penalty = 1- ((100 - defender.curr_health) * 0.005)
-	var defr_melee_str = defender.melee_strength - num_atkrs * defender.multi_def_penalty
+	var defr_str = defender.melee_strength - (num_atkrs -1) * defender.multi_def_penalty
 	if defender.is_defending and defender.is_phalanx:
-		defr_melee_str += PHALANX_BONUS + num_atkrs * defender.multi_def_penalty
-	defr_melee_str = defr_melee_str * defr_damaged_penalty
+		defr_str += PHALANX_BONUS + (num_atkrs -1) * defender.multi_def_penalty
+	defr_str = defr_str * defr_damaged_penalty
 	var atkr_in_dmg
 	if defender.is_ranged and atk_mode == "ranged":
 		var defr_ranged_str = defender.ranged_strength * defr_damaged_penalty
-		atkr_in_dmg = 30 * (1.041**(defr_ranged_str - atkr_melee_str))
+		atkr_in_dmg = 30 * (1.041**(defr_ranged_str - attacker.melee_strength * atkr_damaged_penalty))
 	else:
-		atkr_in_dmg = 30 * (1.041**(defr_melee_str - atkr_melee_str))
-	var defr_in_dmg = 30 * (1.041**(atkr_melee_str - defr_melee_str))
+		atkr_in_dmg = 30 * (1.041**(defr_str - attacker.melee_strength * atkr_damaged_penalty))
+	var defr_in_dmg = 30 * (1.041**(atkr_str - defr_str))
 	return [atkr_in_dmg, defr_in_dmg]
 
 func _process_spawns():
@@ -313,14 +313,24 @@ func _process_attacks():
 			var dmg_result = calculate_damage(unit, target, "ranged", num_attackers)
 			var atkr_in_dmg = dmg_result[0]
 			var defr_in_dmg = dmg_result[1]
+			if target.is_defending and target.is_ranged:
+				ranged_dmg[unit_net_id] = ranged_dmg.get(unit_net_id, 0) + atkr_in_dmg
 			ranged_dmg[target_net_id] = ranged_dmg.get(target_net_id, 0) + defr_in_dmg
 			var report_label = Label.new()
 			if target.player_id == local_player_id:
 				report_label.text = "Your %s #%d took %d ranged damage from %s #%d" % [target.unit_type, target.net_id, defr_in_dmg, unit.unit_type, unit.net_id]
 				dmg_report.add_child(report_label)
+				if target.is_defending and target.is_ranged:
+					report_label = Label.new()
+					report_label.text = "Your %s #%d retaliated and dealt %d damage" % [target.unit_type, target.net_id, atkr_in_dmg]
+					dmg_report.add_child(report_label)
 			else:
 				report_label.text = "Your %s #%d dealt %d ranged damage to %s #%d" % [unit.unit_type, unit.net_id, defr_in_dmg, target.unit_type, target.net_id]
 				dmg_report.add_child(report_label)
+				if target.is_defending and target.is_ranged:
+					report_label = Label.new()
+					report_label.text = "Enemy %s #%d retaliated and dealt %d damage" % [target.unit_type, target.net_id, atkr_in_dmg]
+					dmg_report.add_child(report_label)
 	
 	# calculate all melee attack damages done
 	target_ids = melee_attacks.keys()
@@ -379,151 +389,6 @@ func _process_attacks():
 			target.set_health_bar()
 	
 	# deal melee damage
-	target_ids = melee_dmg.keys()
-	target_ids.sort()
-	for target_unit_net_id in target_ids:
-		var target = unit_manager.get_unit_by_net_id(target_unit_net_id)
-		target.curr_health -= melee_dmg[target.net_id]
-	for target_unit_net_id in target_ids:
-		var target = unit_manager.get_unit_by_net_id(target_unit_net_id)
-		# dead unit, remove from all orders and remove node from game
-		if target.curr_health <= 0:
-			for player in ["player1", "player2"]:
-				player_orders[player].erase(target.net_id)
-			if target.player_id == local_player_id:
-				var report_label = Label.new()
-				report_label.text = "Your %s #%d died at %s" % [target.unit_type, target.net_id, target.grid_pos]
-				dmg_report.add_child(report_label)
-			else:
-				var report_label = Label.new()
-				report_label.text = "Enemy %s #%d died at %s" % [target.unit_type, target.net_id, target.grid_pos]
-				dmg_report.add_child(report_label)
-			$GameBoardNode.vacate(target.grid_pos)
-			$GameBoardNode/HexTileMap.set_player_tile(target.grid_pos, "")
-			
-			if target_unit_net_id in melee_attacks.keys():
-				melee_attacks[target.net_id].sort_custom(func(a,b): return a[1] < b[1])
-				for unit_priority_pair in melee_attacks[target.net_id]:
-					var unit = unit_manager.get_unit_by_net_id(unit_priority_pair[0])
-					if unit.curr_health > 0:
-						unit.set_grid_position(target.grid_pos)
-						break
-				pass
-			target.queue_free()
-		else:
-			target.set_health_bar()
-	$UI._draw_attacks()
-	$UI._draw_paths()
-	$UI._draw_supports()
-	$GameBoardNode/FogOfWar._update_fog()
-	
-func _process_ranged():
-	var ranged_attacks: Dictionary = {} # key: target.net_id, value: [attacker.net_id]
-	var ranged_dmg: Dictionary = {}
-	# ranged orders resolution
-	for player in ["player1", "player2"]:
-		var unit_ids = player_orders[player].keys()
-		unit_ids.sort()
-		for unit_net_id in unit_ids:
-			if unit_net_id is not int:
-				continue
-			var order = player_orders[player][unit_net_id]
-			if order["type"] == "ranged":
-				var unit = unit_manager.get_unit_by_net_id(unit_net_id)
-				var target = unit_manager.get_unit_by_net_id(order["target_unit_net_id"])
-				# check to make sure target unit still exists
-				if is_instance_valid(target):
-					ranged_attacks[target.net_id] = ranged_attacks.get(target.net_id, [])
-					ranged_attacks[target.net_id].append(unit.net_id)
-				player_orders[player].erase(unit.net_id)
-	for target_net_id in ranged_attacks.keys():
-		for unit_net_id in ranged_attacks[target_net_id]:
-			var unit = unit_manager.get_unit_by_net_id(unit_net_id)
-			var target = unit_manager.get_unit_by_net_id(target_net_id)
-			var dmg_result = calculate_damage(unit, target, "ranged", 1)
-			var atkr_in_dmg = dmg_result[0]
-			var defr_in_dmg = dmg_result[1]
-			ranged_dmg[target_net_id] = ranged_dmg.get(target_net_id, 0) + defr_in_dmg
-			var report_label = Label.new()
-			if target.player_id == local_player_id:
-				report_label.text = "Your %s #%d took %d ranged damage from %s #%d" % [target.unit_type, target.net_id, defr_in_dmg, unit.unit_type, unit.net_id]
-				dmg_report.add_child(report_label)
-			else:
-				report_label.text = "Your %s #%d dealt %d ranged damage to %s #%d" % [unit.unit_type, unit.net_id, defr_in_dmg, target.unit_type, target.net_id]
-				dmg_report.add_child(report_label)
-			
-	var target_ids = ranged_dmg.keys()
-	target_ids.sort()
-	for target_net_id in target_ids:
-		var target = unit_manager.get_unit_by_net_id(target_net_id)
-		target.curr_health -= ranged_dmg[target_net_id]
-		# dead unit, remove from all orders and remove node from game
-		if target.curr_health <= 0:
-			for player in ["player1", "player2"]:
-				player_orders[player].erase(target_net_id)
-				var report_label = Label.new()
-				if target.player_id == local_player_id:
-					report_label.text = "Your %s #%d died at %s" % [target.unit_type, target.net_id, target.grid_pos]
-					dmg_report.add_child(report_label)
-				else:
-					report_label.text = "Enemy %s #%d died at %s" % [target.unit_type, target.net_id, target.grid_pos]
-					dmg_report.add_child(report_label)
-			$GameBoardNode.vacate(target.grid_pos)
-			$GameBoardNode/HexTileMap.set_player_tile(target.grid_pos, "")
-			
-			target.queue_free()
-		else:
-			target.set_health_bar()
-	$UI._draw_attacks()
-	$GameBoardNode/FogOfWar._update_fog()
-
-func _process_melee():
-	var melee_attacks: Dictionary = {} # key: target, value: array[[attacker, priority]]
-	var melee_dmg: Dictionary = {} # key: target, vale: damage recieved
-	# melee orders resolution
-	for player in ["player1", "player2"]:
-		var unit_ids = player_orders[player].keys()
-		unit_ids.sort()
-		for unit_net_id in unit_ids:
-			if unit_net_id is not int:
-				continue
-			var order = player_orders[player][unit_net_id]
-			if order["type"] == "melee":
-				var unit = unit_manager.get_unit_by_net_id(unit_net_id)
-				var target = unit_manager.get_unit_by_net_id(order["target_unit_net_id"])
-				if is_instance_valid(target):
-					melee_attacks[order["target_unit_net_id"]] = melee_attacks.get(order["target_unit_net_id"], [])
-					melee_attacks[order["target_unit_net_id"]].append([unit.net_id, order["priority"]])
-				player_orders[player].erase(unit.net_id)
-	var target_ids = melee_attacks.keys()
-	target_ids.sort()
-	for target_unit_net_id in target_ids:
-		var target = unit_manager.get_unit_by_net_id(target_unit_net_id)
-		melee_attacks[target.net_id].sort_custom(func(a,b): return a[1] < b[1])
-		for attack in melee_attacks[target.net_id]:
-			var attacker = unit_manager.get_unit_by_net_id(attack[0])
-			var dmg_result = calculate_damage(attacker, target, "melee", 1)
-			var atkr_in_dmg = dmg_result[0]
-			var defr_in_dmg = dmg_result[1]
-			if target.is_defending:
-				melee_dmg[attacker.net_id] = melee_dmg.get(attacker.net_id, 0) + atkr_in_dmg
-			melee_dmg[target.net_id] = melee_dmg.get(target.net_id, 0) + defr_in_dmg
-			if target.player_id == local_player_id:
-				var report_label = Label.new()
-				report_label.text = "Your %s #%d took %d melee damage from %s #%d" % [target.unit_type, target.net_id, defr_in_dmg, attacker.unit_type, attacker.net_id]
-				dmg_report.add_child(report_label)
-				if target.is_defending:
-					report_label = Label.new()
-					report_label.text = "Your %s #%d retaliated and dealt %d damage" % [target.unit_type, target.net_id, atkr_in_dmg]
-					dmg_report.add_child(report_label)
-			else:
-				var report_label = Label.new()
-				report_label.text = "Your %s #%d dealt %d melee damage to %s #%d" % [attacker.unit_type, attacker.net_id, defr_in_dmg, target.unit_type, target.net_id]
-				dmg_report.add_child(report_label)
-				if target.is_defending:
-					report_label = Label.new()
-					report_label.text = "Enemy %s #%d retaliated and dealt %d damage" % [target.unit_type, target.net_id, atkr_in_dmg]
-					dmg_report.add_child(report_label)
 	target_ids = melee_dmg.keys()
 	target_ids.sort()
 	for target_unit_net_id in target_ids:
