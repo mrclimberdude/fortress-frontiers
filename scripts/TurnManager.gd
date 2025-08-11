@@ -211,7 +211,7 @@ func submit_player_order(player: String) -> void:
 	if _orders_submitted["player1"] and _orders_submitted["player2"]:
 		emit_signal("orders_phase_end")
 
-func calculate_damage(attacker, defender, atk_mode):
+func calculate_damage(attacker, defender, atk_mode, num_atkrs):
 	# NOTE: Whenever this function is updated, also update all manually calculated damage sections
 	# search: MANUAL_DMG
 	var atkr_damaged_penalty = 1- ((100 - attacker.curr_health) * 0.005)
@@ -221,9 +221,9 @@ func calculate_damage(attacker, defender, atk_mode):
 	else:
 		atkr_melee_str = attacker.melee_strength * atkr_damaged_penalty
 	var defr_damaged_penalty = 1- ((100 - defender.curr_health) * 0.005)
-	var defr_melee_str = defender.melee_strength
+	var defr_melee_str = defender.melee_strength - num_atkrs * defender.multi_def_penalty
 	if defender.is_defending and defender.is_phalanx:
-		defr_melee_str += PHALANX_BONUS
+		defr_melee_str += PHALANX_BONUS + num_atkrs * defender.multi_def_penalty
 	defr_melee_str = defr_melee_str * defr_damaged_penalty
 	var atkr_in_dmg
 	if defender.is_ranged and atk_mode == "ranged":
@@ -306,10 +306,11 @@ func _process_attacks():
 	var target_ids = ranged_attacks.keys()
 	target_ids.sort()
 	for target_net_id in target_ids:
+		var num_attackers = ranged_attacks.get(target_net_id, []).size() + melee_attacks.get(target_net_id, []).size()
 		for unit_net_id in ranged_attacks[target_net_id]:
 			var unit = unit_manager.get_unit_by_net_id(unit_net_id)
 			var target = unit_manager.get_unit_by_net_id(target_net_id)
-			var dmg_result = calculate_damage(unit, target, "ranged")
+			var dmg_result = calculate_damage(unit, target, "ranged", num_attackers)
 			var atkr_in_dmg = dmg_result[0]
 			var defr_in_dmg = dmg_result[1]
 			ranged_dmg[target_net_id] = ranged_dmg.get(target_net_id, 0) + defr_in_dmg
@@ -326,10 +327,11 @@ func _process_attacks():
 	target_ids.sort()
 	for target_unit_net_id in target_ids:
 		var target = unit_manager.get_unit_by_net_id(target_unit_net_id)
+		var num_attackers = ranged_attacks.get(target_unit_net_id, []).size() + melee_attacks.get(target_unit_net_id, []).size()
 		melee_attacks[target.net_id].sort_custom(func(a,b): return a[1] < b[1])
 		for attack in melee_attacks[target.net_id]:
 			var attacker = unit_manager.get_unit_by_net_id(attack[0])
-			var dmg_result = calculate_damage(attacker, target, "melee")
+			var dmg_result = calculate_damage(attacker, target, "melee", num_attackers)
 			var atkr_in_dmg = dmg_result[0]
 			var defr_in_dmg = dmg_result[1]
 			if target.is_defending:
@@ -438,7 +440,7 @@ func _process_ranged():
 		for unit_net_id in ranged_attacks[target_net_id]:
 			var unit = unit_manager.get_unit_by_net_id(unit_net_id)
 			var target = unit_manager.get_unit_by_net_id(target_net_id)
-			var dmg_result = calculate_damage(unit, target, "ranged")
+			var dmg_result = calculate_damage(unit, target, "ranged", 1)
 			var atkr_in_dmg = dmg_result[0]
 			var defr_in_dmg = dmg_result[1]
 			ranged_dmg[target_net_id] = ranged_dmg.get(target_net_id, 0) + defr_in_dmg
@@ -500,7 +502,7 @@ func _process_melee():
 		melee_attacks[target.net_id].sort_custom(func(a,b): return a[1] < b[1])
 		for attack in melee_attacks[target.net_id]:
 			var attacker = unit_manager.get_unit_by_net_id(attack[0])
-			var dmg_result = calculate_damage(attacker, target, "melee")
+			var dmg_result = calculate_damage(attacker, target, "melee", 1)
 			var atkr_in_dmg = dmg_result[0]
 			var defr_in_dmg = dmg_result[1]
 			if target.is_defending:
@@ -604,7 +606,7 @@ func _process_move():
 							units[i].set_grid_position(dependency_path[0][i+1])
 						break
 				if obstacle.player_id != curr_unit.player_id:
-					var dmg_result = calculate_damage(curr_unit, obstacle, "move")
+					var dmg_result = calculate_damage(curr_unit, obstacle, "move", 1)
 					var atkr_in_dmg = dmg_result[0]
 					var defr_in_dmg = dmg_result[1]
 					obstacle.curr_health -= defr_in_dmg

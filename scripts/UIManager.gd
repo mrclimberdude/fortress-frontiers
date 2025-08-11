@@ -307,6 +307,7 @@ func _on_action_selected(id: int) -> void:
 				"type": "heal",
 			})
 			_draw_all()
+			$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
 		
 		5:
 			print("Defend selected for %s" % currently_selected_unit.name)
@@ -317,6 +318,7 @@ func _on_action_selected(id: int) -> void:
 			currently_selected_unit.is_defending = true
 			currently_selected_unit.ordered = true
 			_draw_all()
+			$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
 	action_menu.hide()
 
 func _clear_all_drawings():
