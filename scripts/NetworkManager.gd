@@ -39,6 +39,9 @@ func join_game(ip: String, port: int) -> void:
 	get_tree().get_multiplayer().multiplayer_peer = peer      # Register it with Godot
 	print("Joining game at %s:%d" % [ip, port])
 
+func close_connection():
+	get_tree().get_multiplayer().multiplayer_peer.close()
+
 func _on_peer_connected(id: int) -> void:
 	mp = get_tree().get_multiplayer()
 	set_gold()

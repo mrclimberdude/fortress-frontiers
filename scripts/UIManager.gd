@@ -58,6 +58,8 @@ func _ready():
 					Callable(self, "_on_host_pressed"))
 	$JoinButton.connect("pressed",
 					Callable(self, "_on_join_pressed"))
+	$CancelGameButton.connect("pressed",
+					Callable(self, "_on_cancel_game_pressed"))
 	
 	# dev mode connections
 	dev_mode_toggle.connect("toggled",
@@ -215,6 +217,7 @@ func _on_host_pressed():
 	$JoinButton.visible = false
 	$IPLineEdit.visible = false
 	$PortLineEdit.visible = false
+	$CancelGameButton.visible = true
 	if not dev_mode_toggle.button_pressed:
 		dev_mode_toggle.visible = false
 
@@ -228,8 +231,18 @@ func _on_join_pressed():
 	$JoinButton.visible = false
 	$IPLineEdit.visible = false
 	$PortLineEdit.visible = false
+	$CancelGameButton.visible = true
 	if not dev_mode_toggle.button_pressed:
 		dev_mode_toggle.visible = false
+
+func _on_cancel_game_pressed():
+	$HostButton.visible = true
+	$JoinButton.visible = true
+	$IPLineEdit.visible = true
+	$PortLineEdit.visible = true
+	$CancelGameButton.visible = false
+	dev_mode_toggle.visible = true
+	NetworkManager.close_connection()
 
 func _on_unit_selected(unit: Node) -> void:
 	game_board.clear_highlights()

@@ -119,6 +119,7 @@ func _game_loop() -> void:
 # Phase 1: Upkeep — award gold
 # --------------------------------------------------------
 func _do_upkeep() -> void:
+	$UI/CancelGameButton.visible = false
 	current_phase = Phase.UPKEEP
 	NetworkManager._step_ready_counts = {}
 	print("--- Upkeep Phase ---")
