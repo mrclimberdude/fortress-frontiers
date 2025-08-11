@@ -111,10 +111,3 @@ func find_end(unit, path, enemy, enemy_flag):
 
 func get_unit_by_net_id(id: int) -> Node:
 	return unit_by_net_id.get(id, null)
-
-func _input(event):
-	if event.is_action_pressed("debug_move"):
-		# Grab your first unit under UnitManager; adjust path/index as needed
-		var unit = $".".get_child(0)
-		if unit:
-			unit.set_grid_position(Vector2i(4, 6))
