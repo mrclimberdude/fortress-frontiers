@@ -235,6 +235,32 @@ func calculate_damage(attacker, defender, atk_mode, num_atkrs):
 	var defr_in_dmg = 30 * (1.041**(atkr_str - defr_str))
 	return [atkr_in_dmg, defr_in_dmg]
 
+func dealt_dmg_report(atkr, defr, atkr_in_dmg, defr_in_dmg, retaliate, atk_mode):
+	var report_label = Label.new()
+	if defr.player_id == local_player_id:
+		report_label.text = "Your %s #%d took %d %s damage from %s #%d" % [defr.unit_type, defr.net_id, defr_in_dmg, atk_mode, atkr.unit_type, atkr.net_id]
+		dmg_report.add_child(report_label)
+		if retaliate:
+			report_label = Label.new()
+			report_label.text = "Your %s #%d retaliated and dealt %d damage" % [defr.unit_type, defr.net_id, atkr_in_dmg]
+			dmg_report.add_child(report_label)
+	else:
+		report_label.text = "Your %s #%d dealt %d %s damage to %s #%d" % [atkr.unit_type, atkr.net_id, defr_in_dmg, atk_mode, defr.unit_type, defr.net_id]
+		dmg_report.add_child(report_label)
+		if retaliate:
+			report_label = Label.new()
+			report_label.text = "Enemy %s #%d retaliated and dealt %d damage" % [defr.unit_type, defr.net_id, atkr_in_dmg]
+			dmg_report.add_child(report_label)
+
+func died_dmg_report(unit):
+	var report_label = Label.new()
+	if unit.player_id == local_player_id:
+		report_label.text = "Your %s #%d died at %s" % [unit.unit_type, unit.net_id, unit.grid_pos]
+		dmg_report.add_child(report_label)
+	else:
+		report_label.text = "Enemy %s #%d died at %s" % [unit.unit_type, unit.net_id, unit.grid_pos]
+		dmg_report.add_child(report_label)
+
 func _process_spawns():
 	var spawn_orders = []
 	for player_id in NetworkManager.player_orders.keys():
@@ -455,12 +481,117 @@ func _process_move():
 				if obstacle.is_moving:
 					if obstacle.player_id == curr_unit.player_id or obstacle.moving_to != curr_unit.grid_pos:
 						var dependency_path = $GameBoardNode/Units.find_end(curr_unit, [curr_unit.grid_pos], false, false)
-						#if dependency_path[0][-1] == curr_unit.grid_pos:
-						# circular path
+						var dupe_tile = null
+						for spot in dependency_path[0]:
+							if dependency_path[0].count(spot) > 1:
+								dupe_tile = spot
+								break
+						if dupe_tile:
+							var dupe_index = dependency_path[0].find(dupe_tile)
+							var circle = dependency_path[0].slice(dupe_index)
+							var units = []
+							for spot in circle:
+								var unit = $GameBoardNode.get_unit_at(spot)
+								units.append(unit)
+							var first_unit = units[-1]
+							first_unit.set_grid_position(Vector2i(-100, -100))
+							for i in range(units.size() -2, -1, -1):
+								units[i].set_grid_position(circle[i+1])
+								if player_orders[units[i].player_id][units[i].net_id]["path"].size() <= 2:
+									player_orders[units[i].player_id].erase(units[i].net_id)
+									units[i].is_moving = false
+								else:
+									player_orders[units[i].player_id][units[i].net_id]["path"].pop_front()
+									units[i].moving_to = player_orders[units[i].player_id][units[i].net_id]["path"][1]
+							break
 						var units = []
 						for spot in dependency_path[0]:
-							units.append($GameBoardNode.get_unit_at(spot))
-						for i in range(units.size()-1):
+							var unit = $GameBoardNode.get_unit_at(spot)
+							if unit:
+								if unit in units:
+									break
+								if unit.is_moving:
+									units.append(unit)
+						for i in range(units.size()-1, -1, -1):
+							var entering_unit = units[i]
+							var new_tile = dependency_path[0][i+1]
+							var unit_at_tile = $GameBoardNode.get_unit_at(new_tile)
+							if unit_at_tile:
+								if unit_at_tile.player_id == entering_unit.player_id:
+									if unit_at_tile.is_moving:
+										if unit_at_tile.moving_to !=entering_unit.grid_pos:
+											continue
+										unit_at_tile.set_grid_position(Vector2i(-100, -100))
+										var old_tile = entering_unit.grid_pos
+										entering_unit.set_grid_position(new_tile)
+										unit_at_tile.set_grid_position(old_tile)
+										if player_orders[entering_unit.player_id][entering_unit.net_id]["path"].size() <= 2:
+											player_orders[entering_unit.player_id].erase(entering_unit.net_id)
+											entering_unit.is_moving = false
+										else:
+											player_orders[entering_unit.player_id][entering_unit.net_id]["path"].pop_front()
+											entering_unit.moving_to = player_orders[entering_unit.player_id][entering_unit.net_id]["path"][1]
+										if player_orders[unit_at_tile.player_id][unit_at_tile.net_id]["path"].size() <= 2:
+											player_orders[unit_at_tile.player_id].erase(unit_at_tile.net_id)
+											unit_at_tile.is_moving = false
+										else:
+											player_orders[unit_at_tile.player_id][unit_at_tile.net_id]["path"].pop_front()
+											unit_at_tile.moving_to = player_orders[unit_at_tile.player_id][unit_at_tile.net_id]["path"][1]
+										continue
+									player_orders[entering_unit.player_id].erase(entering_unit.net_id)
+									entering_unit.is_moving = false
+								else:
+									if unit_at_tile.is_moving and unit_at_tile.moving_to != entering_unit.grid_pos:
+										continue
+									var dmg_result = calculate_damage(entering_unit, unit_at_tile, "move", 1)
+									var atkr_in_dmg = dmg_result[0]
+									var defr_in_dmg = dmg_result[1]
+									unit_at_tile.curr_health -= defr_in_dmg
+									unit_at_tile.set_health_bar()
+									if unit_at_tile.is_defending:
+										entering_unit.curr_health -= atkr_in_dmg
+										entering_unit.set_health_bar()
+										dealt_dmg_report(entering_unit, unit_at_tile, atkr_in_dmg, defr_in_dmg, true, "melee")
+										if entering_unit.curr_health <= 0:
+											died_dmg_report(entering_unit)
+											player_orders[entering_unit.player_id].erase(entering_unit.net_id)
+											$GameBoardNode.vacate(entering_unit.grid_pos)
+											$GameBoardNode/HexTileMap.set_player_tile(entering_unit.grid_pos, "")
+											entering_unit.queue_free()
+									
+									elif unit_at_tile.is_moving and unit_at_tile.moving_to == entering_unit.grid_pos:
+										entering_unit.curr_health -= atkr_in_dmg
+										entering_unit.set_health_bar()
+										dealt_dmg_report(entering_unit, unit_at_tile, atkr_in_dmg, defr_in_dmg, true, "melee")
+										if entering_unit.curr_health <= 0:
+											died_dmg_report(entering_unit)
+											player_orders[entering_unit.player_id].erase(entering_unit.net_id)
+											$GameBoardNode.vacate(entering_unit.grid_pos)
+											$GameBoardNode/HexTileMap.set_player_tile(entering_unit.grid_pos, "")
+											if unit_at_tile.curr_health > 0:
+												unit_at_tile.set_grid_position(entering_unit.grid_pos)
+											unit_at_tile.is_moving = false
+											player_orders[unit_at_tile.player_id].erase(unit_at_tile.net_id)
+											entering_unit.queue_free()
+									else:
+										dealt_dmg_report(entering_unit, unit_at_tile, atkr_in_dmg, defr_in_dmg, false, "melee")
+									
+									if unit_at_tile.curr_health <= 0:
+										died_dmg_report(unit_at_tile)
+										player_orders[unit_at_tile.player_id].erase(unit_at_tile.net_id)
+										$GameBoardNode.vacate(unit_at_tile.grid_pos)
+										$GameBoardNode/HexTileMap.set_player_tile(unit_at_tile.grid_pos, "")
+										if entering_unit.curr_health > 0:
+											entering_unit.set_grid_position(new_tile)
+										entering_unit.is_moving = false
+										player_orders[entering_unit.player_id].erase(entering_unit.net_id)
+										unit_at_tile.queue_free()
+									
+									player_orders[entering_unit.player_id].erase(entering_unit.net_id)
+									entering_unit.is_moving = false
+								continue
+							
+							# no unit in next_tile
 							units[i].set_grid_position(dependency_path[0][i+1])
 							if player_orders[units[i].player_id][units[i].net_id]["path"].size() <= 2:
 								player_orders[units[i].player_id].erase(units[i].net_id)
@@ -468,8 +599,6 @@ func _process_move():
 							else:
 								player_orders[units[i].player_id][units[i].net_id]["path"].pop_front()
 								units[i].moving_to = player_orders[units[i].player_id][units[i].net_id]["path"][1]
-						for i in range(units.size()-1):
-							units[i].set_grid_position(dependency_path[0][i+1])
 						break
 				if obstacle.player_id != curr_unit.player_id:
 					var dmg_result = calculate_damage(curr_unit, obstacle, "move", 1)
@@ -480,11 +609,16 @@ func _process_move():
 					if obstacle.is_defending:
 						curr_unit.curr_health -= atkr_in_dmg
 						curr_unit.set_health_bar()
+						dealt_dmg_report(curr_unit, obstacle, atkr_in_dmg, defr_in_dmg, true, "melee")
 					if obstacle.moving_to == curr_unit.grid_pos and obstacle.is_moving and obstacle.curr_health > 0:
 						curr_unit.curr_health -= atkr_in_dmg
 						curr_unit.set_health_bar()
 						player_orders[obstacle.player_id].erase(obstacle.net_id)
 						obstacle.is_moving = false
+						dealt_dmg_report(curr_unit, obstacle, atkr_in_dmg, defr_in_dmg, true, "melee")
+					
+					
+					
 					if obstacle.player_id == local_player_id:
 						var report_label = Label.new()
 						report_label.text = "Your %s #%d took %d melee damage from %s #%d" % [obstacle.unit_type, obstacle.net_id, defr_in_dmg, curr_unit.unit_type, curr_unit.net_id]

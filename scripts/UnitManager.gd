@@ -104,8 +104,14 @@ func find_end(unit, path, enemy, enemy_flag):
 			if not obstacle.is_moving:
 				return [path, enemy_flag]
 			if obstacle.player_id == unit.player_id:
+				if obstacle.moving_to == unit.grid_pos:
+					path.append(obstacle.moving_to)
+					return [path, true]
 				return find_end(obstacle, path, false, enemy_flag)
 			else:
+				if obstacle.moving_to == unit.grid_pos:
+					path.append(obstacle.moving_to)
+					return [path, true]
 				return find_end(obstacle, path, true, enemy_flag)
 	return [path, enemy_flag]
 
