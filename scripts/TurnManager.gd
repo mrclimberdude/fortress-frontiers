@@ -681,18 +681,8 @@ func _mg_commit_rotation(scc: Array, mg: MovementGraph, winners_by_tile: Diction
 		moves.append({ "unit": u, "from": from_tile, "to": node })
 
 	# Phase A: vacate the entire component (all nodes), not just 'from' tiles.
-	# For a pure cycle, the set of 'from' tiles equals the set of 'to' tiles (= scc).
-	for node in scc:
-		$GameBoardNode.vacate(node)
-	# also vacate each 'from' explicitly (idempotent)
-	for m in moves:
-		$GameBoardNode.vacate(m["from"])
-
-	# Optional strict sanity: all scc tiles should now be empty
-	for node in scc:
-		if $GameBoardNode.get_unit_at(node) != null:
-			# Something else wrote here; abort rotation
-			return {}
+	for i in range(moves.size()):
+		moves[i]["unit"].set_grid_position(Vector2i(-998 + i, -998 +i))
 
 	# Phase B: place each unit at its destination
 	for m in moves:
@@ -764,18 +754,23 @@ func _process_move():
 	# 4. Commit uncontested rotations and chains
 	var vacated := {}
 	var stayed := {}
+	var rotated_tiles := {}
 	for comp in sccs:
 		if mg.scc_is_uncontested_rotation(comp, winners_by_tile):
-			_mg_commit_rotation(comp, mg, winners_by_tile, vacated)
+			var touched = _mg_commit_rotation(comp, mg, winners_by_tile, vacated)
+			for t in touched.keys():
+				rotated_tiles[t] = true
 	_mg_commit_chains(dep_edges, vacated)
 	
 	# Mark units that did not move as stationary for this tick
 	for u in units:
-		if u.is_moving and not vacated.get(u.grid_pos, false):
+		if u.is_moving and not vacated.get(u.grid_pos, false) and not rotated_tiles.has(u.grid_pos):
 			stayed[u.grid_pos] = true
 	
 	# 5. Run bounce‑as‑stationary defender fights
 	for t in entrants_all.keys():
+		if rotated_tiles.has(t):
+			continue
 		var occ = $GameBoardNode.get_unit_at(t)
 		if not occ:
 			continue
@@ -786,6 +781,8 @@ func _process_move():
 	
 	# 6. Resolve contested empty tiles with FIFO queues
 	for t in entrants_all.keys():
+		if rotated_tiles.has(t):
+			continue
 		if stayed.get(t, false):
 			continue
 		if $GameBoardNode.get_unit_at(t) != null:
