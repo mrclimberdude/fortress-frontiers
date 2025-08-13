@@ -202,15 +202,28 @@ func detect_enemy_swaps() -> Array:
 func scc_is_uncontested_rotation(scc: Array, winners_by_tile: Dictionary) -> bool:
 	if scc.size() < 2:
 		return false
+
+	var entrants := entries_all()
 	var prev := cycle_prev_map()
+
 	for node in scc:
+		if not entrants.has(node):
+			return false
+		# must be exactly one entrant
+		if entrants[node].size() != 1:
+			return false
+
 		var internal = prev.get(node, null)
 		if internal == null:
 			return false
-		# stationary defender if someone is on 'node' and 'node' has no outgoing move this tick
+
+		# no stationary defender on any node in the cycle
 		var occ = unit_lookup.get(node, null)
 		if occ != null and not graph.has(node):
 			return false
+
+		# the chosen winner must be the internal predecessor
 		if winners_by_tile.get(node, null) != internal:
 			return false
+
 	return true
