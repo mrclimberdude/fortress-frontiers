@@ -483,7 +483,8 @@ func _mg_resolve_enemy_swap(a_pos: Vector2i, b_pos: Vector2i) -> void:
 
 	var dmg_a = calculate_damage(ua, ub, "move", 1)	# [atk_in, def_in]
 	var dmg_b = calculate_damage(ub, ua, "move", 1)
-
+	
+	dealt_dmg_report(ua, ub, dmg_b[1], dmg_a[1], true, "move")
 	ua.curr_health -= dmg_b[1]
 	ub.curr_health -= dmg_a[1]
 	ua.set_health_bar()
@@ -491,7 +492,11 @@ func _mg_resolve_enemy_swap(a_pos: Vector2i, b_pos: Vector2i) -> void:
 
 	var ua_dead = ua.curr_health <= 0
 	var ub_dead = ub.curr_health <= 0
-
+	
+	if ua_dead:
+		died_dmg_report(ua)
+	if ub_dead:
+		died_dmg_report(ub)
 	if ua_dead and ub_dead:
 		$GameBoardNode.vacate(a_pos)
 		$GameBoardNode/HexTileMap.set_player_tile(a_pos, "")
@@ -620,6 +625,7 @@ func _mg_tile_fifo_commit(t: Vector2i, entrants: Array, stationary_defender: Nod
 		var dmg = calculate_damage(atk, stationary_defender, "move", 1)
 		stationary_defender.curr_health -= dmg[1]
 		stationary_defender.set_health_bar()
+		dealt_dmg_report(atk, stationary_defender, dmg[0], dmg[1], stationary_defender.is_defending, "move")
 
 		if stationary_defender.is_defending:
 			atk.curr_health -= dmg[0]
@@ -632,11 +638,13 @@ func _mg_tile_fifo_commit(t: Vector2i, entrants: Array, stationary_defender: Nod
 
 		# Handle deaths
 		if atk.curr_health <= 0:
+			died_dmg_report(atk)
 			$GameBoardNode.vacate(atk.grid_pos)
 			$GameBoardNode/HexTileMap.set_player_tile(atk.grid_pos, "")
 			atk.queue_free()
 			enemy_item = null
 		if stationary_defender.curr_health <= 0:
+			died_dmg_report(stationary_defender)
 			# Defender died at atk's hand; remember killer if alive
 			if atk != null and atk.curr_health > 0:
 				killer_item = {"from": atk.grid_pos, "unit": atk, "fought": true}
@@ -704,6 +712,7 @@ func _fifo_resolve_empty_tile(dest: Vector2i, qA: Array, qB: Array) -> Variant:
 		ub.curr_health -= d12[1]
 		ua.set_health_bar()
 		ub.set_health_bar()
+		dealt_dmg_report(ua, ub, d21[1], d12[1], true, "move")
 
 		# both fought this tick
 		ua.is_moving = false
@@ -716,10 +725,12 @@ func _fifo_resolve_empty_tile(dest: Vector2i, qA: Array, qB: Array) -> Variant:
 		var ua_dead = ua.curr_health <= 0
 		var ub_dead = ub.curr_health <= 0
 		if ua_dead:
+			died_dmg_report(ua)
 			$GameBoardNode.vacate(ua.grid_pos)
 			$GameBoardNode/HexTileMap.set_player_tile(ua.grid_pos, "")
 			ua.queue_free()
 		if ub_dead:
+			died_dmg_report(ub)
 			$GameBoardNode.vacate(ub.grid_pos)
 			$GameBoardNode/HexTileMap.set_player_tile(ub.grid_pos, "")
 			ub.queue_free()
