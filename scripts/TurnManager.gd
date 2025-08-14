@@ -773,6 +773,49 @@ func _mg_commit_rotation(scc: Array, mg: MovementGraph, winners_by_tile: Diction
 		rotated_tiles[node] = true
 	return rotated_tiles
 
+# Resolve a chain by walking from the sink backward.
+#  mg          : MovementGraph already built for this tick.
+#  entrants_map: mg.entries_all() (captured once before rotations).
+#  start_tile  : the current sink (empty or stationary/stayed occupant).
+#  rotated_tiles: Dictionary set of tiles that were part of this tick's rotations – skip them.
+func _mg_resolve_chain_from_sink(mg: MovementGraph, entrants_map: Dictionary, start_tile: Vector2i, rotated_tiles: Dictionary) -> void:
+	var pending := [start_tile]
+	var seen := {}
+
+	while pending.size() > 0:
+		var t: Vector2i = pending.pop_front()
+		if rotated_tiles.has(t) or seen.has(t):
+			continue
+		seen[t] = true
+
+		# Filter entrants to live, still-moving units
+		var raw = entrants_map.get(t, [])
+		var entrants := []
+		for src in raw:
+			var u = $GameBoardNode.get_unit_at(src)
+			if u != null and u.curr_health > 0 and u.is_moving:
+				entrants.append(src)
+				if not src in pending:
+					pending.append(src)
+
+		if entrants.size() == 0:
+			continue  # chain ends here
+
+		var occ = $GameBoardNode.get_unit_at(t)
+		var winner_from = null
+		var fought = false
+		# stationary defender if occupant has no outgoing move (or is stayed)
+		if occ != null and not occ.is_moving:
+			winner_from = _mg_tile_fifo_commit(t, entrants, occ)
+		else:
+			winner_from = _mg_tile_fifo_commit(t, entrants, null)
+
+		if typeof(winner_from) == TYPE_VECTOR2I:
+			# The unit that entered t came from winner_from; that tile is the next sink
+			var w = $GameBoardNode.get_unit_at(winner_from)
+			if w != null and w.curr_health > 0:
+				w.set_grid_position(t)
+			#pending.append(winner_from)
 
 
 # Commit chains (SCC singletons) in sink->root order using dep_edges.
@@ -801,10 +844,8 @@ func _process_move():
 	var all_units = $GameBoardNode.get_all_units()
 	var units: Array = all_units["player1"] + all_units["player2"]
 	var mg = MovementGraph.new()
-	
-	# Rebuild the graph for this tick
 	mg.build(units)
-
+	
 	# 1. Resolve enemy swaps first
 	for pair in mg.detect_enemy_swaps():
 		_mg_resolve_enemy_swap(pair["a"], pair["b"])
@@ -836,7 +877,70 @@ func _process_move():
 			var touched = _mg_commit_rotation(comp, mg, winners_by_tile, vacated)
 			for t in touched.keys():
 				rotated_tiles[t] = true
-	_mg_commit_chains(dep_edges, vacated)
+	
+	all_units = $GameBoardNode.get_all_units()
+	units = all_units["player1"] + all_units["player2"]
+	mg.build(units)
+	entrants_all = mg.entries_all()
+	
+	# Build SCCs on the raw intent graph (one outgoing per mover)
+	var graph_edges := {}
+	for from_tile in mg.graph.keys():
+		graph_edges[from_tile] = [mg.graph[from_tile]]
+	var sccs_all: Array = mg.strongly_connected_components(graph_edges)
+
+	# Targeted "entrant-vs-entrant" pre-fight ONLY at contested cycle entry tiles
+	# We do not move anyone here; we only stop fighters. We IGNORE any return value.
+	for comp in sccs_all:
+		if rotated_tiles.has(comp.front()):
+			continue
+		if mg.scc_is_contested_cycle(comp, entrants_all):
+			# Build quick lookup sets
+			var in_comp := {}
+			for n in comp:
+				in_comp[n] = true
+			var prev := mg.cycle_prev_map()
+
+			for node in comp:
+				# entrants to this node in this tick
+				var raw_arr: Array = entrants_all.get(node, [])
+				# Keep internal predecessor IF present (the mover from inside the cycle)
+				var internal_src = prev.get(node, null)
+				# Collect external entrants (outside SCC) + the internal predecessor
+				var fight_list := []
+				for src in raw_arr:
+					if src == internal_src:
+						fight_list.append(src)          # internal predecessor is also an entrant
+					elif not in_comp.has(src):
+						fight_list.append(src)          # true external entrant
+
+				# Only pre-fight if at least two entrants meet at this node
+				if fight_list.size() >= 2:
+					_mg_tile_fifo_commit(node, fight_list, null)  # fight-only; ignore winner
+
+	# Rebuild graph & entrants after these fights (is_moving/HP may have changed)
+	all_units = $GameBoardNode.get_all_units()
+	units = all_units["player1"] + all_units["player2"]
+	mg.build(units)
+	entrants_all = mg.entries_all()
+
+	# 5. Identify sinks: empty tiles with entrants, plus tiles whose occupant does not have an outgoing move
+	var sink_tiles := []
+	for t in entrants_all.keys():
+		if rotated_tiles.has(t):
+			continue
+		var occ = $GameBoardNode.get_unit_at(t)
+		if occ == null or not occ.is_moving:
+			sink_tiles.append(t)
+
+	# Walk each sink to resolve the chain
+	for t in sink_tiles:
+		_mg_resolve_chain_from_sink(mg, entrants_all, t, rotated_tiles)
+
+	all_units = $GameBoardNode.get_all_units()
+	units = all_units["player1"] + all_units["player2"]
+	mg.build(units)
+	entrants_all = mg.entries_all()
 	
 	# Mark units that did not move as stationary for this tick
 	for u in units:
@@ -844,32 +948,35 @@ func _process_move():
 			stayed[u.grid_pos] = true
 	
 	## 5. Run bounce‑as‑stationary defender fights
-	#for t in entrants_all.keys():
-		#if rotated_tiles.has(t):
-			#continue
-		#var occ = $GameBoardNode.get_unit_at(t)
-		#if not occ:
-			#continue
-		#var occupant_is_stationary = not mg.graph.has(t)
-		#var occupant_stayed = stayed.get(t,false)
-		#if occupant_is_stationary or occupant_stayed:
-			#_mg_tile_fifo_commit(t, entrants_all[t], occ)
-	
-	# 6. Resolve contested empty tiles with FIFO queues
 	for t in entrants_all.keys():
 		if rotated_tiles.has(t):
 			continue
 		if stayed.get(t, false):
-			continue
-		if entrants_all[t].size() > 0:
-			var winner_from = _mg_tile_fifo_commit(t, entrants_all[t], $GameBoardNode.get_unit_at(t))
-			if winner_from is Vector2i:
-				var wunit = $GameBoardNode.get_unit_at(winner_from)
-				if wunit != null and wunit.curr_health > 0:
-					$GameBoardNode.vacate(wunit.grid_pos)
-					wunit.set_grid_position(t)
-					wunit.is_moving = false
-					NetworkManager.player_orders[wunit.player_id].erase(wunit.net_id)
+			var defender = $GameBoardNode.get_unit_at(t)
+			if defender != null:
+				var winner_from2 = _mg_tile_fifo_commit(t, entrants_all[t], defender)
+				if typeof(winner_from2) == TYPE_VECTOR2I:
+					var w2 = $GameBoardNode.get_unit_at(winner_from2)
+					if w2 != null and w2.curr_health > 0:
+						# set_grid_position handles vacate+occupy
+						w2.set_grid_position(t)
+						w2.is_moving = false
+	
+	## 6. Resolve contested empty tiles with FIFO queues
+	#for t in entrants_all.keys():
+		#if rotated_tiles.has(t):
+			#continue
+		#if stayed.get(t, false):
+			#continue
+		#if entrants_all[t].size() > 0:
+			#var winner_from = _mg_tile_fifo_commit(t, entrants_all[t], $GameBoardNode.get_unit_at(t))
+			#if winner_from is Vector2i:
+				#var wunit = $GameBoardNode.get_unit_at(winner_from)
+				#if wunit != null and wunit.curr_health > 0:
+					#$GameBoardNode.vacate(wunit.grid_pos)
+					#wunit.set_grid_position(t)
+					#wunit.is_moving = false
+					#NetworkManager.player_orders[wunit.player_id].erase(wunit.net_id)
 	
 	# 7. Pop one path step for every unit that moved; clear finished orders
 	for u in units:

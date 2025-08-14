@@ -227,3 +227,30 @@ func scc_is_uncontested_rotation(scc: Array, winners_by_tile: Dictionary) -> boo
 			return false
 
 	return true
+
+# A cycle is "contested" if any node in the SCC has an external entrant
+# in addition to (or instead of) its internal predecessor.
+func scc_is_contested_cycle(scc: Array, entrants_all: Dictionary) -> bool:
+	if scc.size() < 2:
+		return false
+	var in_scc := {}
+	for n in scc:
+		in_scc[n] = true
+	var prev := cycle_prev_map()
+	for node in scc:
+		var arr: Array = entrants_all.get(node, [])
+		if arr.size() == 0:
+			continue
+		var internal = prev.get(node, null)
+		var has_external := false
+		var only_internal := true
+		for src in arr:
+			if src != internal:
+				only_internal = false
+				if not in_scc.has(src):
+					has_external = true
+		# contested if we have any external entrant OR we have >1 entrant
+		# (the >1 case implies internal+external)
+		if has_external or (arr.size() > 1 and internal != null):
+			return true
+	return false
