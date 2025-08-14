@@ -533,129 +533,205 @@ func _pop_next_unfought(q: Array) -> Dictionary:
 		i += 1
 	return {}
 
-# Decide the winner for a single tile t this tick using FIFO queues.
-# This function MUTATES unit HP and may free nodes. It returns either a winner_from (Vector2i) or null.
+# Decide the winner for a single tile t this tick.
+# If stationary_defender is non-null, treat them as a pinned queue item.
+# Returns either a winner_from (Vector2i) or null. This function mutates HP and may free nodes.
 func _mg_tile_fifo_commit(t: Vector2i, entrants: Array, stationary_defender: Node) -> Variant:
-	# Split entrants by player
-	var q1 := []
-	var q2 := []
+	# Build entrant items with their native player_id; don't assume labels
+	var entrant_items := []
 	for src in entrants:
 		var u = $GameBoardNode.get_unit_at(src)
-		if u == null:
-			continue
-		var item = {"from": src, "unit": u, "fought": false}
-		if u.player_id == "player1":
-			q1.append(item)
+		if u != null:
+			entrant_items.append({"from": src, "unit": u, "fought": false})
+
+	# No defender -> contested empty tile logic
+	if stationary_defender == null:
+		# Partition by first-seen side for deterministic buckets
+		return _fifo_resolve_empty_tile(
+			t,
+			_filter_side_queue(entrant_items, entrant_items[0]["unit"].player_id if entrant_items.size() > 0  else null),
+			_filter_side_queue(entrant_items, _other_side_id(entrant_items, entrant_items[0]["unit"].player_id) if entrant_items.size() > 0  else null)
+		)
+
+	# Defender case: build friend/enemy queues relative to defender's side
+	var def_side = stationary_defender.player_id
+	var friend_q := []
+	var enemy_q := []
+	for it in entrant_items:
+		if it["unit"].player_id == def_side:
+			friend_q.append(it)
 		else:
-			q2.append(item)
+			enemy_q.append(it)
 
-	# Defender phase (pinned at the front until death)
-	if stationary_defender != null:
-		# friendly entrants are blocked this tick
-		var enemy_q
-		var friend_q
-		if stationary_defender.player_id == "player1":
-			enemy_q = q2
-			friend_q = q1
-		else:
-			enemy_q = q1
-			friend_q = q2
-		for item in friend_q:
-			var f = item["unit"]
-			if f == null:
-				continue
-			f.is_moving = false
-			if NetworkManager.player_orders.has(f.player_id):
-				NetworkManager.player_orders[f.player_id].erase(f.net_id)
-		friend_q.clear()
+	# Pin the defender at the very front, using a special marker (not a mover!)
+	var def_item = {"from": stationary_defender.grid_pos, "unit": stationary_defender, "fought": false, "is_defender": true}
+	friend_q.push_front(def_item)
 
-		var last_attacker_survivor = null
-		while stationary_defender != null and stationary_defender.curr_health > 0 and enemy_q.size() > 0:
-			var atk = enemy_q.pop_front()
-			var a = atk["unit"]
-
-			var dmg = calculate_damage(a, stationary_defender, "move", 1)
-			stationary_defender.curr_health -= dmg[1]
-			stationary_defender.set_health_bar()
-			if stationary_defender.is_defending and stationary_defender.curr_health > 0:
-				a.curr_health -= dmg[0]
-				a.set_health_bar()
-
-			a.is_moving = false
-			NetworkManager.player_orders[a.player_id].erase(a.net_id)
-
-			if a.curr_health <= 0:
-				$GameBoardNode.vacate(a.grid_pos)
-				a.queue_free()
-				last_attacker_survivor = null
-			else:
-				last_attacker_survivor = a
-
-		if stationary_defender != null and stationary_defender.curr_health <= 0:
-			var dpos = stationary_defender.grid_pos
-			$GameBoardNode.vacate(dpos)
-			stationary_defender.queue_free()
-			if last_attacker_survivor != null and last_attacker_survivor.curr_health > 0:
-				last_attacker_survivor.set_grid_position(dpos)
-				last_attacker_survivor.is_moving = false
-				NetworkManager.player_orders[last_attacker_survivor.player_id].erase(last_attacker_survivor.net_id)
-				return last_attacker_survivor.grid_pos
-			return null
-
-		# defender held; nobody enters
-		return null
-
-	# No defender → generic two-queue FIFO fights
-
+	var killer_item = null  # if defender dies and the killing attacker lives, we add them post-death
 
 	while true:
-		var a1 = _pop_next_unfought(q1)
-		var a2 = _pop_next_unfought(q2)
-		if a1.is_empty() and a2.is_empty():
-			break
-		if a1.is_empty() or a2.is_empty():
-			if not a1.is_empty(): q1.push_front(a1)
-			if not a2.is_empty(): q2.push_front(a2)
-			break
+		# If defender died already, resolve remaining as contested empty
+		if stationary_defender == null or stationary_defender.curr_health <= 0:
+			# Remove any residual defender marker
+			if friend_q.size() > 0 and friend_q.front().has("is_defender") and friend_q.front()["is_defender"]:
+				friend_q.pop_front()
 
-		var u1 = a1["unit"]
-		var u2 = a2["unit"]
-		var d12 = calculate_damage(u1, u2, "move", 1)
-		var d21 = calculate_damage(u2, u1, "move", 1)
-		u1.curr_health -= d21[1]
-		u2.curr_health -= d12[1]
-		u1.set_health_bar()
-		u2.set_health_bar()
-		u1.is_moving = false
-		u2.is_moving = false
-		NetworkManager.player_orders[u1.player_id].erase(u1.net_id)
-		NetworkManager.player_orders[u2.player_id].erase(u2.net_id)
+			# If we have a live killer from the last clash, append once as fought
+			if killer_item != null and killer_item["unit"] != null and killer_item["unit"].curr_health > 0:
+				killer_item["fought"] = true
+				if killer_item["unit"].player_id == def_side:
+					friend_q.append(killer_item)
+				else:
+					enemy_q.append(killer_item)
+				killer_item = null
 
-		var u1_dead = u1.curr_health <= 0
-		var u2_dead = u2.curr_health <= 0
+			return _fifo_resolve_empty_tile(t, friend_q, enemy_q)
 
-		if u1_dead:
-			$GameBoardNode.vacate(u1.grid_pos)
-			u1.queue_free()
-		elif u2_dead:
-			a1["fought"] = true
-			q1.append(a1)
+		# Defender alive and no enemies left -> friendly entrants cannot pass, stop them this tick
+		if enemy_q.size() == 0:
+			# stop & clear orders for any friendly *entrants* (ignore the defender marker)
+			for it in friend_q:
+				if it.has("is_defender") and it["is_defender"]:
+					continue
+				var f = it["unit"]
+				if f != null:
+					f.is_moving = false
+					if NetworkManager.player_orders.has(f.player_id):
+						NetworkManager.player_orders[f.player_id].erase(f.net_id)
+			return stationary_defender.grid_pos
 
-		if u2_dead:
-			$GameBoardNode.vacate(u2.grid_pos)
-			u2.queue_free()
-		elif u1_dead:
-			a2["fought"] = true
-			q2.append(a2)
+		# Defender alive and enemies present -> clash defender vs next enemy
+		# Ensure the defender marker is at the very front
+		if friend_q.size() == 0 or not (friend_q.front().has("is_defender") and friend_q.front()["is_defender"]):
+			# safety: re-insert defender marker at the front if needed
+			friend_q.push_front(def_item)
 
-	# Claim step
-	if q1.size() == 0 and q2.size() == 0:
-		return null
-	if q1.size() > 0 and q2.size() == 0:
-		return q1.front()["from"]
-	if q2.size() > 0 and q1.size() == 0:
-		return q2.front()["from"]
+		var enemy_item = enemy_q.pop_front()
+		var atk = enemy_item["unit"]
+		if atk == null:
+			continue
+
+		# Attacker hits defender; defender retaliates if still alive & is_defending
+		var dmg = calculate_damage(atk, stationary_defender, "move", 1)
+		stationary_defender.curr_health -= dmg[1]
+		stationary_defender.set_health_bar()
+
+		if stationary_defender.is_defending:
+			atk.curr_health -= dmg[0]
+			atk.set_health_bar()
+
+		# Attacker fought this tick -> stop and clear order
+		atk.is_moving = false
+		if NetworkManager.player_orders.has(atk.player_id):
+			NetworkManager.player_orders[atk.player_id].erase(atk.net_id)
+
+		# Handle deaths
+		if atk.curr_health <= 0:
+			$GameBoardNode.vacate(atk.grid_pos)
+			atk.queue_free()
+			enemy_item = null
+		if stationary_defender.curr_health <= 0:
+			# Defender died at atk's hand; remember killer if alive
+			if atk != null and atk.curr_health > 0:
+				killer_item = {"from": atk.grid_pos, "unit": atk, "fought": true}
+			# Remove defender from board and proceed to empty-tile FIFO
+			var dpos = def_item["from"]
+			$GameBoardNode.vacate(dpos)
+			stationary_defender.queue_free()
+			stationary_defender = null
+			# loop continues; next iteration will fall into the contested-empty branch
+			continue
+
+		# Defender lives -> keep defender marker locked at the very front for next enemy
+		# (do nothing: def_item is already at front)
+	# unreachable
 	return null
+
+
+# Helper: split entrant items by specific side id
+func _filter_side_queue(items: Array, side_id) -> Array:
+	var q := []
+	for it in items:
+		var u = it["unit"]
+		if u == null:
+			continue
+		if side_id == null:
+			continue
+		if u.player_id == side_id:
+			q.append(it.duplicate(true))
+	return q
+
+# Helper: compute the "other" side id from a list (first non-matching)
+func _other_side_id(items: Array, side_id):
+	for it in items:
+		var u = it["unit"]
+		if u != null and u.player_id != side_id:
+			return u.player_id
+	return null
+
+# Resolve contested empty tile between two side-queues (same rules as before):
+# - Pop next *unfought* from each side; if one side empty -> other side's front enters.
+# - When two pop, they clash; both are marked fought and stop; killers requeue once with fought=true.
+# - Returns winner_from or null.
+func _fifo_resolve_empty_tile(dest: Vector2i, qA: Array, qB: Array) -> Variant:
+
+	while true:
+		var a = _pop_next_unfought(qA)
+		var b = _pop_next_unfought(qB)
+
+		if a.is_empty() and b.is_empty():
+			break
+		if a.is_empty() or b.is_empty():
+			if not a.is_empty(): qA.push_front(a)
+			if not b.is_empty(): qB.push_front(b)
+			break
+
+		var ua = a["unit"]
+		var ub = b["unit"]
+		if ua == null or ub == null:
+			continue
+
+		var d12 = calculate_damage(ua, ub, "move", 1)
+		var d21 = calculate_damage(ub, ua, "move", 1)
+		ua.curr_health -= d21[1]
+		ub.curr_health -= d12[1]
+		ua.set_health_bar()
+		ub.set_health_bar()
+
+		# both fought this tick
+		ua.is_moving = false
+		ub.is_moving = false
+		if NetworkManager.player_orders.has(ua.player_id):
+			NetworkManager.player_orders[ua.player_id].erase(ua.net_id)
+		if NetworkManager.player_orders.has(ub.player_id):
+			NetworkManager.player_orders[ub.player_id].erase(ub.net_id)
+
+		var ua_dead = ua.curr_health <= 0
+		var ub_dead = ub.curr_health <= 0
+		if ua_dead:
+			$GameBoardNode.vacate(ua.grid_pos)
+			ua.queue_free()
+		if ub_dead:
+			$GameBoardNode.vacate(ub.grid_pos)
+			ub.queue_free()
+
+		# killer requeues *once* with fought=true
+		if not ua_dead and ub_dead:
+			a["fought"] = true
+			qA.append(a)
+		if not ub_dead and ua_dead:
+			b["fought"] = true
+			qB.append(b)
+
+	# claim step
+	if qA.size() == 0 and qB.size() == 0:
+		return null
+	if qA.size() > 0 and qB.size() == 0:
+		return qA.front()["from"]
+	if qB.size() > 0 and qA.size() == 0:
+		return qB.front()["from"]
+	return null
+
 
 # Rotate an uncontested SCC atomically. winners_by_tile must already reflect internal predecessors.
 # Returns a Set (Dictionary used as set) of tiles touched by the rotation.
@@ -767,17 +843,17 @@ func _process_move():
 		if u.is_moving and not vacated.get(u.grid_pos, false) and not rotated_tiles.has(u.grid_pos):
 			stayed[u.grid_pos] = true
 	
-	# 5. Run bounce‑as‑stationary defender fights
-	for t in entrants_all.keys():
-		if rotated_tiles.has(t):
-			continue
-		var occ = $GameBoardNode.get_unit_at(t)
-		if not occ:
-			continue
-		var occupant_is_stationary = not mg.graph.has(t)
-		var occupant_stayed = stayed.get(t,false)
-		if occupant_is_stationary or occupant_stayed:
-			_mg_tile_fifo_commit(t, entrants_all[t], occ)
+	## 5. Run bounce‑as‑stationary defender fights
+	#for t in entrants_all.keys():
+		#if rotated_tiles.has(t):
+			#continue
+		#var occ = $GameBoardNode.get_unit_at(t)
+		#if not occ:
+			#continue
+		#var occupant_is_stationary = not mg.graph.has(t)
+		#var occupant_stayed = stayed.get(t,false)
+		#if occupant_is_stationary or occupant_stayed:
+			#_mg_tile_fifo_commit(t, entrants_all[t], occ)
 	
 	# 6. Resolve contested empty tiles with FIFO queues
 	for t in entrants_all.keys():
@@ -785,10 +861,8 @@ func _process_move():
 			continue
 		if stayed.get(t, false):
 			continue
-		if $GameBoardNode.get_unit_at(t) != null:
-			continue
 		if entrants_all[t].size() > 0:
-			var winner_from = _mg_tile_fifo_commit(t, entrants_all[t], null)
+			var winner_from = _mg_tile_fifo_commit(t, entrants_all[t], $GameBoardNode.get_unit_at(t))
 			if winner_from is Vector2i:
 				var wunit = $GameBoardNode.get_unit_at(winner_from)
 				if wunit != null and wunit.curr_health > 0:
