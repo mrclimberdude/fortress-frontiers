@@ -233,7 +233,6 @@ text = "Done With Orders"
 mouse_passthrough = true
 
 [node name="FinishMoveButton" type="Button" parent="UI/Panel"]
-visible = false
 layout_mode = 0
 offset_right = 8.0
 offset_bottom = 8.0

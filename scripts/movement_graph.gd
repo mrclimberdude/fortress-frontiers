@@ -254,3 +254,38 @@ func scc_is_contested_cycle(scc: Array, entrants_all: Dictionary) -> bool:
 		if has_external or (arr.size() > 1 and internal != null):
 			return true
 	return false
+
+# scripts/movement_graph.gd
+
+## Return the list of "contested entry" tiles in this SCC.
+## An entry tile is a node in the SCC that:
+##  • has exactly one internal predecessor in the SCC (so it's a normal cycle node),
+##  • has at least one entrant from outside the SCC.
+func scc_contested_entry_nodes(scc: Array, entrants_all: Dictionary) -> Array:
+	if scc.size() < 2:
+		return []
+	# Record nodes in the SCC
+	var in_scc := {}
+	for n in scc:
+		in_scc[n] = true
+	# Build internal predecessor map: dest -> source inside SCC
+	var internal_pred := {}
+	for src in scc:
+		var dest = graph.get(src, null)
+		if dest != null and in_scc.has(dest):
+			internal_pred[dest] = src
+	# Identify contested entry tiles
+	var entries := []
+	for node in scc:
+		if not internal_pred.has(node):
+			continue  # node isn’t a cycle step (or internal pred missing)
+		# External entrants?
+		var arr = entrants_all.get(node, [])
+		var has_external := false
+		for src in arr:
+			if not in_scc.has(src):
+				has_external = true
+				break
+		if has_external:
+			entries.append(node)
+	return entries
