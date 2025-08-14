@@ -412,26 +412,6 @@ func _process_attacks():
 	$UI._draw_supports()
 	$GameBoardNode/FogOfWar._update_fog()
 
-# Find enemy pairs A<->B where A moves to B and B moves to A.
-func _mg_detect_enemy_swaps(mg: MovementGraph) -> Array:
-	var pairs := []	# [{"a": Vector2i, "b": Vector2i}]
-	var seen := {}
-	for a in mg.graph.keys():
-		var b = mg.graph[a]
-		if not (mg.unit_lookup.has(a) and mg.unit_lookup.has(b)):
-			continue
-		var ua = mg.unit_lookup[a]
-		var ub = mg.unit_lookup[b]
-		if ua == null or ub == null or ua.player_id == ub.player_id:
-			continue
-		if mg.graph.get(b, Vector2i(-999, -999)) == a:
-			var k1 := str(a) + "|" + str(b)
-			var k2 := str(b) + "|" + str(a)
-			if not (seen.has(k1) or seen.has(k2)):
-				pairs.append({"a": a, "b": b})
-				seen[k1] = true
-	return pairs
-
 # Resolve a single enemy swap as a symmetric melee clash.
 func _mg_resolve_enemy_swap(a_pos: Vector2i, b_pos: Vector2i) -> void:
 	var ua = $GameBoardNode.get_unit_at(a_pos)
@@ -796,28 +776,6 @@ func _mg_resolve_chain_from_sink(mg: MovementGraph, entrants_map: Dictionary, st
 			#pending.append(winner_from)
 
 
-# Commit chains (SCC singletons) in sink->root order using dep_edges.
-func _mg_commit_chains(dep_edges: Dictionary, vacated: Dictionary) -> void:
-	var incoming := {}
-	for s in dep_edges.keys():
-		incoming[dep_edges[s]] = true
-	var roots := []
-	for s in dep_edges.keys():
-		if not incoming.get(s, false):
-			roots.append(s)
-	for s in roots:
-		var cur = s
-		while dep_edges.has(cur):
-			var d = dep_edges[cur]
-			var u = $GameBoardNode.get_unit_at(cur)
-			if u == null or u.curr_health <= 0:
-				break
-			$GameBoardNode.vacate(cur)
-			$GameBoardNode/HexTileMap.set_player_tile(cur, "")
-			u.set_grid_position(d)
-			vacated[cur] = true
-			cur = d
-
 
 func _process_move():
 	var all_units = $GameBoardNode.get_all_units()
@@ -849,7 +807,6 @@ func _process_move():
 
 	# 4. Commit uncontested rotations and chains
 	var vacated := {}
-	var stayed := {}
 	var rotated_tiles := {}
 	for comp in sccs:
 		if mg.scc_is_uncontested_rotation(comp, winners_by_tile):
@@ -919,12 +876,6 @@ func _process_move():
 	mg.build(units)
 	entrants_all = mg.entries_all()
 	
-	# Mark units that did not move as stationary for this tick
-	for u in units:
-		if u.is_moving and not vacated.get(u.grid_pos, false) and not rotated_tiles.has(u.grid_pos):
-			stayed[u.grid_pos] = true
-	
-	
 	# 7. Pop one path step for every unit that moved; clear finished orders
 	for u in units:
 		var orders = NetworkManager.player_orders.get(u.player_id, {})
@@ -964,18 +915,11 @@ func _do_execution() -> void:
 	$GameBoardNode/OrderReminderMap.clear()
 	for child in dmg_report.get_children():
 		child.queue_free()
-	#exec_steps = [
-		#func(): _process_spawns(),
-		#func(): _process_ranged(),
-		#func(): _process_melee(),
-		#func(): _process_move()
-	#]
 	exec_steps = [
 		func(): _process_spawns(),
 		func(): _process_attacks(),
 		func(): _process_move()
 	]
-
 	step_index = 0
 	_run_next_step()
 

@@ -466,7 +466,7 @@ func _draw_partial_path() -> void:
 			var b = current_path[i + 1]
 			var p1 = hex.map_to_world(a) + hex.tile_size * 0.5
 			var p2 = hex.map_to_world(b) + hex.tile_size * 0.5
-			var arrow = ArrowScene.instantiate() as Sprite2D
+			var arrow = SupportArrowScene.instantiate() as Sprite2D
 			var dir = (p2 - p1).normalized()
 			var tex_size = arrow.texture.get_size()
 			var distance: float = (p2 - p1).length()
@@ -496,6 +496,8 @@ func _draw_attacks():
 				
 				# calculate direction and size for attack arrow
 				var attacker = unit_mgr.get_unit_by_net_id(order["unit_net_id"])
+				var target = unit_mgr.get_unit_by_net_id(order["target_unit_net_id"])
+				var dmg = $"..".calculate_damage(attacker, target, order["type"], 1)
 				var p1 = hex.map_to_world(attacker.grid_pos) + hex.tile_size * 0.5
 				var p2 = hex.map_to_world(order["target_tile"]) + hex.tile_size * 0.5
 				var arrow = AttackArrowScene.instantiate() as Sprite2D
@@ -510,6 +512,13 @@ func _draw_attacks():
 				arrow.rotation = (p2 - p1).angle()
 				arrow.z_index = 10
 				root.add_child(arrow)
+				var dmg_label = Label.new()
+				dmg_label.text = "%d (%d)" % [dmg[1], dmg[0]]
+				dmg_label.add_theme_color_override("font_color", Color(0.96, 0.96, 0.08))
+				var normal := Vector2(-dir.y, dir.x)
+				dmg_label.position = p1 + normal * 8.0 + dir * 6.0
+				dmg_label.z_index = 11
+				root.add_child(dmg_label)
 
 func _draw_supports():
 	var support_arrows_node = hex.get_node("SupportArrows")
@@ -592,7 +601,8 @@ func _draw_all():
 	_draw_defends()
 
 func finish_current_path():
-	if current_path.size() ==1:
+	if current_path.size() == 1:
+		action_mode = ""
 		return
 	move_priority +=1
 	currently_selected_unit.is_moving = true
@@ -640,7 +650,7 @@ func _unhandled_input(ev):
 	
 	# Order phase: if waiting for destination (move mode)
 	if action_mode == "move" and currently_selected_unit:
-		if cell not in current_reachable["tiles"] or cell == currently_selected_unit.grid_pos:
+		if cell not in current_reachable["tiles"]:
 			finish_current_path()
 			return
 		var path = []
