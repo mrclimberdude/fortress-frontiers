@@ -343,21 +343,7 @@ func _process_attacks():
 			if target.is_defending and target.is_ranged:
 				ranged_dmg[unit_net_id] = ranged_dmg.get(unit_net_id, 0) + atkr_in_dmg
 			ranged_dmg[target_net_id] = ranged_dmg.get(target_net_id, 0) + defr_in_dmg
-			var report_label = Label.new()
-			if target.player_id == local_player_id:
-				report_label.text = "Your %s #%d took %d ranged damage from %s #%d" % [target.unit_type, target.net_id, defr_in_dmg, unit.unit_type, unit.net_id]
-				dmg_report.add_child(report_label)
-				if target.is_defending and target.is_ranged:
-					report_label = Label.new()
-					report_label.text = "Your %s #%d retaliated and dealt %d damage" % [target.unit_type, target.net_id, atkr_in_dmg]
-					dmg_report.add_child(report_label)
-			else:
-				report_label.text = "Your %s #%d dealt %d ranged damage to %s #%d" % [unit.unit_type, unit.net_id, defr_in_dmg, target.unit_type, target.net_id]
-				dmg_report.add_child(report_label)
-				if target.is_defending and target.is_ranged:
-					report_label = Label.new()
-					report_label.text = "Enemy %s #%d retaliated and dealt %d damage" % [target.unit_type, target.net_id, atkr_in_dmg]
-					dmg_report.add_child(report_label)
+			dealt_dmg_report(unit, target, atkr_in_dmg, defr_in_dmg, target.is_defending and target.is_ranged, "ranged")
 	
 	# calculate all melee attack damages done
 	target_ids = melee_attacks.keys()
@@ -374,22 +360,7 @@ func _process_attacks():
 			if target.is_defending:
 				melee_dmg[attacker.net_id] = melee_dmg.get(attacker.net_id, 0) + atkr_in_dmg
 			melee_dmg[target.net_id] = melee_dmg.get(target.net_id, 0) + defr_in_dmg
-			if target.player_id == local_player_id:
-				var report_label = Label.new()
-				report_label.text = "Your %s #%d took %d melee damage from %s #%d" % [target.unit_type, target.net_id, defr_in_dmg, attacker.unit_type, attacker.net_id]
-				dmg_report.add_child(report_label)
-				if target.is_defending:
-					report_label = Label.new()
-					report_label.text = "Your %s #%d retaliated and dealt %d damage" % [target.unit_type, target.net_id, atkr_in_dmg]
-					dmg_report.add_child(report_label)
-			else:
-				var report_label = Label.new()
-				report_label.text = "Your %s #%d dealt %d melee damage to %s #%d" % [attacker.unit_type, attacker.net_id, defr_in_dmg, target.unit_type, target.net_id]
-				dmg_report.add_child(report_label)
-				if target.is_defending:
-					report_label = Label.new()
-					report_label.text = "Enemy %s #%d retaliated and dealt %d damage" % [target.unit_type, target.net_id, atkr_in_dmg]
-					dmg_report.add_child(report_label)
+			dealt_dmg_report(attacker, target, atkr_in_dmg, defr_in_dmg, target.is_defending, "melee")
 	
 	# deal ranged damage
 	target_ids = ranged_dmg.keys()
@@ -401,13 +372,7 @@ func _process_attacks():
 		if target.curr_health <= 0:
 			for player in ["player1", "player2"]:
 				player_orders[player].erase(target_net_id)
-				var report_label = Label.new()
-				if target.player_id == local_player_id:
-					report_label.text = "Your %s #%d died at %s" % [target.unit_type, target.net_id, target.grid_pos]
-					dmg_report.add_child(report_label)
-				else:
-					report_label.text = "Enemy %s #%d died at %s" % [target.unit_type, target.net_id, target.grid_pos]
-					dmg_report.add_child(report_label)
+			died_dmg_report(target)
 			$GameBoardNode.vacate(target.grid_pos)
 			$GameBoardNode/HexTileMap.set_player_tile(target.grid_pos, "")
 			
@@ -427,14 +392,7 @@ func _process_attacks():
 		if target.curr_health <= 0:
 			for player in ["player1", "player2"]:
 				player_orders[player].erase(target.net_id)
-			if target.player_id == local_player_id:
-				var report_label = Label.new()
-				report_label.text = "Your %s #%d died at %s" % [target.unit_type, target.net_id, target.grid_pos]
-				dmg_report.add_child(report_label)
-			else:
-				var report_label = Label.new()
-				report_label.text = "Enemy %s #%d died at %s" % [target.unit_type, target.net_id, target.grid_pos]
-				dmg_report.add_child(report_label)
+			died_dmg_report(target)
 			$GameBoardNode.vacate(target.grid_pos)
 			$GameBoardNode/HexTileMap.set_player_tile(target.grid_pos, "")
 			
