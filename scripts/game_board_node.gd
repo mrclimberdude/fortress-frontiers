@@ -21,8 +21,8 @@ func vacate(tile: Vector2i) -> void:
 		if tile in $"..".tower_positions[player]:
 			$"..".tower_positions[player].erase(tile)
 			$"..".structure_positions.erase(tile)
-		if tile in $"..".base_positions:
-			$"..".end_game()
+		if tile == $"..".base_positions[player]:
+			$"..".end_game(player)
 
 func is_occupied(tile: Vector2i) -> bool:
 	return occupied_tiles.has(tile)

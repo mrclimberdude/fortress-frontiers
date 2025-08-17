@@ -95,7 +95,11 @@ func _ready():
 func start_game() -> void:
 	call_deferred("_game_loop")
 
-func end_game():
+func end_game(player_id):
+	$GameOver/GameOverLabel.add_theme_font_size_override("font_size", 100)
+	$GameOver/GameOverLabel.text = "%s lost!" % player_id
+	$GameOver.visible = true
+	$UI.visible = false
 	print("the game has ended")
 
 # --------------------------------------------------------
