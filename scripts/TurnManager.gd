@@ -340,10 +340,12 @@ func _process_attacks():
 			var dmg_result = calculate_damage(unit, target, "ranged", num_attackers)
 			var atkr_in_dmg = dmg_result[0]
 			var defr_in_dmg = dmg_result[1]
-			if target.is_defending and target.is_ranged:
+			var result = $GameBoardNode.get_reachable_tiles(target.grid_pos, 1, "move")
+			var melee_in_range = unit.grid_pos in result["tiles"]
+			if target.is_defending and (target.is_ranged or melee_in_range):
 				ranged_dmg[unit_net_id] = ranged_dmg.get(unit_net_id, 0) + atkr_in_dmg
 			ranged_dmg[target_net_id] = ranged_dmg.get(target_net_id, 0) + defr_in_dmg
-			dealt_dmg_report(unit, target, atkr_in_dmg, defr_in_dmg, target.is_defending and target.is_ranged, "ranged")
+			dealt_dmg_report(unit, target, atkr_in_dmg, defr_in_dmg, target.is_defending and (target.is_ranged or melee_in_range), "ranged")
 	
 	# calculate all melee attack damages done
 	target_ids = melee_attacks.keys()
