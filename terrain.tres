@@ -1,8 +1,39 @@
-[gd_resource type="TileSet" load_steps=7 format=3 uid="uid://vpqqir5dxo6"]
+[gd_resource type="TileSet" load_steps=11 format=3 uid="uid://vpqqir5dxo6"]
 
+[ext_resource type="Texture2D" uid="uid://ciitwnd7hxyra" path="res://assets/spritesheet.png" id="1_0nxkq"]
 [ext_resource type="Texture2D" uid="uid://bpva5jepboiki" path="res://assets/terrain/forest.png" id="1_76y57"]
 [ext_resource type="Texture2D" uid="uid://btoevs0pefav" path="res://assets/terrain/mountains.png" id="2_o5fmc"]
 [ext_resource type="Texture2D" uid="uid://cdkxqhrtvv5d8" path="res://assets/terrain/river.png" id="3_0nxkq"]
+[ext_resource type="Texture2D" uid="uid://efcd5m4wxl00" path="res://assets/terrain/lake.png" id="5_cg5es"]
+
+[sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_re61t"]
+texture = ExtResource("1_0nxkq")
+margins = Vector2i(21, 6)
+separation = Vector2i(42, 21)
+texture_region_size = Vector2i(170, 192)
+0:0/0 = 0
+1:0/0 = 0
+2:0/0 = 0
+3:0/0 = 0
+4:0/0 = 0
+5:0/0 = 0
+0:1/0 = 0
+1:1/0 = 0
+2:1/0 = 0
+3:1/0 = 0
+4:1/0 = 0
+5:1/0 = 0
+0:2/0 = 0
+1:2/0 = 0
+2:2/0 = 0
+3:2/0 = 0
+4:2/0 = 0
+5:2/0 = 0
+0:3/0 = 0
+1:3/0 = 0
+2:3/0 = 0
+3:3/0 = 0
+4:3/0 = 0
 
 [sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_cg5es"]
 texture = ExtResource("1_76y57")
@@ -10,6 +41,11 @@ margins = Vector2i(21, 6)
 separation = Vector2i(42, 21)
 texture_region_size = Vector2i(170, 192)
 0:0/0 = 0
+0:0/0/custom_data_0 = "forest"
+0:0/0/custom_data_1 = 2
+0:0/0/custom_data_2 = true
+0:0/0/custom_data_4 = 2
+0:0/0/custom_data_5 = 2
 
 [sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_hlu1x"]
 texture = ExtResource("2_o5fmc")
@@ -17,6 +53,10 @@ margins = Vector2i(21, 6)
 separation = Vector2i(42, 21)
 texture_region_size = Vector2i(170, 192)
 0:0/0 = 0
+0:0/0/custom_data_0 = "mountain"
+0:0/0/custom_data_1 = 9999
+0:0/0/custom_data_2 = true
+0:0/0/custom_data_3 = true
 
 [sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_c8yqh"]
 texture = ExtResource("3_0nxkq")
@@ -24,10 +64,43 @@ margins = Vector2i(21, 6)
 separation = Vector2i(42, 21)
 texture_region_size = Vector2i(170, 192)
 0:0/0 = 0
+0:0/0/custom_data_0 = "river"
+0:0/0/custom_data_1 = 2
+0:0/0/custom_data_4 = -2
+0:0/0/custom_data_5 = -2
+0:0/0/custom_data_6 = -2
+
+[sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_vtyro"]
+texture = ExtResource("5_cg5es")
+margins = Vector2i(21, 6)
+separation = Vector2i(42, 21)
+texture_region_size = Vector2i(170, 192)
+0:0/0 = 0
+0:0/0/custom_data_0 = "lake"
+0:0/0/custom_data_1 = 2
+0:0/0/custom_data_4 = -2
+0:0/0/custom_data_5 = 2
+0:0/0/custom_data_6 = -2
 
 [resource]
 tile_shape = 3
 tile_size = Vector2i(170, 192)
+custom_data_layer_0/name = "terrain"
+custom_data_layer_0/type = 4
+custom_data_layer_1/name = "move_cost"
+custom_data_layer_1/type = 2
+custom_data_layer_2/name = "blocks_sight"
+custom_data_layer_2/type = 1
+custom_data_layer_3/name = "impassable"
+custom_data_layer_3/type = 1
+custom_data_layer_4/name = "ranged_defense_bonus"
+custom_data_layer_4/type = 2
+custom_data_layer_5/name = "melee_defense_bonus"
+custom_data_layer_5/type = 2
+custom_data_layer_6/name = "melee_attack_bonus"
+custom_data_layer_6/type = 2
 sources/1 = SubResource("TileSetAtlasSource_cg5es")
 sources/2 = SubResource("TileSetAtlasSource_hlu1x")
 sources/3 = SubResource("TileSetAtlasSource_c8yqh")
+sources/0 = SubResource("TileSetAtlasSource_re61t")
+sources/4 = SubResource("TileSetAtlasSource_vtyro")
