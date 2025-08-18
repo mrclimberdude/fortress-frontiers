@@ -12,8 +12,14 @@ extends Resource
 }
 
 @export var tower_positions := {
-	"player1": [],
-	"player2": []
+	"player1": [Vector2i(2,10),
+				Vector2i(2,15),
+				Vector2i(2,20)
+				],
+	"player2": [Vector2i(33,10),
+				Vector2i(32,15),
+				Vector2i(33,20)
+				],
 }
 
 @export var mine_tiles := {
