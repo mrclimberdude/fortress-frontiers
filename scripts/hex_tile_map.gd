@@ -18,6 +18,7 @@ var player_atlas_tiles := {
 	"player2": Vector2i(2, 2)
 }
 var structure_atlas_tiles:= {
+	"unclaimed": Vector2i(1,1),
 	"player1": Vector2i(1, 3),
 	"player2": Vector2i(3, 3)
 }
@@ -51,8 +52,8 @@ func set_player_tile(pos: Vector2i, pid: String) -> void:
 	structure_tiles = $"../..".structure_positions
 	if pos in structure_tiles:
 		tint = structure_atlas_tiles.get(pid, ground_tile)
-		for player in ["player1", "player2"]:
-			if pos in $"../..".special_tiles[player]:
+		for player in ["player1", "player2", "unclaimed"]:
+			if pos in $"../..".mines[player]:
 				tint = structure_atlas_tiles.get(player, ground_tile)
 	else:
 		tint = player_atlas_tiles.get(pid, ground_tile)

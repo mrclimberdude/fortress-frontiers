@@ -7,8 +7,8 @@ extends Resource
 @export var terrain_scene: PackedScene
 
 @export var base_positions := {
-	"player1": Vector2i(-1,7),
-	"player2": Vector2i(17,7)
+	"player1": Vector2i(-1,15),
+	"player2": Vector2i(35,15)
 }
 
 @export var tower_positions := {
@@ -22,8 +22,31 @@ extends Resource
 				],
 }
 
-@export var mine_tiles := {
+@export var mines := {
 	"unclaimed": [],
 	"player1": [],
 	"player2": []
 }
+
+@export var camps := {
+	"basic" : [],
+	"dragon": []
+}
+
+func populate_from_terrain(tmap: TileMapLayer) -> void:
+	var mine_tiles = []
+	var basic_camps = []
+	var dragons = []
+	for cell in tmap.get_used_cells():
+		var td = tmap.get_cell_tile_data(cell)
+		if td ==null:
+			continue
+		if bool(td.get_custom_data("is_mine")):
+			mine_tiles.append(cell)
+		elif bool(td.get_custom_data("is_camp")):
+			basic_camps.append(cell)
+		elif bool(td.get_custom_data("is_dragon")):
+			dragons.append(cell)
+	mines["unclaimed"] = mine_tiles
+	camps["basic"] = basic_camps
+	camps["dragon"] = dragons

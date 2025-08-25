@@ -26,7 +26,7 @@ func _update_fog():
 			for unit in units[player]:
 				unit.visible = false
 	for structure in $"..".get_all_structures():
-		structure.z_index = 0
+		structure.z_index = 6
 	for player in ["player1", "player2"]:
 		# reset all visible cells to explored
 		for cell in visiblity[player].keys():
@@ -55,11 +55,11 @@ func _update_fog():
 					if cell in $"../..".structure_positions:
 						var structure = $"..".get_structure_at(cell)
 						structure.z_index = 99
-						if cell in $"../..".special_tiles["unclaimed"]:
+						if cell in $"../..".mines["unclaimed"]:
 							tint = Vector2i(1,1)
-						elif cell in $"../..".special_tiles["player1"]:
+						elif cell in $"../..".mines["player1"]:
 							tint = Vector2i(1,3)
-						elif cell in $"../..".special_tiles["player2"]:
+						elif cell in $"../..".mines["player2"]:
 							tint = Vector2i(3,3)
 						elif structure.player_id == "player1":
 							tint = Vector2i(1,3)
@@ -74,7 +74,7 @@ func _update_fog():
 					$"../ExploredFog".erase_cell(cell)
 					if cell in $"../..".structure_positions:
 						var structure = $"..".get_structure_at(cell)
-						structure.z_index = 0
+						structure.z_index = 6
 					if $"..".is_occupied(cell):
 						$"..".get_unit_at(cell).visible = true
 	for player in ["player1", "player2"]:

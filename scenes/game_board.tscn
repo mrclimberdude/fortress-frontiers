@@ -1,4 +1,4 @@
-[gd_scene load_steps=19 format=4 uid="uid://dnx0cxl4a46lg"]
+[gd_scene load_steps=20 format=4 uid="uid://dnx0cxl4a46lg"]
 
 [ext_resource type="Script" uid="uid://daaph63aiv3vd" path="res://scripts/TurnManager.gd" id="1_xh13x"]
 [ext_resource type="Texture2D" uid="uid://ciitwnd7hxyra" path="res://assets/spritesheet.png" id="2_17g6i"]
@@ -13,7 +13,8 @@
 [ext_resource type="PackedScene" uid="uid://y3gcjhi3ho0o" path="res://scenes/Tank.tscn" id="6_w5uqb"]
 [ext_resource type="PackedScene" uid="uid://bj1f1demforgr" path="res://scenes/Cavalry.tscn" id="7_hl2y5"]
 [ext_resource type="Script" uid="uid://srlpr2fln13a" path="res://scripts/camera.gd" id="7_rs5it"]
-[ext_resource type="TileSet" uid="uid://vpqqir5dxo6" path="res://terrain.tres" id="10_axant"]
+[ext_resource type="Resource" uid="uid://c1o6wwhlvvogu" path="res://maps/map_1.tres" id="8_8auva"]
+[ext_resource type="Resource" uid="uid://x6d0njhmctsc" path="res://maps/map_2.tres" id="9_hrnlr"]
 [ext_resource type="Script" uid="uid://cvqvvdw265adw" path="res://scripts/fog.gd" id="10_sax53"]
 [ext_resource type="Script" uid="uid://cojvvohyejpxa" path="res://scenes/order_reminder.gd" id="11_cac7a"]
 
@@ -62,6 +63,7 @@ scout_scene = ExtResource("4_04ve2")
 miner_scene = ExtResource("5_c1to4")
 phalanx_scene = ExtResource("6_w5uqb")
 cavalry_scene = ExtResource("7_hl2y5")
+map_data = Array[Resource]([ExtResource("8_8auva"), ExtResource("9_hrnlr")])
 
 [node name="GameBoardNode" type="Node2D" parent="."]
 script = ExtResource("4_6lofv")
@@ -86,10 +88,6 @@ rows = 30
 [node name="DefendingSprites" type="Node2D" parent="GameBoardNode/HexTileMap"]
 
 [node name="Structures" type="Node2D" parent="GameBoardNode/HexTileMap"]
-
-[node name="TerrainMap" type="TileMapLayer" parent="GameBoardNode"]
-self_modulate = Color(1, 1, 1, 0.588235)
-tile_set = ExtResource("10_axant")
 
 [node name="OrderReminderMap" type="TileMapLayer" parent="GameBoardNode"]
 self_modulate = Color(1, 1, 1, 0.588235)

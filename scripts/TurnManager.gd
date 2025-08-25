@@ -22,6 +22,12 @@ enum Phase { UPKEEP, ORDERS, EXECUTION }
 @export var phalanx_scene: PackedScene
 @export var cavalry_scene: PackedScene
 
+const MineScene = preload("res://scenes/GemMine.tscn")
+
+@export var map_data: Array[Resource] = []
+var terrain_overlay: TileMapLayer
+var rng := RandomNumberGenerator.new()
+
 # --- Turn & Phase State ---
 var turn_number:   int    = 0
 var current_phase: Phase  = Phase.UPKEEP
@@ -38,18 +44,11 @@ const SPECIAL_INCOME : int = 10
 const MINER_BONUS    : int = 15
 const PHALANX_BONUS     : int = 20
 
-@export var structure_positions = [Vector2i(5, 2),
-					Vector2i(12, 2),
-					Vector2i(8, 7),
-					Vector2i(5, 12),
-					Vector2i(12, 12),
-					Vector2i(-1, 7),
-					Vector2i(17, 7)
-					]
+@export var structure_positions = []
 
 var base_positions := {
-	"player1": Vector2i(-1, 7),
-	"player2": Vector2i(17, 7)
+	"player1": Vector2i(-1, 15),
+	"player2": Vector2i(35, 15)
 }
 
 var tower_positions := {
@@ -60,15 +59,15 @@ var tower_positions := {
 				Vector2i(14,7),
 				Vector2i(16,10)]
 }
-var special_tiles := {
-	"unclaimed": [Vector2i(5, 2),
-					Vector2i(12, 2),
-					Vector2i(8, 7),
-					Vector2i(5, 12),
-					Vector2i(12, 12)
-					],
+var mines := {
+	"unclaimed": [],
 	"player1": [],
 	"player2": []
+}
+
+var camps := {
+	"basic" : [],
+	"dragon": []
 }
 
 # --- Orders Data ---
@@ -76,7 +75,6 @@ var player_orders     := { "player1": {}, "player2": {} }
 var _orders_submitted := { "player1": false, "player2": false }
 
 var local_player_id: String
-var rng: RandomNumberGenerator = RandomNumberGenerator.new()
 
 # --------------------------------------------------------
 # Entry point: start the game loop once the scene is ready
@@ -84,12 +82,46 @@ var rng: RandomNumberGenerator = RandomNumberGenerator.new()
 func _ready():
 	NetworkManager.hex = $GameBoardNode/HexTileMap
 	NetworkManager.turn_mgr = $"."
-	unit_manager.spawn_unit("base", base_positions["player1"], "player1", false)
-	unit_manager.spawn_unit("base", base_positions["player2"], "player2", false)
+	
+	rng.randomize()
+	var map_num = rng.randi_range(1, map_data.size())
+	var md = map_data[map_num-1] as MapData
+	md = md.duplicate(true)
+	print("loaded map: ", md.map_name)
+	var inst: Node = md.terrain_scene.instantiate()
+	var tmap = inst.get_node_or_null("TerrainMap")
+	if tmap == null and inst is TileMapLayer:
+		tmap = inst as TileMapLayer
+	tmap.name = "TerrainMap"
+	tmap.z_index = 5
+	tmap.get_parent().remove_child(tmap)
+	$GameBoardNode.add_child(tmap)
+	terrain_overlay = tmap
+	md.populate_from_terrain(terrain_overlay)
+	base_positions = md.base_positions
+	tower_positions = md.tower_positions
+	mines = md.mines
+	camps = md.camps
+	
 	for player in tower_positions.keys():
 		for tile in tower_positions[player]:
 			structure_positions.append(tile)
 			unit_manager.spawn_unit("tower", tile, player, false)
+	for player in base_positions.keys():
+		var tile = base_positions[player]
+		structure_positions.append(tile)
+		unit_manager.spawn_unit("base", tile, player, false)
+	for tile in mines["unclaimed"]:
+		structure_positions.append(tile)
+		$GameBoardNode/HexTileMap.set_player_tile(tile, "unclaimed")
+		tmap.set_cell(tile)
+		var mine = MineScene.instantiate() as Sprite2D
+		mine.position = $GameBoardNode/HexTileMap.map_to_world(tile) + $GameBoardNode/HexTileMap.tile_size * 0.5
+		mine.z_index = 6
+		mine.grid_pos = tile
+		$GameBoardNode/HexTileMap/Structures.add_child(mine)
+		$GameBoardNode.set_structure_at(tile, mine)
+
 	$GameBoardNode/FogOfWar._update_fog()
 
 func start_game() -> void:
@@ -133,7 +165,7 @@ func _do_upkeep() -> void:
 			income += BASE_INCOME
 		for tower in tower_positions[player]:
 			income += TOWER_INCOME
-		for pos in special_tiles[player]:
+		for pos in mines[player]:
 			if _controls_tile(player, pos):
 				if $GameBoardNode.is_occupied(pos):
 					if $GameBoardNode.get_unit_at(pos).is_miner:
