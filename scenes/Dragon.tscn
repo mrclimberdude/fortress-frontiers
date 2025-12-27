@@ -1,0 +1,48 @@
+[gd_scene load_steps=6 format=3 uid="uid://d0w4x3k8y2p1q"]
+
+[ext_resource type="PackedScene" uid="uid://c62dn8sldq572" path="res://scenes/Unit.tscn" id="1_8v4tw"]
+[ext_resource type="Texture2D" uid="uid://2s9r1w6t3u5x9" path="res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Objects Light/HSI_icon_137l.png" id="2_3m7aq"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_3m7aq"]
+bg_color = Color(0.988235, 0.227451, 0.152941, 0.603922)
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_8v4tw"]
+bg_color = Color(0, 0.843137, 0.0941176, 0.92549)
+
+[sub_resource type="LabelSettings" id="LabelSettings_3m7aq"]
+font_size = 30
+font_color = Color(0.989583, 0.989583, 0, 1)
+
+[node name="Dragon" instance=ExtResource("1_8v4tw")]
+cost = 0
+is_ranged = true
+melee_strength = 40
+ranged_strength = 35
+move_range = 0
+ranged_range = 3
+max_health = 350
+curr_health = 350
+regen = 0
+special_skills = "Fire + Cleave"
+
+[node name="Sprite2D" parent="." index="0"]
+texture = ExtResource("2_3m7aq")
+
+[node name="HealthBar" type="ProgressBar" parent="." index="1"]
+offset_left = 36.0
+offset_top = -52.0
+offset_right = 75.0
+offset_bottom = 43.0
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+theme_override_styles/background = SubResource("StyleBoxFlat_3m7aq")
+theme_override_styles/fill = SubResource("StyleBoxFlat_8v4tw")
+step = 1.0
+fill_mode = 3
+
+[node name="NetIDLabel" type="Label" parent="." index="2"]
+offset_left = -20.0
+offset_top = -67.0
+offset_right = 20.0
+offset_bottom = -44.0
+label_settings = SubResource("LabelSettings_3m7aq")
+horizontal_alignment = 1

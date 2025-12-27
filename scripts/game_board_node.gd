@@ -38,13 +38,18 @@ func get_structure_at(tile: Vector2i):
 	return structure_tiles[tile]
 
 func get_all_units():
-	var units: Dictionary = {"player1": [], "player2": []}
+	var units: Dictionary = {"player1": [], "player2": [], "neutral": []}
 	for unit in occupied_tiles.values():
 		if unit.player_id == "player1":
 			units["player1"].append(unit)
-		else:
+		elif unit.player_id == "player2":
 			units["player2"].append(unit)
+		elif unit.player_id == "neutral":
+			units["neutral"].append(unit)
 	return units
+
+func get_all_units_flat() -> Array:
+	return occupied_tiles.values()
 
 func get_all_structures():
 	var structures = []

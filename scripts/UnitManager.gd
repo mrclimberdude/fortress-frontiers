@@ -10,6 +10,8 @@ extends Node2D
 @export var miner_scene: PackedScene = preload("res://scenes/Miner.tscn")
 @export var phalanx_scene: PackedScene = preload("res://scenes/Tank.tscn")
 @export var cavalry_scene: PackedScene = preload("res://scenes/Cavalry.tscn")
+@export var camp_archer_scene: PackedScene = preload("res://scenes/CampArcher.tscn")
+@export var dragon_scene: PackedScene = preload("res://scenes/Dragon.tscn")
 
 @export var tile_size: Vector2 = Vector2(170, 192)   # width, height of one hex
 
@@ -21,6 +23,7 @@ extends Node2D
 
 var _next_net_id_odd: int  = 1
 var _next_net_id_even: int = 2
+var _next_net_id_neutral: int = 1000001
 
 var unit_by_net_id: Dictionary = {}
 
@@ -33,8 +36,10 @@ func spawn_unit(unit_type: String, cell: Vector2i, owner: String, undo: bool) ->
 	if undo:
 		if owner == "player1":
 			_next_net_id_odd += 2
-		else:
+		elif owner == "player2":
 			_next_net_id_even +=2
+		else:
+			_next_net_id_neutral += 1
 		return
 	var scene: PackedScene
 	match unit_type.to_lower():
@@ -54,6 +59,10 @@ func spawn_unit(unit_type: String, cell: Vector2i, owner: String, undo: bool) ->
 			scene = phalanx_scene
 		"cavalry":
 			scene = cavalry_scene
+		"camp_archer":
+			scene = camp_archer_scene
+		"dragon":
+			scene = dragon_scene
 		_:
 			push_error("Unknown unit type '%s'" % unit_type)
 			return
@@ -71,9 +80,14 @@ func spawn_unit(unit_type: String, cell: Vector2i, owner: String, undo: bool) ->
 		net_id_label.scale = Vector2(-1,1)
 		net_id_label.position[0] += net_id_label.size[0]
 		net_id_label.text = str(unit.net_id)
-	else:
+	elif owner == "player2":
 		unit.net_id = _next_net_id_even
 		_next_net_id_even +=2
+		var net_id_label = unit.get_node("NetIDLabel")
+		net_id_label.text = str(unit.net_id)
+	else:
+		unit.net_id = _next_net_id_neutral
+		_next_net_id_neutral += 1
 		var net_id_label = unit.get_node("NetIDLabel")
 		net_id_label.text = str(unit.net_id)
 	unit.unit_type = unit_type

@@ -20,11 +20,11 @@ func _ready() -> void:
 
 func _update_fog():
 	var units = $"..".get_all_units()
-	# make all enemy units invisible
-	for player in ["player1", "player2"]:
-		if player != $"../..".local_player_id:
-			for unit in units[player]:
-				unit.visible = false
+	var all_units = $"..".get_all_units_flat()
+	# make all non-local units invisible (including neutrals)
+	for unit in all_units:
+		if unit.player_id != $"../..".local_player_id:
+			unit.visible = false
 	for structure in $"..".get_all_structures():
 		structure.z_index = 6
 	for player in ["player1", "player2"]:
@@ -77,7 +77,8 @@ func _update_fog():
 						structure.z_index = 6
 					if $"..".is_occupied(cell):
 						$"..".get_unit_at(cell).visible = true
-	for player in ["player1", "player2"]:
-		if not $"../../UI/DevPanel/VBoxContainer/FogCheckButton".button_pressed:
-			for unit in units[player]:
-				unit.visible = true
+	if not $"../../UI/DevPanel/VBoxContainer/FogCheckButton".button_pressed:
+		for unit in all_units:
+			unit.visible = true
+	if $"../..".has_method("update_neutral_markers"):
+		$"../..".update_neutral_markers()

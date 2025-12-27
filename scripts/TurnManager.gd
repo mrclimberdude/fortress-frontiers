@@ -34,6 +34,7 @@ var current_phase: Phase  = Phase.UPKEEP
 var current_player:String = "player1"
 var exec_steps: Array     = []
 var step_index: int       = 0
+var neutral_step_index: int = -1
 
 # --- Economy State ---
 var player_gold       := { "player1": 25, "player2": 25 }
@@ -70,6 +71,33 @@ var camps := {
 	"dragon": []
 }
 
+const NEUTRAL_PLAYER_ID: String = "neutral"
+const CAMP_ARCHER_TYPE: String = "camp_archer"
+const DRAGON_TYPE: String = "dragon"
+const DRAGON_REWARD_GOLD: String = "gold"
+const DRAGON_REWARD_MELEE: String = "melee_bonus"
+const DRAGON_REWARD_RANGED: String = "ranged_bonus"
+
+@export var camp_respawn_turns: int = 3
+@export var dragon_respawn_turns: int = 6
+@export var camp_gold_min: int = 10
+@export var camp_gold_max: int = 25
+@export var dragon_gold_bonus: int = 100
+@export var dragon_melee_bonus: int = 3
+@export var dragon_ranged_bonus: int = 3
+@export var camp_archer_range: int = 2
+@export var dragon_fire_range: int = 3
+@export var dragon_cleave_targets: int = 3
+
+var camp_units := {}
+var dragon_units := {}
+var camp_respawns := {}
+var dragon_respawns := {}
+var camp_respawn_counts := {}
+var dragon_rewards := {}
+var player_melee_bonus := { "player1": 0, "player2": 0 }
+var player_ranged_bonus := { "player1": 0, "player2": 0 }
+
 func _get_terrain_tile_data(cell: Vector2i) -> TileData:
 	if terrain_overlay == null:
 		return null
@@ -83,6 +111,135 @@ func _terrain_bonus(cell: Vector2i, key: String) -> int:
 	if val == null:
 		return 0
 	return int(val)
+
+func _get_neutral_marker_root() -> Node2D:
+	var root = $GameBoardNode/HexTileMap.get_node_or_null("NeutralMarkers")
+	if root == null:
+		root = Node2D.new()
+		root.name = "NeutralMarkers"
+		$GameBoardNode/HexTileMap.add_child(root)
+	return root
+
+func _offset_to_cube(cell: Vector2i) -> Vector3i:
+	var x = cell.x - (cell.y - (cell.y & 1)) / 2
+	var z = cell.y
+	var y = -x - z
+	return Vector3i(x, y, z)
+
+func _hex_distance(a: Vector2i, b: Vector2i) -> int:
+	var ac = _offset_to_cube(a)
+	var bc = _offset_to_cube(b)
+	return int(max(abs(ac.x - bc.x), abs(ac.y - bc.y), abs(ac.z - bc.z)))
+
+func _target_weight(unit, origin: Vector2i) -> float:
+	var dist = _hex_distance(origin, unit.grid_pos)
+	var hp_ratio = clamp(float(unit.curr_health) / float(unit.max_health), 0.01, 1.0)
+	var low_hp_bias = 3.0
+	var dist_factor = 1.0 / float(dist + 1)
+	var hp_factor = 1.0 + low_hp_bias * (1.0 - hp_ratio)
+	return max(0.001, hp_factor * dist_factor)
+
+func _pick_weighted_index(weights: Array) -> int:
+	var total = 0.0
+	for w in weights:
+		total += float(w)
+	if total <= 0.0:
+		return -1
+	var roll = rng.randf() * total
+	for i in range(weights.size()):
+		roll -= float(weights[i])
+		if roll <= 0.0:
+			return i
+	return weights.size() - 1
+
+func _get_player_units() -> Array:
+	var all_units = $GameBoardNode.get_all_units()
+	return all_units.get("player1", []) + all_units.get("player2", [])
+
+func _units_in_range(origin: Vector2i, range: int) -> Array:
+	var out := []
+	for unit in _get_player_units():
+		if unit == null:
+			continue
+		if _hex_distance(origin, unit.grid_pos) <= range:
+			out.append(unit)
+	return out
+
+func _pick_weighted_targets(candidates: Array, origin: Vector2i, count: int) -> Array:
+	var pool := candidates.duplicate()
+	var picks: int = int(min(count, pool.size()))
+	var out := []
+	for i in range(picks):
+		var weights := []
+		for unit in pool:
+			weights.append(_target_weight(unit, origin))
+		var idx = _pick_weighted_index(weights)
+		if idx < 0:
+			break
+		out.append(pool[idx])
+		pool.remove_at(idx)
+	return out
+
+func _pick_adjacent_pair(candidates: Array, origin: Vector2i) -> Array:
+	var pairs := []
+	var weights := []
+	for i in range(candidates.size()):
+		for j in range(i + 1, candidates.size()):
+			var a = candidates[i]
+			var b = candidates[j]
+			if _hex_distance(a.grid_pos, b.grid_pos) != 1:
+				continue
+			pairs.append([a, b])
+			weights.append(_target_weight(a, origin) * _target_weight(b, origin))
+	if pairs.size() == 0:
+		return []
+	var idx = _pick_weighted_index(weights)
+	if idx < 0:
+		return []
+	return pairs[idx]
+
+func _queue_neutral_attack(attacker, target, atk_mode: String, dmg_map: Dictionary, src_map: Dictionary, ret_map: Dictionary, ret_src_map: Dictionary) -> void:
+	if attacker == null or target == null:
+		return
+	var dmg_result = calculate_damage(attacker, target, atk_mode, 1)
+	var atkr_in_dmg = dmg_result[0]
+	var defr_in_dmg = dmg_result[1]
+	var retaliate = false
+	if atk_mode == "ranged":
+		var result = $GameBoardNode.get_reachable_tiles(target.grid_pos, 1, "move")
+		var melee_in_range = attacker.grid_pos in result["tiles"]
+		retaliate = target.is_defending and (target.is_ranged or melee_in_range)
+	else:
+		retaliate = target.is_defending
+	dmg_map[target.net_id] = dmg_map.get(target.net_id, 0) + defr_in_dmg
+	_accumulate_damage_by_player(src_map, target.net_id, attacker.player_id, defr_in_dmg)
+	if retaliate:
+		ret_map[attacker.net_id] = ret_map.get(attacker.net_id, 0) + atkr_in_dmg
+		_accumulate_damage_by_player(ret_src_map, attacker.net_id, target.player_id, atkr_in_dmg)
+	dealt_dmg_report(attacker, target, atkr_in_dmg, defr_in_dmg, retaliate, atk_mode)
+
+func _camp_gold_reward(pos: Vector2i) -> int:
+	var count = camp_respawn_counts.get(pos, 0)
+	var seed = int(pos.x * 73856093) ^ int(pos.y * 19349663) ^ int(count * 83492791)
+	var span = max(1, camp_gold_max - camp_gold_min + 1)
+	return camp_gold_min + (abs(seed) % span)
+
+func _dragon_reward_for_pos(pos: Vector2i) -> String:
+	var rewards = [DRAGON_REWARD_GOLD, DRAGON_REWARD_MELEE, DRAGON_REWARD_RANGED]
+	var seed = int(pos.x * 1259) + int(pos.y * 1931)
+	var idx = abs(seed) % rewards.size()
+	return rewards[idx]
+
+func _apply_dragon_reward_color(unit, reward: String) -> void:
+	match reward:
+		DRAGON_REWARD_GOLD:
+			unit.modulate = Color(1, 0.84, 0)
+		DRAGON_REWARD_MELEE:
+			unit.modulate = Color(0.9, 0.35, 0.25)
+		DRAGON_REWARD_RANGED:
+			unit.modulate = Color(0.35, 0.6, 1)
+		_:
+			unit.modulate = Color(1, 1, 1)
 
 # --- Orders Data ---
 var player_orders     := { "player1": {}, "player2": {} }
@@ -136,10 +293,89 @@ func _ready():
 		$GameBoardNode/HexTileMap/Structures.add_child(mine)
 		$GameBoardNode.set_structure_at(tile, mine)
 
+	_spawn_neutral_units()
 	$GameBoardNode/FogOfWar._update_fog()
+
+func _spawn_camp_at(pos: Vector2i) -> Node:
+	var unit = unit_manager.spawn_unit(CAMP_ARCHER_TYPE, pos, NEUTRAL_PLAYER_ID, false)
+	if unit == null:
+		return null
+	unit.is_defending = true
+	unit.just_purchased = false
+	camp_units[pos] = unit
+	if not camp_respawn_counts.has(pos):
+		camp_respawn_counts[pos] = 0
+	return unit
+
+func _spawn_dragon_at(pos: Vector2i) -> Node:
+	var unit = unit_manager.spawn_unit(DRAGON_TYPE, pos, NEUTRAL_PLAYER_ID, false)
+	if unit == null:
+		return null
+	unit.is_defending = true
+	unit.just_purchased = false
+	if not dragon_rewards.has(pos):
+		dragon_rewards[pos] = _dragon_reward_for_pos(pos)
+	var reward = dragon_rewards[pos]
+	_apply_dragon_reward_color(unit, reward)
+	dragon_units[pos] = unit
+	return unit
+
+func _spawn_neutral_units() -> void:
+	for pos in camps["basic"]:
+		if camp_units.has(pos):
+			continue
+		if camp_respawns.has(pos):
+			continue
+		_spawn_camp_at(pos)
+	for pos in camps["dragon"]:
+		if dragon_units.has(pos):
+			continue
+		if dragon_respawns.has(pos):
+			continue
+		_spawn_dragon_at(pos)
+	update_neutral_markers()
+
+func _tick_neutral_respawns() -> void:
+	var camp_positions = camp_respawns.keys()
+	camp_positions.sort()
+	for pos in camp_positions:
+		camp_respawns[pos] -= 1
+		if camp_respawns[pos] <= 0:
+			camp_respawns.erase(pos)
+			_spawn_camp_at(pos)
+	var dragon_positions = dragon_respawns.keys()
+	dragon_positions.sort()
+	for pos in dragon_positions:
+		dragon_respawns[pos] -= 1
+		if dragon_respawns[pos] <= 0:
+			dragon_respawns.erase(pos)
+			_spawn_dragon_at(pos)
+	update_neutral_markers()
 
 func start_game() -> void:
 	call_deferred("_game_loop")
+
+func update_neutral_markers() -> void:
+	var root = _get_neutral_marker_root()
+	for child in root.get_children():
+		child.queue_free()
+	var fog = $GameBoardNode/FogOfWar
+	var vis = {}
+	if fog != null and fog.visiblity.has(local_player_id):
+		vis = fog.visiblity[local_player_id]
+	for pos in camp_respawns.keys():
+		if vis.get(pos, 0) == 2:
+			_add_neutral_marker(root, pos, str(camp_respawns[pos]))
+	for pos in dragon_respawns.keys():
+		if vis.get(pos, 0) == 2:
+			_add_neutral_marker(root, pos, str(dragon_respawns[pos]))
+
+func _add_neutral_marker(root: Node2D, pos: Vector2i, text: String) -> void:
+	var label = Label.new()
+	label.text = text
+	label.position = $GameBoardNode/HexTileMap.map_to_world(pos) + $GameBoardNode/HexTileMap.tile_size * 0.35
+	label.z_index = 101
+	root.add_child(label)
 
 func end_game(player_id):
 	$GameOver/GameOverLabel.add_theme_font_size_override("font_size", 100)
@@ -205,6 +441,10 @@ func _do_upkeep() -> void:
 				unit.curr_health += unit.regen
 				unit.set_health_bar()
 				unit.is_healing = false
+	for unit in all_units.get("neutral", []):
+		unit.is_defending = true
+		unit.is_moving = false
+	_tick_neutral_respawns()
 	$GameBoardNode/FogOfWar._update_fog()
 	$UI/DamagePanel.visible = true
 	$GameBoardNode/OrderReminderMap.highlight_unordered_units(local_player_id)
@@ -271,6 +511,10 @@ func calculate_damage(attacker, defender, atk_mode, num_atkrs):
 		atkr_str = attacker.ranged_strength * atkr_damaged_penalty
 	else:
 		atkr_str = attacker.melee_strength * atkr_damaged_penalty
+	if atk_mode == "ranged":
+		atkr_str += player_ranged_bonus.get(attacker.player_id, 0)
+	else:
+		atkr_str += player_melee_bonus.get(attacker.player_id, 0)
 	if atk_mode != "ranged":
 		atkr_str += _terrain_bonus(attacker.grid_pos, "melee_attack_bonus")
 	var defr_damaged_penalty = 1- ((100 - defender.curr_health) * 0.005)
@@ -291,6 +535,81 @@ func calculate_damage(attacker, defender, atk_mode, num_atkrs):
 		atkr_in_dmg = 30 * (1.041**(defr_str - attacker.melee_strength * atkr_damaged_penalty))
 	var defr_in_dmg = 30 * (1.041**(atkr_str - defr_str))
 	return [atkr_in_dmg, defr_in_dmg]
+
+func _accumulate_damage_by_player(dmg_map: Dictionary, target_net_id: int, player_id: String, amount: float) -> void:
+	if amount <= 0:
+		return
+	if player_id == "":
+		return
+	var by_player = dmg_map.get(target_net_id, {})
+	by_player[player_id] = float(by_player.get(player_id, 0.0)) + float(amount)
+	dmg_map[target_net_id] = by_player
+
+func _assign_last_damaged_by(target, dmg_map: Dictionary, target_net_id: int) -> void:
+	if target == null:
+		return
+	var by_player = dmg_map.get(target_net_id, {})
+	if by_player.size() == 0:
+		return
+	var max_dmg := -1.0
+	var tied: Array = []
+	for player_id in by_player.keys():
+		var dmg = float(by_player[player_id])
+		if dmg > max_dmg:
+			max_dmg = dmg
+			tied = [player_id]
+		elif dmg == max_dmg:
+			tied.append(player_id)
+	if tied.size() == 1:
+		target.last_damaged_by = tied[0]
+		return
+	# TODO: Replace random tie-break with deterministic logic.
+	var idx = rng.randi_range(0, tied.size() - 1)
+	target.last_damaged_by = tied[idx]
+
+func _grant_dragon_reward(player_id: String, pos: Vector2i) -> void:
+	var reward = dragon_rewards.get(pos, DRAGON_REWARD_GOLD)
+	match reward:
+		DRAGON_REWARD_GOLD:
+			player_gold[player_id] += dragon_gold_bonus
+		DRAGON_REWARD_MELEE:
+			player_melee_bonus[player_id] += dragon_melee_bonus
+		DRAGON_REWARD_RANGED:
+			player_ranged_bonus[player_id] += dragon_ranged_bonus
+
+func _handle_neutral_death(unit) -> void:
+	if unit == null:
+		return
+	if unit.player_id != NEUTRAL_PLAYER_ID:
+		return
+	var pos = unit.grid_pos
+	if unit.unit_type == CAMP_ARCHER_TYPE:
+		camp_units.erase(pos)
+		camp_respawns[pos] = camp_respawn_turns
+		var killer = unit.last_damaged_by
+		if killer in ["player1", "player2"]:
+			var reward = _camp_gold_reward(pos)
+			player_gold[killer] += reward
+		camp_respawn_counts[pos] = camp_respawn_counts.get(pos, 0) + 1
+	elif unit.unit_type == DRAGON_TYPE:
+		dragon_units.erase(pos)
+		dragon_respawns[pos] = dragon_respawn_turns
+		var killer = unit.last_damaged_by
+		if killer in ["player1", "player2"]:
+			_grant_dragon_reward(killer, pos)
+	update_neutral_markers()
+
+func _cleanup_dead_unit(unit) -> void:
+	if unit == null or not is_instance_valid(unit):
+		return
+	for player in ["player1", "player2"]:
+		player_orders[player].erase(unit.net_id)
+		NetworkManager.player_orders[player].erase(unit.net_id)
+	died_dmg_report(unit)
+	_handle_neutral_death(unit)
+	$GameBoardNode.vacate(unit.grid_pos)
+	$GameBoardNode/HexTileMap.set_player_tile(unit.grid_pos, "")
+	unit.queue_free()
 
 func dealt_dmg_report(atkr, defr, atkr_in_dmg, defr_in_dmg, retaliate, atk_mode):
 	var report_label = Label.new()
@@ -361,6 +680,8 @@ func _process_attacks():
 	var ranged_dmg: Dictionary = {} # key: target.net_id, value: damage recieved
 	var melee_attacks: Dictionary = {} # key: target.net_id, value: array[[attacker.net_id, priority]]
 	var melee_dmg: Dictionary = {} # key: target, value: damage recieved
+	var ranged_sources: Dictionary = {} # key: target.net_id, value: {player_id: damage}
+	var melee_sources: Dictionary = {} # key: target.net_id, value: {player_id: damage}
 	
 	# get all attacks
 	for player in ["player1", "player2"]:
@@ -401,7 +722,9 @@ func _process_attacks():
 			var melee_in_range = unit.grid_pos in result["tiles"]
 			if target.is_defending and (target.is_ranged or melee_in_range):
 				ranged_dmg[unit_net_id] = ranged_dmg.get(unit_net_id, 0) + atkr_in_dmg
+				_accumulate_damage_by_player(ranged_sources, unit_net_id, target.player_id, atkr_in_dmg)
 			ranged_dmg[target_net_id] = ranged_dmg.get(target_net_id, 0) + defr_in_dmg
+			_accumulate_damage_by_player(ranged_sources, target_net_id, unit.player_id, defr_in_dmg)
 			dealt_dmg_report(unit, target, atkr_in_dmg, defr_in_dmg, target.is_defending and (target.is_ranged or melee_in_range), "ranged")
 	
 	# calculate all melee attack damages done
@@ -418,7 +741,9 @@ func _process_attacks():
 			var defr_in_dmg = dmg_result[1]
 			if target.is_defending:
 				melee_dmg[attacker.net_id] = melee_dmg.get(attacker.net_id, 0) + atkr_in_dmg
+				_accumulate_damage_by_player(melee_sources, attacker.net_id, target.player_id, atkr_in_dmg)
 			melee_dmg[target.net_id] = melee_dmg.get(target.net_id, 0) + defr_in_dmg
+			_accumulate_damage_by_player(melee_sources, target.net_id, attacker.player_id, defr_in_dmg)
 			dealt_dmg_report(attacker, target, atkr_in_dmg, defr_in_dmg, target.is_defending, "melee")
 	
 	# deal ranged damage
@@ -427,15 +752,10 @@ func _process_attacks():
 	for target_net_id in target_ids:
 		var target = unit_manager.get_unit_by_net_id(target_net_id)
 		target.curr_health -= ranged_dmg[target_net_id]
+		_assign_last_damaged_by(target, ranged_sources, target_net_id)
 		# dead unit, remove from all orders and remove node from game
 		if target.curr_health <= 0:
-			for player in ["player1", "player2"]:
-				player_orders[player].erase(target_net_id)
-			died_dmg_report(target)
-			$GameBoardNode.vacate(target.grid_pos)
-			$GameBoardNode/HexTileMap.set_player_tile(target.grid_pos, "")
-			
-			target.queue_free()
+			_cleanup_dead_unit(target)
 		else:
 			target.set_health_bar()
 	
@@ -447,14 +767,9 @@ func _process_attacks():
 		target.curr_health -= melee_dmg[target.net_id]
 	for target_unit_net_id in target_ids:
 		var target = unit_manager.get_unit_by_net_id(target_unit_net_id)
+		_assign_last_damaged_by(target, melee_sources, target.net_id)
 		# dead unit, remove from all orders and remove node from game
 		if target.curr_health <= 0:
-			for player in ["player1", "player2"]:
-				player_orders[player].erase(target.net_id)
-			died_dmg_report(target)
-			$GameBoardNode.vacate(target.grid_pos)
-			$GameBoardNode/HexTileMap.set_player_tile(target.grid_pos, "")
-			
 			if target_unit_net_id in melee_attacks.keys():
 				melee_attacks[target.net_id].sort_custom(func(a,b): return a[1] < b[1])
 				for unit_priority_pair in melee_attacks[target.net_id]:
@@ -463,9 +778,74 @@ func _process_attacks():
 						unit.set_grid_position(target.grid_pos)
 						break
 				pass
-			target.queue_free()
+			_cleanup_dead_unit(target)
 		else:
 			target.set_health_bar()
+	$UI._draw_attacks()
+	$UI._draw_paths()
+	$UI._draw_supports()
+	$GameBoardNode/FogOfWar._update_fog()
+
+func _process_neutral_attacks() -> void:
+	var neutral_units = $GameBoardNode.get_all_units().get("neutral", [])
+	if neutral_units.size() == 0:
+		return
+	var neutral_dmg: Dictionary = {}
+	var neutral_sources: Dictionary = {}
+	var retaliation_dmg: Dictionary = {}
+	var retaliation_sources: Dictionary = {}
+
+	for neutral in neutral_units:
+		if neutral == null or neutral.curr_health <= 0:
+			continue
+		if neutral.unit_type == CAMP_ARCHER_TYPE:
+			var candidates = _units_in_range(neutral.grid_pos, camp_archer_range)
+			if candidates.size() == 0:
+				continue
+			var weights := []
+			for unit in candidates:
+				weights.append(_target_weight(unit, neutral.grid_pos))
+			var idx = _pick_weighted_index(weights)
+			if idx < 0:
+				continue
+			_queue_neutral_attack(neutral, candidates[idx], "ranged", neutral_dmg, neutral_sources, retaliation_dmg, retaliation_sources)
+		elif neutral.unit_type == DRAGON_TYPE:
+			var fire_candidates = _units_in_range(neutral.grid_pos, dragon_fire_range)
+			var fire_pair = _pick_adjacent_pair(fire_candidates, neutral.grid_pos)
+			if fire_pair.size() == 2:
+				_queue_neutral_attack(neutral, fire_pair[0], "ranged", neutral_dmg, neutral_sources, retaliation_dmg, retaliation_sources)
+				_queue_neutral_attack(neutral, fire_pair[1], "ranged", neutral_dmg, neutral_sources, retaliation_dmg, retaliation_sources)
+			var cleave_candidates = _units_in_range(neutral.grid_pos, 1)
+			var cleave_targets = _pick_weighted_targets(cleave_candidates, neutral.grid_pos, dragon_cleave_targets)
+			for target in cleave_targets:
+				_queue_neutral_attack(neutral, target, "melee", neutral_dmg, neutral_sources, retaliation_dmg, retaliation_sources)
+
+	var target_ids = neutral_dmg.keys()
+	target_ids.sort()
+	for target_net_id in target_ids:
+		var target = unit_manager.get_unit_by_net_id(target_net_id)
+		if target == null:
+			continue
+		target.curr_health -= neutral_dmg[target_net_id]
+		_assign_last_damaged_by(target, neutral_sources, target_net_id)
+		if target.curr_health <= 0:
+			_cleanup_dead_unit(target)
+		else:
+			target.set_health_bar()
+
+	var retaliation_ids = retaliation_dmg.keys()
+	retaliation_ids.sort()
+	for target_net_id in retaliation_ids:
+		var target = unit_manager.get_unit_by_net_id(target_net_id)
+		if target == null:
+			continue
+		target.curr_health -= retaliation_dmg[target_net_id]
+		_assign_last_damaged_by(target, retaliation_sources, target_net_id)
+		if target.curr_health <= 0:
+			_cleanup_dead_unit(target)
+		else:
+			target.set_health_bar()
+
 	$UI._draw_attacks()
 	$UI._draw_paths()
 	$UI._draw_supports()
@@ -484,45 +864,31 @@ func _mg_resolve_enemy_swap(a_pos: Vector2i, b_pos: Vector2i) -> void:
 	dealt_dmg_report(ua, ub, dmg_b[1], dmg_a[1], true, "move")
 	ua.curr_health -= dmg_b[1]
 	ub.curr_health -= dmg_a[1]
+	ua.last_damaged_by = ub.player_id
+	ub.last_damaged_by = ua.player_id
 	ua.set_health_bar()
 	ub.set_health_bar()
 
 	var ua_dead = ua.curr_health <= 0
 	var ub_dead = ub.curr_health <= 0
 	
-	if ua_dead:
-		died_dmg_report(ua)
-	if ub_dead:
-		died_dmg_report(ub)
 	if ua_dead and ub_dead:
-		$GameBoardNode.vacate(a_pos)
-		$GameBoardNode/HexTileMap.set_player_tile(a_pos, "")
-		$GameBoardNode.vacate(b_pos)
-		$GameBoardNode/HexTileMap.set_player_tile(b_pos, "")
-		NetworkManager.player_orders[ua.player_id].erase(ua.net_id)
-		NetworkManager.player_orders[ub.player_id].erase(ub.net_id)
-		ua.queue_free()
-		ub.queue_free()
+		_cleanup_dead_unit(ua)
+		_cleanup_dead_unit(ub)
 		return
 
 	if ua_dead and not ub_dead:
-		$GameBoardNode.vacate(a_pos)
-		$GameBoardNode/HexTileMap.set_player_tile(a_pos, "")
+		_cleanup_dead_unit(ua)
 		ub.set_grid_position(a_pos)
 		NetworkManager.player_orders[ub.player_id].erase(ub.net_id)
 		ub.is_moving = false
-		NetworkManager.player_orders[ua.player_id].erase(ua.net_id)
-		ua.queue_free()
 		return
 
 	if ub_dead and not ua_dead:
-		$GameBoardNode.vacate(b_pos)
-		$GameBoardNode/HexTileMap.set_player_tile(b_pos, "")
+		_cleanup_dead_unit(ub)
 		ua.set_grid_position(b_pos)
 		NetworkManager.player_orders[ua.player_id].erase(ua.net_id)
 		ua.is_moving = false
-		NetworkManager.player_orders[ub.player_id].erase(ub.net_id)
-		ub.queue_free()
 		return
 
 	# both live → both bounce
@@ -621,11 +987,13 @@ func _mg_tile_fifo_commit(t: Vector2i, entrants: Array, stationary_defender: Nod
 		# Attacker hits defender; defender retaliates if still alive & is_defending
 		var dmg = calculate_damage(atk, stationary_defender, "move", 1)
 		stationary_defender.curr_health -= dmg[1]
+		stationary_defender.last_damaged_by = atk.player_id
 		stationary_defender.set_health_bar()
 		dealt_dmg_report(atk, stationary_defender, dmg[0], dmg[1], stationary_defender.is_defending, "move")
 
 		if stationary_defender.is_defending:
 			atk.curr_health -= dmg[0]
+			atk.last_damaged_by = stationary_defender.player_id
 			atk.set_health_bar()
 
 		# Attacker fought this tick -> stop and clear order
@@ -635,21 +1003,14 @@ func _mg_tile_fifo_commit(t: Vector2i, entrants: Array, stationary_defender: Nod
 
 		# Handle deaths
 		if atk.curr_health <= 0:
-			died_dmg_report(atk)
-			$GameBoardNode.vacate(atk.grid_pos)
-			$GameBoardNode/HexTileMap.set_player_tile(atk.grid_pos, "")
-			atk.queue_free()
+			_cleanup_dead_unit(atk)
 			enemy_item = null
 		if stationary_defender.curr_health <= 0:
-			died_dmg_report(stationary_defender)
 			# Defender died at atk's hand; remember killer if alive
 			if atk != null and atk.curr_health > 0:
 				killer_item = {"from": atk.grid_pos, "unit": atk, "fought": true}
 			# Remove defender from board and proceed to empty-tile FIFO
-			var dpos = def_item["from"]
-			$GameBoardNode.vacate(dpos)
-			$GameBoardNode/HexTileMap.set_player_tile(dpos, "")
-			stationary_defender.queue_free()
+			_cleanup_dead_unit(stationary_defender)
 			stationary_defender = null
 			# loop continues; next iteration will fall into the contested-empty branch
 			continue
@@ -707,6 +1068,8 @@ func _fifo_resolve_empty_tile(dest: Vector2i, qA: Array, qB: Array) -> Variant:
 		var d21 = calculate_damage(ub, ua, "move", 1)
 		ua.curr_health -= d21[1]
 		ub.curr_health -= d12[1]
+		ua.last_damaged_by = ub.player_id
+		ub.last_damaged_by = ua.player_id
 		ua.set_health_bar()
 		ub.set_health_bar()
 		dealt_dmg_report(ua, ub, d21[1], d12[1], true, "move")
@@ -722,15 +1085,9 @@ func _fifo_resolve_empty_tile(dest: Vector2i, qA: Array, qB: Array) -> Variant:
 		var ua_dead = ua.curr_health <= 0
 		var ub_dead = ub.curr_health <= 0
 		if ua_dead:
-			died_dmg_report(ua)
-			$GameBoardNode.vacate(ua.grid_pos)
-			$GameBoardNode/HexTileMap.set_player_tile(ua.grid_pos, "")
-			ua.queue_free()
+			_cleanup_dead_unit(ua)
 		if ub_dead:
-			died_dmg_report(ub)
-			$GameBoardNode.vacate(ub.grid_pos)
-			$GameBoardNode/HexTileMap.set_player_tile(ub.grid_pos, "")
-			ub.queue_free()
+			_cleanup_dead_unit(ub)
 
 		# killer requeues *once* with fought=true
 		if not ua_dead and ub_dead:
@@ -837,8 +1194,7 @@ func _mg_resolve_chain_from_sink(mg: MovementGraph, entrants_map: Dictionary, st
 
 
 func _process_move():
-	var all_units = $GameBoardNode.get_all_units()
-	var units: Array = all_units["player1"] + all_units["player2"]
+	var units: Array = $GameBoardNode.get_all_units_flat()
 	var mg = MovementGraph.new()
 	mg.build(units)
 	
@@ -847,8 +1203,7 @@ func _process_move():
 		_mg_resolve_enemy_swap(pair["a"], pair["b"])
 
 	# Rebuild after swaps
-	all_units = $GameBoardNode.get_all_units()
-	units = all_units["player1"] + all_units["player2"]
+	units = $GameBoardNode.get_all_units_flat()
 	mg.build(units)
 
 	# 2. Determine entrants and provisional winners on single‑entry tiles
@@ -873,8 +1228,7 @@ func _process_move():
 			for t in touched.keys():
 				rotated_tiles[t] = true
 	
-	all_units = $GameBoardNode.get_all_units()
-	units = all_units["player1"] + all_units["player2"]
+	units = $GameBoardNode.get_all_units_flat()
 	mg.build(units)
 	entrants_all = mg.entries_all()
 	
@@ -912,8 +1266,7 @@ func _process_move():
 						winner.is_moving = true
 
 	# Rebuild graph & entrants after these fights (is_moving/HP may have changed)
-	all_units = $GameBoardNode.get_all_units()
-	units = all_units["player1"] + all_units["player2"]
+	units = $GameBoardNode.get_all_units_flat()
 	mg.build(units)
 	entrants_all = mg.entries_all()
 
@@ -930,8 +1283,7 @@ func _process_move():
 	for t in sink_tiles:
 		_mg_resolve_chain_from_sink(mg, entrants_all, t, rotated_tiles)
 
-	all_units = $GameBoardNode.get_all_units()
-	units = all_units["player1"] + all_units["player2"]
+	units = $GameBoardNode.get_all_units_flat()
 	mg.build(units)
 	entrants_all = mg.entries_all()
 	
@@ -963,6 +1315,9 @@ func _process_move():
 				$UI._draw_paths()
 				$GameBoardNode/FogOfWar._update_fog()
 				return  # pause execution here
+	if neutral_step_index == -1:
+		neutral_step_index = exec_steps.size()
+		exec_steps.append(func(): _process_neutral_attacks())
 
 # --------------------------------------------------------
 # Phase 3: Execution — process orders
@@ -974,6 +1329,7 @@ func _do_execution() -> void:
 	$GameBoardNode/OrderReminderMap.clear()
 	for child in dmg_report.get_children():
 		child.queue_free()
+	neutral_step_index = -1
 	exec_steps = [
 		func(): _process_spawns(),
 		func(): _process_attacks(),
