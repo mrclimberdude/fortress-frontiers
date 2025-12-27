@@ -76,6 +76,12 @@ func _terrain_move_cost(cell: Vector2i) -> int:
 	var cost = int(td.get_custom_data("move_cost"))
 	return 1 if cost <= 0 else cost
 
+func _terrain_blocks_sight(cell: Vector2i) -> bool:
+	var td = _get_terrain_tile_data(cell)
+	if td == null:
+		return false
+	return bool(td.get_custom_data("blocks_sight"))
+
 func get_move_cost(cell: Vector2i) -> int:
 	return _terrain_move_cost(cell)
 # ────────────────────────────────────────────────────────────────────────────────
@@ -126,6 +132,8 @@ func get_reachable_tiles(start: Vector2i, range: int, mode: String) -> Dictionar
 
 			# Expand neighbors if under move range
 			if dist < range:
+				if mode in ["visibility", "ranged"] and current != spawn and _terrain_blocks_sight(current):
+					continue
 				for neighbor in get_offset_neighbors(current):
 					# Bounds check
 					if not hex_map.is_cell_valid(neighbor):
