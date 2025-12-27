@@ -3,6 +3,7 @@ extends Node2D
 @export var tile_size: Vector2 = Vector2(170, 192)   # width, height of one hex
 @export var highlight_tile_id: int = 2
 @onready var hex_map: TileMapLayer = $HexTileMap
+var terrain_overlay: TileMapLayer = null
 
 # Maps a Vector2i tile coordinate → the Unit node standing there
 var occupied_tiles: Dictionary = {}
@@ -50,6 +51,33 @@ func get_all_structures():
 	for structure in structure_tiles.values():
 		structures.append(structure)
 	return structures
+
+func _get_terrain_overlay() -> TileMapLayer:
+	if terrain_overlay == null:
+		terrain_overlay = get_node_or_null("TerrainMap")
+	return terrain_overlay
+
+func _get_terrain_tile_data(cell: Vector2i) -> TileData:
+	var tmap = _get_terrain_overlay()
+	if tmap == null:
+		return null
+	return tmap.get_cell_tile_data(cell)
+
+func _terrain_is_impassable(cell: Vector2i) -> bool:
+	var td = _get_terrain_tile_data(cell)
+	if td == null:
+		return false
+	return bool(td.get_custom_data("impassable"))
+
+func _terrain_move_cost(cell: Vector2i) -> int:
+	var td = _get_terrain_tile_data(cell)
+	if td == null:
+		return 1
+	var cost = int(td.get_custom_data("move_cost"))
+	return 1 if cost <= 0 else cost
+
+func get_move_cost(cell: Vector2i) -> int:
+	return _terrain_move_cost(cell)
 # ────────────────────────────────────────────────────────────────────────────────
 
 # ─── Hex neighbor & reachability ───────────────────────────────────────────────
@@ -102,6 +130,8 @@ func get_reachable_tiles(start: Vector2i, range: int, mode: String) -> Dictionar
 					# Bounds check
 					if not hex_map.is_cell_valid(neighbor):
 						continue
+					if mode in ["move", "place"] and _terrain_is_impassable(neighbor):
+						continue
 					if visited.has(neighbor):
 						continue
 					if mode == "place":
@@ -111,6 +141,38 @@ func get_reachable_tiles(start: Vector2i, range: int, mode: String) -> Dictionar
 					visited[neighbor] = dist + 1
 					prev[neighbor] = current
 					queue.append(neighbor)
+	if mode == "move":
+		# Re-run a weighted search for movement cost
+		reachable.clear()
+		prev.clear()
+		visited.clear()
+		var open: Array = []
+		visited[start] = 0
+		open.append(start)
+		while open.size() > 0:
+			var best_idx = 0
+			var best_cost = visited[open[0]]
+			for i in range(1, open.size()):
+				var c = visited[open[i]]
+				if c < best_cost:
+					best_cost = c
+					best_idx = i
+			var current = open.pop_at(best_idx)
+			reachable.append(current)
+			for neighbor in get_offset_neighbors(current):
+				if not hex_map.is_cell_valid(neighbor):
+					continue
+				if _terrain_is_impassable(neighbor):
+					continue
+				var step_cost = _terrain_move_cost(neighbor)
+				var new_cost = visited[current] + step_cost
+				if new_cost > range:
+					continue
+				if not visited.has(neighbor) or new_cost < visited[neighbor]:
+					visited[neighbor] = new_cost
+					prev[neighbor] = current
+					if neighbor not in open:
+						open.append(neighbor)
 	if mode == "place":
 		for spawn in spawns:
 			if spawn in reachable:

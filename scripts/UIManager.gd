@@ -650,8 +650,10 @@ func _unhandled_input(ev):
 			cur = prev[cur]
 		
 		current_path += path
-		var steps_used = path.size()
-		remaining_moves -= steps_used
+		var cost_used = 0
+		for step_cell in path:
+			cost_used += game_board.get_move_cost(step_cell)
+		remaining_moves -= cost_used
 		
 		_draw_partial_path()
 		finish_move_button.set_position(ev.position)
