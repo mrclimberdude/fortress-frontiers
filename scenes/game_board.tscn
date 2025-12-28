@@ -331,6 +331,10 @@ text = "Gold += Income"
 layout_mode = 2
 text = "Show respawn timers"
 
+[node name="ResyncButton" type="Button" parent="UI/DevPanel/VBoxContainer"]
+layout_mode = 2
+text = "Resync state"
+
 [node name="DamagePanel" type="Panel" parent="UI"]
 visible = false
 offset_left = 1.0

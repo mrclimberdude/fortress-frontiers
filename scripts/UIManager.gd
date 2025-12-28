@@ -37,6 +37,7 @@ var _current_exec_step_idx: int = 0
 @onready var dev_mode_toggle = get_node(dev_mode_toggle_path) as CheckButton
 @onready var dev_panel = $DevPanel
 @onready var respawn_timers_toggle = $DevPanel/VBoxContainer/RespawnTimersCheckButton as CheckButton
+@onready var resync_button = $DevPanel/VBoxContainer/ResyncButton as Button
 @onready var finish_move_button = $Panel/FinishMoveButton
 
 const ArrowScene = preload("res://scenes/Arrow.tscn")
@@ -74,12 +75,22 @@ func _ready():
 					 Callable(self, "_on_give_income_pressed"))
 	$DevPanel/VBoxContainer/RespawnTimersCheckButton.connect("toggled",
 					 Callable(self, "_on_respawn_timers_toggled"))
+	$DevPanel/VBoxContainer/ResyncButton.connect("pressed",
+					 Callable(self, "_on_resync_pressed"))
+	NetworkManager.connect("buy_result",
+					Callable(self, "_on_buy_result"))
+	NetworkManager.connect("undo_result",
+					Callable(self, "_on_undo_result"))
+	NetworkManager.connect("order_result",
+					Callable(self, "_on_order_result"))
 	
 	# turn flow connections
 	turn_mgr.connect("orders_phase_begin",
 					Callable(self, "_on_orders_phase_begin"))
 	turn_mgr.connect("orders_phase_end",
 					Callable(self, "_on_orders_phase_end"))
+	turn_mgr.connect("state_applied",
+					Callable(self, "_on_state_applied"))
 	turn_mgr.connect("execution_paused",
 					Callable(self, "_on_execution_paused"))
 	turn_mgr.connect("execution_complete",
@@ -221,6 +232,99 @@ func _on_give_income_pressed():
 
 func _on_respawn_timers_toggled(pressed: bool) -> void:
 	turn_mgr.set_respawn_timer_override(pressed)
+
+func _on_resync_pressed() -> void:
+	NetworkManager.request_state()
+
+func _buy_error_message(reason: String, cost: int) -> String:
+	match reason:
+		"not_enough_gold":
+			if cost > 0:
+				return "[Not enough gold] Need %d" % cost
+			return "[Not enough gold]"
+		"unknown_unit":
+			return "[Unknown unit]"
+		_:
+			return "[Purchase failed]"
+
+func _undo_error_message(reason: String) -> String:
+	match reason:
+		"not_owner":
+			return "[Undo failed: not owner]"
+		"not_just_purchased":
+			return "[Undo failed: not a fresh buy]"
+		"not_found":
+			return "[Undo failed: unit missing]"
+		_:
+			return "[Undo failed]"
+
+func _order_error_message(reason: String) -> String:
+	match reason:
+		"wrong_phase":
+			return "[Orders closed]"
+		"not_owner":
+			return "[Order failed: not owner]"
+		"unit_missing":
+			return "[Order failed: unit missing]"
+		"invalid_unit":
+			return "[Order failed: invalid unit]"
+		"invalid_path":
+			return "[Order failed: invalid path]"
+		"invalid_target":
+			return "[Order failed: invalid target]"
+		"out_of_range":
+			return "[Order failed: out of range]"
+		"not_ready":
+			return "[Order failed: unit not ready]"
+		_:
+			return "[Order failed]"
+
+func _on_buy_result(player_id: String, unit_type: String, grid_pos: Vector2i, ok: bool, reason: String, cost: int) -> void:
+	if player_id != turn_mgr.local_player_id:
+		return
+	if turn_mgr.is_host():
+		return
+	if ok:
+		gold_lbl.text = "%s Gold: %d" % [current_player, turn_mgr.player_gold[current_player]]
+	else:
+		gold_lbl.text = _buy_error_message(reason, cost)
+
+func _on_undo_result(player_id: String, unit_net_id: int, ok: bool, reason: String, refund: int) -> void:
+	if player_id != turn_mgr.local_player_id:
+		return
+	if turn_mgr.is_host():
+		return
+	if ok:
+		gold_lbl.text = "%s Gold: %d" % [current_player, turn_mgr.player_gold[current_player]]
+	else:
+		gold_lbl.text = _undo_error_message(reason)
+
+func _on_order_result(player_id: String, unit_net_id: int, order: Dictionary, ok: bool, reason: String) -> void:
+	if player_id != turn_mgr.local_player_id:
+		return
+	if ok:
+		turn_mgr.player_orders[player_id][unit_net_id] = order
+		NetworkManager.player_orders[player_id][unit_net_id] = order
+		var unit = unit_mgr.get_unit_by_net_id(unit_net_id)
+		if unit != null:
+			unit.is_defending = false
+			unit.is_healing = false
+			unit.is_moving = false
+			match order.get("type", ""):
+				"move":
+					unit.is_moving = true
+					var path = order.get("path", [])
+					if path.size() > 1:
+						unit.moving_to = path[1]
+				"heal":
+					unit.is_healing = true
+				"defend":
+					unit.is_defending = true
+			unit.ordered = true
+		_draw_all()
+		$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
+	else:
+		gold_lbl.text = _order_error_message(reason)
 	
 
 func _on_host_pressed():
@@ -286,19 +390,16 @@ func _on_unit_selected(unit: Node) -> void:
 	action_menu.add_item("Defend", 5)
 
 func _on_action_selected(id: int) -> void:
-	currently_selected_unit.is_defending = false
-	currently_selected_unit.is_healing = false
-	currently_selected_unit.is_moving = false
 	match id:
 		0:
-			turn_mgr.player_gold[currently_selected_unit.player_id] += currently_selected_unit.cost
-			gold_lbl.text = "%s Gold: %d" % [current_player, turn_mgr.player_gold[current_player]]
-			turn_mgr.player_orders[currently_selected_unit.player_id][currently_selected_unit.net_id]["undo"] = true
-			$"../GameBoardNode/Units".unit_by_net_id.erase(currently_selected_unit.net_id)
-			$"../GameBoardNode".vacate(currently_selected_unit.grid_pos)
-			$"../GameBoardNode/HexTileMap".set_player_tile(currently_selected_unit.grid_pos, "")
-			currently_selected_unit.ordered = true
-			currently_selected_unit.queue_free()
+			var player_id = currently_selected_unit.player_id
+			var unit_id = currently_selected_unit.net_id
+			if turn_mgr.is_host():
+				if NetworkManager.request_undo_buy(player_id, unit_id):
+					gold_lbl.text = "%s Gold: %d" % [current_player, turn_mgr.player_gold[current_player]]
+			else:
+				NetworkManager.request_undo_buy(player_id, unit_id)
+			currently_selected_unit = null
 			$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
 		1:
 			action_mode = "move"
@@ -338,25 +439,19 @@ func _on_action_selected(id: int) -> void:
 		
 		4:
 			print("Heal selected for %s" % currently_selected_unit.name)
-			currently_selected_unit.is_healing = true
-			currently_selected_unit.ordered = true
-			turn_mgr.add_order(current_player, {
+			NetworkManager.request_order(current_player, {
 				"unit_net_id": currently_selected_unit.net_id,
 				"type": "heal",
 			})
-			_draw_all()
-			$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
+			action_mode = ""
 		
 		5:
 			print("Defend selected for %s" % currently_selected_unit.name)
-			turn_mgr.add_order(current_player, {
+			NetworkManager.request_order(current_player, {
 				"unit_net_id": currently_selected_unit.net_id,
 				"type": "defend",
 			})
-			currently_selected_unit.is_defending = true
-			currently_selected_unit.ordered = true
-			_draw_all()
-			$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
+			action_mode = ""
 	action_menu.hide()
 
 func _clear_all_drawings():
@@ -376,15 +471,21 @@ func _on_done_pressed():
 	#_clear_all_drawings()
 	$Panel.visible = false
 	cancel_done_button.visible = true
-	var my_orders = turn_mgr.get_all_orders(current_player)
-	NetworkManager.submit_orders(current_player, my_orders)
+	NetworkManager.submit_orders(current_player, [])
 	# prevent further clicks
 	placing_unit = ""
 	allow_clicks = false
 
 func _on_cancel_pressed():
 	NetworkManager.cancel_orders(current_player)
+	gold_lbl.text = "Orders cancelled - waiting on host"
 	_draw_all()
+	currently_selected_unit = null
+	action_mode = ""
+	current_path = []
+	remaining_moves = 0
+	finish_move_button.visible = false
+	game_board.clear_highlights()
 	allow_clicks = true
 	$Panel.visible = true
 	cancel_done_button.visible = false
@@ -423,7 +524,7 @@ func _draw_paths() -> void:
 	else:
 		players = ["player1", "player2"]
 	for player in players:
-		var all_orders = turn_mgr.get_all_orders(player)
+		var all_orders = turn_mgr.get_all_orders_for_phase(player)
 		for order in all_orders:
 			if order["type"] == "move":
 				var root = Node2D.new()
@@ -488,7 +589,7 @@ func _draw_attacks():
 	else:
 		players = ["player1", "player2"]
 	for player in players:
-		var all_orders = turn_mgr.get_all_orders(player)
+		var all_orders = turn_mgr.get_all_orders_for_phase(player)
 		for order in all_orders:
 			if order["type"] == "ranged" or order["type"] == "melee":
 				var root = Node2D.new()
@@ -530,7 +631,7 @@ func _draw_supports():
 	else:
 		players = ["player1", "player2"]
 	for player in players:
-		var all_orders = turn_mgr.get_all_orders(player)
+		var all_orders = turn_mgr.get_all_orders_for_phase(player)
 		for order in all_orders:
 			if order["type"] == "support":
 				var root = Node2D.new()
@@ -563,7 +664,7 @@ func _draw_heals():
 	else:
 		players = ["player1", "player2"]
 	for player in players:
-		var all_orders = turn_mgr.get_all_orders(player)
+		var all_orders = turn_mgr.get_all_orders_for_phase(player)
 		for order in all_orders:
 			if order["type"] == "heal":
 				var root = Node2D.new()
@@ -583,7 +684,7 @@ func _draw_defends():
 	else:
 		players = ["player1", "player2"]
 	for player in players:
-		var all_orders = turn_mgr.get_all_orders(player)
+		var all_orders = turn_mgr.get_all_orders_for_phase(player)
 		for order in all_orders:
 			if order["type"] == "defend":
 				var root = Node2D.new()
@@ -605,16 +706,12 @@ func finish_current_path():
 		action_mode = ""
 		return
 	move_priority +=1
-	currently_selected_unit.is_moving = true
-	currently_selected_unit.moving_to = current_path[1]
-	currently_selected_unit.ordered = true
-	turn_mgr.add_order(current_player, {
+	NetworkManager.request_order(current_player, {
 				"unit_net_id": currently_selected_unit.net_id,
 				"type": "move",
 				"path": current_path,
 				"priority": move_priority
 			})
-	_draw_all()
 	var preview_node = hex.get_node("PreviewPathArrows")
 	for child in preview_node.get_children():
 		child.queue_free()
@@ -625,6 +722,14 @@ func finish_current_path():
 	game_board.clear_highlights()
 	$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
 	
+func _on_state_applied() -> void:
+	if turn_mgr.current_phase == turn_mgr.Phase.ORDERS:
+		current_player = turn_mgr.local_player_id
+		gold_lbl.text = "Current Gold: %d" % [turn_mgr.player_gold.get(current_player, 0)]
+		income_lbl.text = "Income: %d per turn" % turn_mgr.player_income.get(current_player, 0)
+		$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
+	_draw_all()
+
 
 func _unhandled_input(ev):
 	if not (ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT):
@@ -638,12 +743,18 @@ func _unhandled_input(ev):
 	if placing_unit != "":
 		# Placement logic
 		if cell in current_reachable["tiles"]:
-			if turn_mgr.buy_unit(turn_mgr.local_player_id, placing_unit, cell):
-				gold_lbl.text = "%s Gold: %d" % [current_player, turn_mgr.player_gold[current_player]]
-				placing_unit = ""
-				$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
+			if turn_mgr.is_host():
+				if NetworkManager.request_buy_unit(current_player, placing_unit, cell):
+					gold_lbl.text = "%s Gold: %d" % [current_player, turn_mgr.player_gold[current_player]]
+					placing_unit = ""
+					$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
+				else:
+					gold_lbl.text = "[Not enough gold]\nGold: %d" % turn_mgr.player_gold[current_player]
 			else:
-				gold_lbl.text = "[Not enough gold]\nGold: %d" % turn_mgr.player_gold[current_player]
+				NetworkManager.request_buy_unit(current_player, placing_unit, cell)
+				placing_unit = ""
+				gold_lbl.text = "Purchase requested"
+				$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
 		else:
 			gold_lbl.text = "[Can't place there]\nGold: %d" % turn_mgr.player_gold[current_player]
 		return
@@ -684,20 +795,13 @@ func _unhandled_input(ev):
 	if action_mode == "ranged" or action_mode == "melee" and currently_selected_unit:
 		if cell in enemy_tiles:
 			move_priority += 1
-			if action_mode == "melee":
-				#currently_selected_unit.is_moving = true
-				#currently_selected_unit.moving_to = cell
-				pass
-			currently_selected_unit.ordered = true
-			$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
-			turn_mgr.add_order(current_player, {
+			NetworkManager.request_order(current_player, {
 				"unit_net_id": currently_selected_unit.net_id,
 				"type": action_mode,
 				"target_tile": cell,
 				"target_unit_net_id": game_board.get_unit_at(cell).net_id,
 				"priority": move_priority
 			})
-		_draw_all()
 		action_mode = ""
 		return
 	
