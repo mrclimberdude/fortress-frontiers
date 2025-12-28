@@ -1,7 +1,7 @@
 [gd_scene load_steps=6 format=3 uid="uid://d0w4x3k8y2p1q"]
 
 [ext_resource type="PackedScene" uid="uid://c62dn8sldq572" path="res://scenes/Unit.tscn" id="1_8v4tw"]
-[ext_resource type="Texture2D" uid="uid://2s9r1w6t3u5x9" path="res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Objects Light/HSI_icon_137l.png" id="2_3m7aq"]
+[ext_resource type="Texture2D" uid="uid://b27lhontk4ooq" path="res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Objects Light/HSI_icon_137l.png" id="2_3m7aq"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_3m7aq"]
 bg_color = Color(0.988235, 0.227451, 0.152941, 0.603922)
@@ -14,14 +14,11 @@ font_size = 30
 font_color = Color(0.989583, 0.989583, 0, 1)
 
 [node name="Dragon" instance=ExtResource("1_8v4tw")]
-cost = 0
 is_ranged = true
-melee_strength = 40
-ranged_strength = 35
+melee_strength = 25
+ranged_strength = 30
 move_range = 0
 ranged_range = 3
-max_health = 350
-curr_health = 350
 regen = 0
 special_skills = "Fire + Cleave"
 

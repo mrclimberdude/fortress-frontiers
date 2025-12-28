@@ -22,6 +22,10 @@ var structure_atlas_tiles:= {
 	"player1": Vector2i(1, 3),
 	"player2": Vector2i(3, 3)
 }
+var camp_atlas_tiles := {
+	"camp": Vector2i(1, 1),
+	"dragon": Vector2i(1, 1)
+}
 
 var structure_tiles : Array
 
@@ -50,7 +54,15 @@ func set_player_tile(pos: Vector2i, pid: String) -> void:
 	var src = tile_set.get_source_id(0)
 	var tint
 	structure_tiles = $"../..".structure_positions
-	if pos in structure_tiles:
+	var is_camp = pos in $"../..".camps["basic"]
+	var is_dragon = pos in $"../..".camps["dragon"]
+	if is_camp or is_dragon:
+		if pid in ["", "neutral", "camp", "dragon"]:
+			var camp_key = "dragon" if is_dragon else "camp"
+			tint = camp_atlas_tiles.get(camp_key, ground_tile)
+		else:
+			tint = player_atlas_tiles.get(pid, ground_tile)
+	elif pos in structure_tiles:
 		tint = structure_atlas_tiles.get(pid, ground_tile)
 		for player in ["player1", "player2", "unclaimed"]:
 			if pos in $"../..".mines[player]:
@@ -58,6 +70,17 @@ func set_player_tile(pos: Vector2i, pid: String) -> void:
 	else:
 		tint = player_atlas_tiles.get(pid, ground_tile)
 	set_cell(pos, src, tint)
+	if is_camp or is_dragon:
+		var terrain_map = get_parent().get_node_or_null("TerrainMap") as TileMapLayer
+		if terrain_map:
+			var terrain_src = terrain_map.tile_set.get_source_id(0)
+			var terrain_tint
+			if pid in ["", "neutral", "camp", "dragon"]:
+				var camp_key = "dragon" if is_dragon else "camp"
+				terrain_tint = camp_atlas_tiles.get(camp_key, ground_tile)
+			else:
+				terrain_tint = player_atlas_tiles.get(pid, ground_tile)
+			terrain_map.set_cell(pos, terrain_src, terrain_tint)
 	$"..".clear_highlights()
 	update_internals()
 

@@ -62,7 +62,11 @@ func set_grid_position(pos: Vector2i) -> void:
 	# 1) Clear previous tile
 	if board and board.has_method("vacate") and old_pos:
 		board.vacate(old_pos)
-		if old_pos not in structure_tiles:
+		if old_pos in turn_mgr.camps["basic"]:
+			map_layer.set_player_tile(old_pos, "camp")
+		elif old_pos in turn_mgr.camps["dragon"]:
+			map_layer.set_player_tile(old_pos, "dragon")
+		elif old_pos not in structure_tiles:
 			map_layer.set_player_tile(old_pos, "")
 	# 2) Update our stored grid_pos
 	grid_pos = pos

@@ -112,6 +112,13 @@ func _terrain_bonus(cell: Vector2i, key: String) -> int:
 		return 0
 	return int(val)
 
+func _special_tile_pid(pos: Vector2i) -> String:
+	if pos in camps["basic"]:
+		return "camp"
+	if pos in camps["dragon"]:
+		return "dragon"
+	return ""
+
 func _get_neutral_marker_root() -> Node2D:
 	var root = $GameBoardNode/HexTileMap.get_node_or_null("NeutralMarkers")
 	if root == null:
@@ -162,6 +169,17 @@ func _units_in_range(origin: Vector2i, range: int) -> Array:
 		if unit == null:
 			continue
 		if _hex_distance(origin, unit.grid_pos) <= range:
+			out.append(unit)
+	return out
+
+func _units_in_range_los(origin: Vector2i, range: int) -> Array:
+	var result = $GameBoardNode.get_reachable_tiles(origin, range, "ranged")
+	var tiles = result.get("tiles", [])
+	var out := []
+	for unit in _get_player_units():
+		if unit == null:
+			continue
+		if unit.grid_pos in tiles:
 			out.append(unit)
 	return out
 
@@ -339,6 +357,9 @@ func _tick_neutral_respawns() -> void:
 	var camp_positions = camp_respawns.keys()
 	camp_positions.sort()
 	for pos in camp_positions:
+		if $GameBoardNode.is_occupied(pos):
+			camp_respawns[pos] = camp_respawn_turns
+			continue
 		camp_respawns[pos] -= 1
 		if camp_respawns[pos] <= 0:
 			camp_respawns.erase(pos)
@@ -346,6 +367,9 @@ func _tick_neutral_respawns() -> void:
 	var dragon_positions = dragon_respawns.keys()
 	dragon_positions.sort()
 	for pos in dragon_positions:
+		if $GameBoardNode.is_occupied(pos):
+			dragon_respawns[pos] = dragon_respawn_turns
+			continue
 		dragon_respawns[pos] -= 1
 		if dragon_respawns[pos] <= 0:
 			dragon_respawns.erase(pos)
@@ -364,10 +388,10 @@ func update_neutral_markers() -> void:
 	if fog != null and fog.visiblity.has(local_player_id):
 		vis = fog.visiblity[local_player_id]
 	for pos in camp_respawns.keys():
-		if vis.get(pos, 0) == 2:
+		if vis.get(pos, 0) == 2 and not $GameBoardNode.is_occupied(pos):
 			_add_neutral_marker(root, pos, str(camp_respawns[pos]))
 	for pos in dragon_respawns.keys():
-		if vis.get(pos, 0) == 2:
+		if vis.get(pos, 0) == 2 and not $GameBoardNode.is_occupied(pos):
 			_add_neutral_marker(root, pos, str(dragon_respawns[pos]))
 
 func _add_neutral_marker(root: Node2D, pos: Vector2i, text: String) -> void:
@@ -607,11 +631,24 @@ func _cleanup_dead_unit(unit) -> void:
 		NetworkManager.player_orders[player].erase(unit.net_id)
 	died_dmg_report(unit)
 	_handle_neutral_death(unit)
-	$GameBoardNode.vacate(unit.grid_pos)
-	$GameBoardNode/HexTileMap.set_player_tile(unit.grid_pos, "")
+	var occupant = $GameBoardNode.get_unit_at(unit.grid_pos)
+	var can_clear = false
+	if occupant == unit:
+		$GameBoardNode.vacate(unit.grid_pos)
+		can_clear = true
+	elif occupant == null:
+		can_clear = true
+	if can_clear:
+		var special_pid = _special_tile_pid(unit.grid_pos)
+		if special_pid == "":
+			$GameBoardNode/HexTileMap.set_player_tile(unit.grid_pos, "")
+		else:
+			$GameBoardNode/HexTileMap.set_player_tile(unit.grid_pos, special_pid)
 	unit.queue_free()
 
 func dealt_dmg_report(atkr, defr, atkr_in_dmg, defr_in_dmg, retaliate, atk_mode):
+	if atkr.player_id != local_player_id and defr.player_id != local_player_id:
+		return
 	var report_label = Label.new()
 	if defr.player_id == local_player_id:
 		report_label.text = "Your %s #%d took %d %s damage from %s #%d" % [defr.unit_type, defr.net_id, defr_in_dmg, atk_mode, atkr.unit_type, atkr.net_id]
@@ -629,6 +666,8 @@ func dealt_dmg_report(atkr, defr, atkr_in_dmg, defr_in_dmg, retaliate, atk_mode)
 			dmg_report.add_child(report_label)
 
 func died_dmg_report(unit):
+	if unit.player_id != local_player_id and unit.last_damaged_by != local_player_id:
+		return
 	var report_label = Label.new()
 	if unit.player_id == local_player_id:
 		report_label.text = "Your %s #%d died at %s" % [unit.unit_type, unit.net_id, unit.grid_pos]
@@ -799,7 +838,7 @@ func _process_neutral_attacks() -> void:
 		if neutral == null or neutral.curr_health <= 0:
 			continue
 		if neutral.unit_type == CAMP_ARCHER_TYPE:
-			var candidates = _units_in_range(neutral.grid_pos, camp_archer_range)
+			var candidates = _units_in_range_los(neutral.grid_pos, camp_archer_range)
 			if candidates.size() == 0:
 				continue
 			var weights := []
@@ -810,7 +849,7 @@ func _process_neutral_attacks() -> void:
 				continue
 			_queue_neutral_attack(neutral, candidates[idx], "ranged", neutral_dmg, neutral_sources, retaliation_dmg, retaliation_sources)
 		elif neutral.unit_type == DRAGON_TYPE:
-			var fire_candidates = _units_in_range(neutral.grid_pos, dragon_fire_range)
+			var fire_candidates = _units_in_range_los(neutral.grid_pos, dragon_fire_range)
 			var fire_pair = _pick_adjacent_pair(fire_candidates, neutral.grid_pos)
 			if fire_pair.size() == 2:
 				_queue_neutral_attack(neutral, fire_pair[0], "ranged", neutral_dmg, neutral_sources, retaliation_dmg, retaliation_sources)

@@ -91,6 +91,7 @@ rows = 30
 
 [node name="OrderReminderMap" type="TileMapLayer" parent="GameBoardNode"]
 self_modulate = Color(1, 1, 1, 0.588235)
+z_index = 6
 tile_set = SubResource("TileSet_xh13x")
 script = ExtResource("11_cac7a")
 
