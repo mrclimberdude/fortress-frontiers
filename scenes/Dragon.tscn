@@ -16,10 +16,10 @@ font_color = Color(0.989583, 0.989583, 0, 1)
 [node name="Dragon" instance=ExtResource("1_8v4tw")]
 is_ranged = true
 melee_strength = 25
-ranged_strength = 30
+ranged_strength = 40
 move_range = 0
 ranged_range = 3
-regen = 0
+sight_range = 3
 special_skills = "Fire + Cleave"
 
 [node name="Sprite2D" parent="." index="0"]

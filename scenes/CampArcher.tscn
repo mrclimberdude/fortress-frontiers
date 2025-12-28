@@ -15,11 +15,10 @@ font_color = Color(0.989583, 0.989583, 0, 1)
 
 [node name="CampArcher" instance=ExtResource("1_4w2am")]
 is_ranged = true
-melee_strength = 12
-ranged_strength = 30
+melee_strength = 15
+ranged_strength = 35
 move_range = 0
 ranged_range = 2
-regen = 0
 special_skills = "Neutral Camp"
 
 [node name="Sprite2D" parent="." index="0"]

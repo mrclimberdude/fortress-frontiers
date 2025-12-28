@@ -78,11 +78,13 @@ const DRAGON_REWARD_GOLD: String = "gold"
 const DRAGON_REWARD_MELEE: String = "melee_bonus"
 const DRAGON_REWARD_RANGED: String = "ranged_bonus"
 
-@export var camp_respawn_turns: int = 3
-@export var dragon_respawn_turns: int = 6
-@export var camp_gold_min: int = 10
-@export var camp_gold_max: int = 25
-@export var dragon_gold_bonus: int = 100
+@export var camp_respawn_min: int = 6
+@export var camp_respawn_max: int = 10
+@export var dragon_respawn_min: int = 12
+@export var dragon_respawn_max: int = 20
+@export var camp_gold_min: int = 150
+@export var camp_gold_max: int = 300
+@export var dragon_gold_bonus: int = 1000
 @export var dragon_melee_bonus: int = 3
 @export var dragon_ranged_bonus: int = 3
 @export var camp_archer_range: int = 2
@@ -242,6 +244,19 @@ func _camp_gold_reward(pos: Vector2i) -> int:
 	var span = max(1, camp_gold_max - camp_gold_min + 1)
 	return camp_gold_min + (abs(seed) % span)
 
+func _roll_camp_respawn() -> int:
+	return rng.randi_range(camp_respawn_min, camp_respawn_max)
+
+func _roll_dragon_respawn() -> int:
+	return rng.randi_range(dragon_respawn_min, dragon_respawn_max)
+
+func _reward_report(player_id: String, text: String) -> void:
+	if player_id != local_player_id:
+		return
+	var report_label = Label.new()
+	report_label.text = text
+	dmg_report.add_child(report_label)
+
 func _dragon_reward_for_pos(pos: Vector2i) -> String:
 	var rewards = [DRAGON_REWARD_GOLD, DRAGON_REWARD_MELEE, DRAGON_REWARD_RANGED]
 	var seed = int(pos.x * 1259) + int(pos.y * 1931)
@@ -318,7 +333,7 @@ func _spawn_camp_at(pos: Vector2i) -> Node:
 	var unit = unit_manager.spawn_unit(CAMP_ARCHER_TYPE, pos, NEUTRAL_PLAYER_ID, false)
 	if unit == null:
 		return null
-	unit.is_defending = true
+	unit.is_defending = false
 	unit.just_purchased = false
 	camp_units[pos] = unit
 	if not camp_respawn_counts.has(pos):
@@ -329,7 +344,7 @@ func _spawn_dragon_at(pos: Vector2i) -> Node:
 	var unit = unit_manager.spawn_unit(DRAGON_TYPE, pos, NEUTRAL_PLAYER_ID, false)
 	if unit == null:
 		return null
-	unit.is_defending = true
+	unit.is_defending = false
 	unit.just_purchased = false
 	if not dragon_rewards.has(pos):
 		dragon_rewards[pos] = _dragon_reward_for_pos(pos)
@@ -358,7 +373,7 @@ func _tick_neutral_respawns() -> void:
 	camp_positions.sort()
 	for pos in camp_positions:
 		if $GameBoardNode.is_occupied(pos):
-			camp_respawns[pos] = camp_respawn_turns
+			camp_respawns[pos] = _roll_camp_respawn()
 			continue
 		camp_respawns[pos] -= 1
 		if camp_respawns[pos] <= 0:
@@ -368,7 +383,7 @@ func _tick_neutral_respawns() -> void:
 	dragon_positions.sort()
 	for pos in dragon_positions:
 		if $GameBoardNode.is_occupied(pos):
-			dragon_respawns[pos] = dragon_respawn_turns
+			dragon_respawns[pos] = _roll_dragon_respawn()
 			continue
 		dragon_respawns[pos] -= 1
 		if dragon_respawns[pos] <= 0:
@@ -466,7 +481,7 @@ func _do_upkeep() -> void:
 				unit.set_health_bar()
 				unit.is_healing = false
 	for unit in all_units.get("neutral", []):
-		unit.is_defending = true
+		unit.is_defending = false
 		unit.is_moving = false
 	_tick_neutral_respawns()
 	$GameBoardNode/FogOfWar._update_fog()
@@ -609,18 +624,29 @@ func _handle_neutral_death(unit) -> void:
 	var pos = unit.grid_pos
 	if unit.unit_type == CAMP_ARCHER_TYPE:
 		camp_units.erase(pos)
-		camp_respawns[pos] = camp_respawn_turns
+		var camp_duration = _roll_camp_respawn()
+		camp_respawns[pos] = camp_duration
 		var killer = unit.last_damaged_by
 		if killer in ["player1", "player2"]:
 			var reward = _camp_gold_reward(pos)
 			player_gold[killer] += reward
+			_reward_report(killer, "Camp defeated: +%d gold" % reward)
 		camp_respawn_counts[pos] = camp_respawn_counts.get(pos, 0) + 1
 	elif unit.unit_type == DRAGON_TYPE:
 		dragon_units.erase(pos)
-		dragon_respawns[pos] = dragon_respawn_turns
+		var dragon_duration = _roll_dragon_respawn()
+		dragon_respawns[pos] = dragon_duration
 		var killer = unit.last_damaged_by
 		if killer in ["player1", "player2"]:
+			var reward = dragon_rewards.get(pos, DRAGON_REWARD_GOLD)
 			_grant_dragon_reward(killer, pos)
+			match reward:
+				DRAGON_REWARD_GOLD:
+					_reward_report(killer, "Dragon defeated: +%d gold" % dragon_gold_bonus)
+				DRAGON_REWARD_MELEE:
+					_reward_report(killer, "Dragon defeated: +%d melee strength" % dragon_melee_bonus)
+				DRAGON_REWARD_RANGED:
+					_reward_report(killer, "Dragon defeated: +%d ranged strength" % dragon_ranged_bonus)
 	update_neutral_markers()
 
 func _cleanup_dead_unit(unit) -> void:
@@ -837,27 +863,33 @@ func _process_neutral_attacks() -> void:
 	for neutral in neutral_units:
 		if neutral == null or neutral.curr_health <= 0:
 			continue
+		var attacked = false
 		if neutral.unit_type == CAMP_ARCHER_TYPE:
 			var candidates = _units_in_range_los(neutral.grid_pos, camp_archer_range)
-			if candidates.size() == 0:
-				continue
-			var weights := []
-			for unit in candidates:
-				weights.append(_target_weight(unit, neutral.grid_pos))
-			var idx = _pick_weighted_index(weights)
-			if idx < 0:
-				continue
-			_queue_neutral_attack(neutral, candidates[idx], "ranged", neutral_dmg, neutral_sources, retaliation_dmg, retaliation_sources)
+			if candidates.size() > 0:
+				var weights := []
+				for unit in candidates:
+					weights.append(_target_weight(unit, neutral.grid_pos))
+				var idx = _pick_weighted_index(weights)
+				if idx >= 0:
+					_queue_neutral_attack(neutral, candidates[idx], "ranged", neutral_dmg, neutral_sources, retaliation_dmg, retaliation_sources)
+					attacked = true
 		elif neutral.unit_type == DRAGON_TYPE:
 			var fire_candidates = _units_in_range_los(neutral.grid_pos, dragon_fire_range)
 			var fire_pair = _pick_adjacent_pair(fire_candidates, neutral.grid_pos)
 			if fire_pair.size() == 2:
 				_queue_neutral_attack(neutral, fire_pair[0], "ranged", neutral_dmg, neutral_sources, retaliation_dmg, retaliation_sources)
 				_queue_neutral_attack(neutral, fire_pair[1], "ranged", neutral_dmg, neutral_sources, retaliation_dmg, retaliation_sources)
+				attacked = true
 			var cleave_candidates = _units_in_range(neutral.grid_pos, 1)
 			var cleave_targets = _pick_weighted_targets(cleave_candidates, neutral.grid_pos, dragon_cleave_targets)
 			for target in cleave_targets:
 				_queue_neutral_attack(neutral, target, "melee", neutral_dmg, neutral_sources, retaliation_dmg, retaliation_sources)
+			if cleave_targets.size() > 0:
+				attacked = true
+		if not attacked and neutral.curr_health < neutral.max_health:
+			neutral.curr_health = min(neutral.max_health, neutral.curr_health + neutral.regen)
+			neutral.set_health_bar()
 
 	var target_ids = neutral_dmg.keys()
 	target_ids.sort()
