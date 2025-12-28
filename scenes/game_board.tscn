@@ -327,6 +327,10 @@ text = "Fog of war"
 layout_mode = 2
 text = "Gold += Income"
 
+[node name="RespawnTimersCheckButton" type="CheckButton" parent="UI/DevPanel/VBoxContainer"]
+layout_mode = 2
+text = "Show respawn timers"
+
 [node name="DamagePanel" type="Panel" parent="UI"]
 visible = false
 offset_left = 1.0

@@ -1,7 +1,7 @@
 [gd_scene load_steps=6 format=3 uid="uid://d0w4x3k8y2p1q"]
 
 [ext_resource type="PackedScene" uid="uid://c62dn8sldq572" path="res://scenes/Unit.tscn" id="1_8v4tw"]
-[ext_resource type="Texture2D" uid="uid://b27lhontk4ooq" path="res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Objects Light/HSI_icon_137l.png" id="2_3m7aq"]
+[ext_resource type="Texture2D" uid="uid://bnsbhlwbqytl7" path="res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Animals Light/HSI_icon_036l.png" id="2_yknt0"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_3m7aq"]
 bg_color = Color(0.988235, 0.227451, 0.152941, 0.603922)
@@ -23,7 +23,7 @@ sight_range = 3
 special_skills = "Fire + Cleave"
 
 [node name="Sprite2D" parent="." index="0"]
-texture = ExtResource("2_3m7aq")
+texture = ExtResource("2_yknt0")
 
 [node name="HealthBar" type="ProgressBar" parent="." index="1"]
 offset_left = 36.0

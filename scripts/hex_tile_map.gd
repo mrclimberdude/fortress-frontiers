@@ -23,8 +23,8 @@ var structure_atlas_tiles:= {
 	"player2": Vector2i(3, 3)
 }
 var camp_atlas_tiles := {
-	"camp": Vector2i(1, 1),
-	"dragon": Vector2i(1, 1)
+	"camp": Vector2i(1, 2),
+	"dragon": Vector2i(4, 1)
 }
 
 var structure_tiles : Array

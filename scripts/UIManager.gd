@@ -36,6 +36,7 @@ var _current_exec_step_idx: int = 0
 @onready var cancel_done_button = $CancelDoneButton as Button
 @onready var dev_mode_toggle = get_node(dev_mode_toggle_path) as CheckButton
 @onready var dev_panel = $DevPanel
+@onready var respawn_timers_toggle = $DevPanel/VBoxContainer/RespawnTimersCheckButton as CheckButton
 @onready var finish_move_button = $Panel/FinishMoveButton
 
 const ArrowScene = preload("res://scenes/Arrow.tscn")
@@ -71,6 +72,8 @@ func _ready():
 					 Callable(self, "_on_fog_toggled"))
 	$DevPanel/VBoxContainer/GiveIncomeButton.connect("pressed",
 					 Callable(self, "_on_give_income_pressed"))
+	$DevPanel/VBoxContainer/RespawnTimersCheckButton.connect("toggled",
+					 Callable(self, "_on_respawn_timers_toggled"))
 	
 	# turn flow connections
 	turn_mgr.connect("orders_phase_begin",
@@ -199,6 +202,8 @@ func _on_dev_mode_toggled(pressed:bool):
 		dev_panel.visible = true
 	else:
 		dev_panel.visible = false
+		respawn_timers_toggle.button_pressed = false
+		_on_respawn_timers_toggled(false)
 
 func _on_fog_toggled(pressed:bool):
 	print("Fog of War -> ", pressed)
@@ -213,6 +218,9 @@ func _on_give_income_pressed():
 	for player in ["player1", "player2"]:
 		turn_mgr.player_gold[player] += turn_mgr.player_income[player]
 	gold_lbl.text = "%s Gold: %d" % [current_player, turn_mgr.player_gold[current_player]]
+
+func _on_respawn_timers_toggled(pressed: bool) -> void:
+	turn_mgr.set_respawn_timer_override(pressed)
 	
 
 func _on_host_pressed():

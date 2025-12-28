@@ -27,6 +27,7 @@ const MineScene = preload("res://scenes/GemMine.tscn")
 @export var map_data: Array[Resource] = []
 var terrain_overlay: TileMapLayer
 var rng := RandomNumberGenerator.new()
+var current_map_index: int = -1
 
 # --- Turn & Phase State ---
 var turn_number:   int    = 0
@@ -77,6 +78,8 @@ const DRAGON_TYPE: String = "dragon"
 const DRAGON_REWARD_GOLD: String = "gold"
 const DRAGON_REWARD_MELEE: String = "melee_bonus"
 const DRAGON_REWARD_RANGED: String = "ranged_bonus"
+const CAMP_RESPAWN_DISPLAY_TURNS: int = 3
+const DRAGON_RESPAWN_DISPLAY_TURNS: int = 5
 
 @export var camp_respawn_min: int = 6
 @export var camp_respawn_max: int = 10
@@ -97,6 +100,8 @@ var camp_respawns := {}
 var dragon_respawns := {}
 var camp_respawn_counts := {}
 var dragon_rewards := {}
+var dragon_spawn_counts := {}
+var show_respawn_timers_override: bool = false
 var player_melee_bonus := { "player1": 0, "player2": 0 }
 var player_ranged_bonus := { "player1": 0, "player2": 0 }
 
@@ -257,9 +262,9 @@ func _reward_report(player_id: String, text: String) -> void:
 	report_label.text = text
 	dmg_report.add_child(report_label)
 
-func _dragon_reward_for_pos(pos: Vector2i) -> String:
+func _dragon_reward_for_pos(pos: Vector2i, spawn_count: int) -> String:
 	var rewards = [DRAGON_REWARD_GOLD, DRAGON_REWARD_MELEE, DRAGON_REWARD_RANGED]
-	var seed = int(pos.x * 1259) + int(pos.y * 1931)
+	var seed = int(pos.x * 1259) + int(pos.y * 1931) + int(spawn_count * 83492791) + int(current_map_index + 1) * 104729 + int(NetworkManager.match_seed) * 32452843
 	var idx = abs(seed) % rewards.size()
 	return rewards[idx]
 
@@ -286,10 +291,37 @@ var local_player_id: String
 func _ready():
 	NetworkManager.hex = $GameBoardNode/HexTileMap
 	NetworkManager.turn_mgr = $"."
+	NetworkManager.connect("map_index_received", Callable(self, "_on_map_index_received"))
+	NetworkManager.connect("match_seed_received", Callable(self, "_on_match_seed_received"))
 	
 	rng.randomize()
-	var map_num = rng.randi_range(1, map_data.size())
-	var md = map_data[map_num-1] as MapData
+	var mp = get_tree().get_multiplayer()
+	var has_peer = mp != null and mp.multiplayer_peer != null
+	var is_server = (not has_peer) or mp.is_server()
+	var map_index = -1
+	if is_server:
+		if NetworkManager.selected_map_index < 0:
+			NetworkManager.selected_map_index = rng.randi_range(0, map_data.size() - 1)
+		if NetworkManager.match_seed < 0:
+			NetworkManager.match_seed = rng.randi_range(1, 2147483646)
+		map_index = NetworkManager.selected_map_index
+	else:
+		if NetworkManager.selected_map_index < 0:
+			await NetworkManager.map_index_received
+		if NetworkManager.match_seed < 0:
+			await NetworkManager.match_seed_received
+		map_index = NetworkManager.selected_map_index
+	_load_map_by_index(map_index)
+	_spawn_neutral_units()
+	$GameBoardNode/FogOfWar._update_fog()
+
+func _load_map_by_index(map_index: int) -> void:
+	if map_data.size() == 0:
+		push_error("TurnManager: map_data is empty.")
+		return
+	var idx = int(clamp(map_index, 0, map_data.size() - 1))
+	current_map_index = idx
+	var md = map_data[idx] as MapData
 	md = md.duplicate(true)
 	print("loaded map: ", md.map_name)
 	var inst: Node = md.terrain_scene.instantiate()
@@ -326,8 +358,58 @@ func _ready():
 		$GameBoardNode/HexTileMap/Structures.add_child(mine)
 		$GameBoardNode.set_structure_at(tile, mine)
 
+func _reset_map_state() -> void:
+	if terrain_overlay != null:
+		terrain_overlay.queue_free()
+		terrain_overlay = null
+	var hex = $GameBoardNode/HexTileMap
+	var src = hex.tile_set.get_source_id(0)
+	for cell in hex.get_used_cells():
+		hex.set_cell(cell, src, hex.ground_tile)
+	hex.update_internals()
+	var structures = $GameBoardNode/HexTileMap.get_node_or_null("Structures")
+	if structures != null:
+		for child in structures.get_children():
+			child.queue_free()
+	structure_positions.clear()
+	camps = {"basic": [], "dragon": []}
+	mines = {"unclaimed": [], "player1": [], "player2": []}
+	camp_units.clear()
+	dragon_units.clear()
+	camp_respawns.clear()
+	dragon_respawns.clear()
+	camp_respawn_counts.clear()
+	dragon_rewards.clear()
+	dragon_spawn_counts.clear()
+	$GameBoardNode.occupied_tiles.clear()
+	$GameBoardNode.structure_tiles.clear()
+	for child in unit_manager.get_children():
+		child.queue_free()
+	unit_manager.unit_by_net_id.clear()
+	unit_manager._next_net_id_odd = 1
+	unit_manager._next_net_id_even = 2
+	unit_manager._next_net_id_neutral = 1000001
+
+func _on_map_index_received(map_index: int) -> void:
+	var mp = get_tree().get_multiplayer()
+	if mp != null and mp.multiplayer_peer != null and mp.is_server():
+		return
+	if current_map_index == -1:
+		return
+	if map_index == current_map_index:
+		return
+	_reset_map_state()
+	_load_map_by_index(map_index)
 	_spawn_neutral_units()
 	$GameBoardNode/FogOfWar._update_fog()
+
+func _on_match_seed_received(seed_value: int) -> void:
+	var mp = get_tree().get_multiplayer()
+	if mp != null and mp.multiplayer_peer != null and mp.is_server():
+		return
+	if seed_value == NetworkManager.match_seed:
+		return
+	NetworkManager.match_seed = seed_value
 
 func _spawn_camp_at(pos: Vector2i) -> Node:
 	var unit = unit_manager.spawn_unit(CAMP_ARCHER_TYPE, pos, NEUTRAL_PLAYER_ID, false)
@@ -346,9 +428,10 @@ func _spawn_dragon_at(pos: Vector2i) -> Node:
 		return null
 	unit.is_defending = false
 	unit.just_purchased = false
-	if not dragon_rewards.has(pos):
-		dragon_rewards[pos] = _dragon_reward_for_pos(pos)
-	var reward = dragon_rewards[pos]
+	var spawn_count = dragon_spawn_counts.get(pos, 0)
+	var reward = _dragon_reward_for_pos(pos, spawn_count)
+	dragon_spawn_counts[pos] = spawn_count + 1
+	dragon_rewards[pos] = reward
 	_apply_dragon_reward_color(unit, reward)
 	dragon_units[pos] = unit
 	return unit
@@ -404,10 +487,16 @@ func update_neutral_markers() -> void:
 		vis = fog.visiblity[local_player_id]
 	for pos in camp_respawns.keys():
 		if vis.get(pos, 0) == 2 and not $GameBoardNode.is_occupied(pos):
-			_add_neutral_marker(root, pos, str(camp_respawns[pos]))
+			if show_respawn_timers_override or camp_respawns[pos] <= CAMP_RESPAWN_DISPLAY_TURNS:
+				_add_neutral_marker(root, pos, str(camp_respawns[pos]))
 	for pos in dragon_respawns.keys():
 		if vis.get(pos, 0) == 2 and not $GameBoardNode.is_occupied(pos):
-			_add_neutral_marker(root, pos, str(dragon_respawns[pos]))
+			if show_respawn_timers_override or dragon_respawns[pos] <= DRAGON_RESPAWN_DISPLAY_TURNS:
+				_add_neutral_marker(root, pos, str(dragon_respawns[pos]))
+
+func set_respawn_timer_override(enabled: bool) -> void:
+	show_respawn_timers_override = enabled
+	update_neutral_markers()
 
 func _add_neutral_marker(root: Node2D, pos: Vector2i, text: String) -> void:
 	var label = Label.new()

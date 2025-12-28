@@ -10,12 +10,16 @@ var player_orders := {"player1": {}, "player2": {}}  # map player_id → orders 
 var server_peer_id: int
 var client_peer_id: int
 var mp
+var selected_map_index: int = -1
+var match_seed: int = -1
 
 
 var _step_ready_counts := {}
 
 signal orders_ready(all_orders: Dictionary)
 signal orders_cancelled(player_id: String)
+signal map_index_received(map_index: int)
+signal match_seed_received(match_seed: int)
 
 func _ready() -> void:
 	print("NetworkManager _ready() fired")
@@ -48,7 +52,11 @@ func _on_peer_connected(id: int) -> void:
 	if mp.is_server():
 		# Host sees a new client
 		client_peer_id = id
-		print("Client joined as peer %d — starting game!" % id)
+		print("Client joined as peer %d - starting game!" % id)
+		if selected_map_index >= 0:
+			rpc_id(id, "rpc_set_map_index", selected_map_index)
+		if match_seed >= 0:
+			rpc_id(id, "rpc_set_match_seed", match_seed)
 		turn_mgr.start_game()
 	else:
 		# Client sees the host
@@ -64,6 +72,16 @@ func map_sync(id) -> void:
 	if get_tree().get_multiplayer().is_server():
 		var data = get_map_data()
 		rpc_id(id, "map_sync", data)
+
+@rpc("any_peer", "reliable")
+func rpc_set_map_index(map_index: int) -> void:
+	selected_map_index = map_index
+	emit_signal("map_index_received", map_index)
+
+@rpc("any_peer", "reliable")
+func rpc_set_match_seed(seed_value: int) -> void:
+	match_seed = seed_value
+	emit_signal("match_seed_received", seed_value)
 
 # Helper to gather the host's map layout
 func get_map_data() -> Array:

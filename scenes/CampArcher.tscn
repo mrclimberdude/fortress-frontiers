@@ -1,7 +1,7 @@
 [gd_scene load_steps=6 format=3 uid="uid://c2r8h5m3y6k7a"]
 
 [ext_resource type="PackedScene" uid="uid://c62dn8sldq572" path="res://scenes/Unit.tscn" id="1_4w2am"]
-[ext_resource type="Texture2D" uid="uid://tbt2lpb0opl" path="res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Objects Light/HSI_icon_131l.png" id="2_5qv8u"]
+[ext_resource type="Texture2D" uid="uid://biedribp4yh4x" path="res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Objects Light/HSI_icon_190l.png" id="2_8ssq0"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_5qv8u"]
 bg_color = Color(0.988235, 0.227451, 0.152941, 0.603922)
@@ -22,7 +22,7 @@ ranged_range = 2
 special_skills = "Neutral Camp"
 
 [node name="Sprite2D" parent="." index="0"]
-texture = ExtResource("2_5qv8u")
+texture = ExtResource("2_8ssq0")
 
 [node name="HealthBar" type="ProgressBar" parent="." index="1"]
 offset_left = 36.0
