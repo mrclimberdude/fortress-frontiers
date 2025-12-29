@@ -95,17 +95,5 @@ func map_to_world(cell: Vector2i) -> Vector2:
 
 # convert a world-position → offset-coordinate cell
 func world_to_map(world_pos: Vector2) -> Vector2i:
-	# Convert a world position to an offset cell, using floor-based rounding for consistency
 	var local = to_local(world_pos)
-	var fw = tile_size.x + spacing.x
-	var fh = tile_size.y * 0.75 + spacing.y
-
-	# Determine row by flooring rather than rounding to avoid off-by-one when clicking edges
-	var row_f = local.y / fh
-	var row = int(clamp(floor(row_f), 0, rows - 1))
-
-	# Determine column, adjusting for odd-r offset
-	var col_f = local.x / fw - 0.5 * (row & 1)
-	var col = int(clamp(floor(col_f), -1, columns - 1))
-
-	return Vector2i(col, row)
+	return local_to_map(local)

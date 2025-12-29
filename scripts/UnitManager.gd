@@ -31,7 +31,7 @@ func _ready():
 	print("UnitManager: hex_map =", hex_map, "script=", hex_map.get_script())
 
 # spawns a unit by type ("archer" or "soldier") at grid_pos for owner
-func spawn_unit(unit_type: String, cell: Vector2i, owner: String, undo: bool) -> Node2D:
+func spawn_unit(unit_type: String, cell: Vector2i, owner: String, undo: bool, forced_net_id: int = -1) -> Node2D:
 	# 1) Pick the right scene with a match statement
 	if undo:
 		if owner == "player1":
@@ -74,20 +74,35 @@ func spawn_unit(unit_type: String, cell: Vector2i, owner: String, undo: bool) ->
 		var health_bar = unit.get_node("HealthBar")
 		health_bar.scale = Vector2(-1,1)
 		health_bar.position[0] += health_bar.size[0]
-		unit.net_id = _next_net_id_odd
-		_next_net_id_odd += 2
+		if forced_net_id > 0:
+			unit.net_id = forced_net_id
+			if forced_net_id >= _next_net_id_odd:
+				_next_net_id_odd = forced_net_id + 2
+		else:
+			unit.net_id = _next_net_id_odd
+			_next_net_id_odd += 2
 		var net_id_label = unit.get_node("NetIDLabel")
 		net_id_label.scale = Vector2(-1,1)
 		net_id_label.position[0] += net_id_label.size[0]
 		net_id_label.text = str(unit.net_id)
 	elif owner == "player2":
-		unit.net_id = _next_net_id_even
-		_next_net_id_even +=2
+		if forced_net_id > 0:
+			unit.net_id = forced_net_id
+			if forced_net_id >= _next_net_id_even:
+				_next_net_id_even = forced_net_id + 2
+		else:
+			unit.net_id = _next_net_id_even
+			_next_net_id_even +=2
 		var net_id_label = unit.get_node("NetIDLabel")
 		net_id_label.text = str(unit.net_id)
 	else:
-		unit.net_id = _next_net_id_neutral
-		_next_net_id_neutral += 1
+		if forced_net_id > 0:
+			unit.net_id = forced_net_id
+			if forced_net_id >= _next_net_id_neutral:
+				_next_net_id_neutral = forced_net_id + 1
+		else:
+			unit.net_id = _next_net_id_neutral
+			_next_net_id_neutral += 1
 		var net_id_label = unit.get_node("NetIDLabel")
 		net_id_label.text = str(unit.net_id)
 	unit.unit_type = unit_type

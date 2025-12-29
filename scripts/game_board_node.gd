@@ -58,6 +58,8 @@ func get_all_structures():
 	return structures
 
 func _get_terrain_overlay() -> TileMapLayer:
+	if terrain_overlay != null and not is_instance_valid(terrain_overlay):
+		terrain_overlay = null
 	if terrain_overlay == null:
 		terrain_overlay = get_node_or_null("TerrainMap")
 	return terrain_overlay
