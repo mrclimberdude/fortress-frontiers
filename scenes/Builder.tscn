@@ -1,0 +1,42 @@
+[gd_scene load_steps=6 format=3 uid="uid://bldrb1gaq5v1e"]
+
+[ext_resource type="PackedScene" uid="uid://c62dn8sldq572" path="res://scenes/Unit.tscn" id="1_builder"]
+[ext_resource type="Texture2D" uid="uid://biqgpbiqkrnl1" path="res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Objects Light/HSI_icon_142l.png" id="2_w8gtv"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_builder_bg"]
+bg_color = Color(0.988235, 0.227451, 0.152941, 0.603922)
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_builder_fill"]
+bg_color = Color(0, 0.843137, 0.0941176, 0.92549)
+
+[sub_resource type="LabelSettings" id="LabelSettings_builder"]
+font_size = 30
+font_color = Color(0.989583, 0.989583, 0, 1)
+
+[node name="Builder" instance=ExtResource("1_builder")]
+cost = 50
+melee_strength = 3
+is_builder = true
+special_skills = "Build/Repair"
+
+[node name="Sprite2D" parent="." index="0"]
+texture = ExtResource("2_w8gtv")
+
+[node name="HealthBar" type="ProgressBar" parent="." index="1"]
+offset_left = 34.0
+offset_top = -53.0
+offset_right = 73.0
+offset_bottom = 42.0
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+theme_override_styles/background = SubResource("StyleBoxFlat_builder_bg")
+theme_override_styles/fill = SubResource("StyleBoxFlat_builder_fill")
+step = 1.0
+fill_mode = 3
+
+[node name="NetIDLabel" type="Label" parent="." index="2"]
+offset_left = -20.0
+offset_top = -67.0
+offset_right = 20.0
+offset_bottom = -44.0
+label_settings = SubResource("LabelSettings_builder")
+horizontal_alignment = 1

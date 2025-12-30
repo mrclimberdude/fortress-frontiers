@@ -29,10 +29,12 @@ extends Node2D
 
 @export var is_base:         bool = false
 @export var is_miner:        bool = false
+@export var is_builder:      bool = false
 @export var is_phalanx:      bool = false
 @export var is_tower:        bool = false
 @export var unit_type:       String = ""
 @export var special_skills:  String = ""
+@export var last_damaged_by: String = ""
 
 # -- grid positioning and reference to the TileMapLayer
 var grid_pos: Vector2i
@@ -49,6 +51,7 @@ func _ready():
 	if map_layer and grid_pos:
 		set_grid_position(grid_pos)
 	set_health_bar()
+	self.z_index = 7
 
 # Set which map layer this unit should use for positioning
 func set_map_layer(layer: TileMapLayer) -> void:
@@ -59,8 +62,12 @@ func set_grid_position(pos: Vector2i) -> void:
 	var old_pos = grid_pos
 	# 1) Clear previous tile
 	if board and board.has_method("vacate") and old_pos:
-		board.vacate(old_pos)
-		if old_pos not in structure_tiles:
+		board.vacate(old_pos, self)
+		if old_pos in turn_mgr.camps["basic"]:
+			map_layer.set_player_tile(old_pos, "camp")
+		elif old_pos in turn_mgr.camps["dragon"]:
+			map_layer.set_player_tile(old_pos, "dragon")
+		elif old_pos not in structure_tiles:
 			map_layer.set_player_tile(old_pos, "")
 	# 2) Update our stored grid_pos
 	grid_pos = pos
@@ -75,18 +82,18 @@ func set_grid_position(pos: Vector2i) -> void:
 	if board and board.has_method("occupy"):
 		board.occupy(pos, self)
 		if pos in structure_tiles:
-			if pos in turn_mgr.special_tiles["unclaimed"]:
-				var idx = turn_mgr.special_tiles["unclaimed"].find(pos)
-				turn_mgr.special_tiles["unclaimed"].remove_at(idx)
-				turn_mgr.special_tiles[player_id].append(pos)
-			elif pos in turn_mgr.special_tiles["player1"]:
-				var idx = turn_mgr.special_tiles["player1"].find(pos)
-				turn_mgr.special_tiles["player1"].remove_at(idx)
-				turn_mgr.special_tiles[player_id].append(pos)
-			elif pos in turn_mgr.special_tiles["player2"]:
-				var idx = turn_mgr.special_tiles["player2"].find(pos)
-				turn_mgr.special_tiles["player2"].remove_at(idx)
-				turn_mgr.special_tiles[player_id].append(pos)
+			if pos in turn_mgr.mines["unclaimed"]:
+				var idx = turn_mgr.mines["unclaimed"].find(pos)
+				turn_mgr.mines["unclaimed"].remove_at(idx)
+				turn_mgr.mines[player_id].append(pos)
+			elif pos in turn_mgr.mines["player1"]:
+				var idx = turn_mgr.mines["player1"].find(pos)
+				turn_mgr.mines["player1"].remove_at(idx)
+				turn_mgr.mines[player_id].append(pos)
+			elif pos in turn_mgr.mines["player2"]:
+				var idx = turn_mgr.mines["player2"].find(pos)
+				turn_mgr.mines["player2"].remove_at(idx)
+				turn_mgr.mines[player_id].append(pos)
 		map_layer.set_player_tile(pos, player_id)
 	else:
 		push_error("Unit.gd: could not find GameBoardNode to occupy()")

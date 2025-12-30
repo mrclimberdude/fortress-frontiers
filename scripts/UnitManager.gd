@@ -8,8 +8,11 @@ extends Node2D
 @export var soldier_scene: PackedScene = preload("res://scenes/Soldier.tscn")
 @export var scout_scene: PackedScene = preload("res://scenes/Scout.tscn")
 @export var miner_scene: PackedScene = preload("res://scenes/Miner.tscn")
+@export var builder_scene: PackedScene = preload("res://scenes/Builder.tscn")
 @export var phalanx_scene: PackedScene = preload("res://scenes/Tank.tscn")
 @export var cavalry_scene: PackedScene = preload("res://scenes/Cavalry.tscn")
+@export var camp_archer_scene: PackedScene = preload("res://scenes/CampArcher.tscn")
+@export var dragon_scene: PackedScene = preload("res://scenes/Dragon.tscn")
 
 @export var tile_size: Vector2 = Vector2(170, 192)   # width, height of one hex
 
@@ -21,6 +24,7 @@ extends Node2D
 
 var _next_net_id_odd: int  = 1
 var _next_net_id_even: int = 2
+var _next_net_id_neutral: int = 1000001
 
 var unit_by_net_id: Dictionary = {}
 
@@ -28,13 +32,15 @@ func _ready():
 	print("UnitManager: hex_map =", hex_map, "script=", hex_map.get_script())
 
 # spawns a unit by type ("archer" or "soldier") at grid_pos for owner
-func spawn_unit(unit_type: String, cell: Vector2i, owner: String, undo: bool) -> Node2D:
+func spawn_unit(unit_type: String, cell: Vector2i, owner: String, undo: bool, forced_net_id: int = -1) -> Node2D:
 	# 1) Pick the right scene with a match statement
 	if undo:
 		if owner == "player1":
 			_next_net_id_odd += 2
-		else:
+		elif owner == "player2":
 			_next_net_id_even +=2
+		else:
+			_next_net_id_neutral += 1
 		return
 	var scene: PackedScene
 	match unit_type.to_lower():
@@ -50,10 +56,16 @@ func spawn_unit(unit_type: String, cell: Vector2i, owner: String, undo: bool) ->
 			scene = scout_scene
 		"miner":
 			scene = miner_scene
+		"builder":
+			scene = builder_scene
 		"phalanx":
 			scene = phalanx_scene
 		"cavalry":
 			scene = cavalry_scene
+		"camp_archer":
+			scene = camp_archer_scene
+		"dragon":
+			scene = dragon_scene
 		_:
 			push_error("Unknown unit type '%s'" % unit_type)
 			return
@@ -65,15 +77,35 @@ func spawn_unit(unit_type: String, cell: Vector2i, owner: String, undo: bool) ->
 		var health_bar = unit.get_node("HealthBar")
 		health_bar.scale = Vector2(-1,1)
 		health_bar.position[0] += health_bar.size[0]
-		unit.net_id = _next_net_id_odd
-		_next_net_id_odd += 2
+		if forced_net_id > 0:
+			unit.net_id = forced_net_id
+			if forced_net_id >= _next_net_id_odd:
+				_next_net_id_odd = forced_net_id + 2
+		else:
+			unit.net_id = _next_net_id_odd
+			_next_net_id_odd += 2
 		var net_id_label = unit.get_node("NetIDLabel")
 		net_id_label.scale = Vector2(-1,1)
 		net_id_label.position[0] += net_id_label.size[0]
 		net_id_label.text = str(unit.net_id)
+	elif owner == "player2":
+		if forced_net_id > 0:
+			unit.net_id = forced_net_id
+			if forced_net_id >= _next_net_id_even:
+				_next_net_id_even = forced_net_id + 2
+		else:
+			unit.net_id = _next_net_id_even
+			_next_net_id_even +=2
+		var net_id_label = unit.get_node("NetIDLabel")
+		net_id_label.text = str(unit.net_id)
 	else:
-		unit.net_id = _next_net_id_even
-		_next_net_id_even +=2
+		if forced_net_id > 0:
+			unit.net_id = forced_net_id
+			if forced_net_id >= _next_net_id_neutral:
+				_next_net_id_neutral = forced_net_id + 1
+		else:
+			unit.net_id = _next_net_id_neutral
+			_next_net_id_neutral += 1
 		var net_id_label = unit.get_node("NetIDLabel")
 		net_id_label.text = str(unit.net_id)
 	unit.unit_type = unit_type

@@ -16,10 +16,15 @@ var current_reachable: Dictionary = {}
 var enemy_tiles: Array = []
 var support_tiles = []
 var current_path: Array = []
-var remaining_moves: int = 0
-var action_mode:       String   = ""     # "move", "ranged", "melee", "support", "hold"
+var remaining_moves: float = 0.0
+var repair_tiles: Array = []
+var action_mode:       String   = ""     # "move", "ranged", "melee", "support", "hold", "repair"
 var move_priority: int = 0
 var allow_clicks: bool = true
+var last_click_pos: Vector2 = Vector2.ZERO
+var _build_hover_root: Node2D = null
+var _build_hover_label: Label = null
+var _build_hover_cell: Vector2i = Vector2i(-99999, -99999)
 
 var _current_exec_step_idx: int = 0
 
@@ -30,12 +35,15 @@ var _current_exec_step_idx: int = 0
 @onready var gold_lbl = $Panel/VBoxContainer/GoldLabel as Label
 @onready var income_lbl = $Panel/VBoxContainer/IncomeLabel as Label
 @onready var action_menu: PopupMenu      = $Panel/ActionMenu as PopupMenu
+@onready var build_menu: PopupMenu = PopupMenu.new()
 @onready var exec_panel: PanelContainer  = $ExecutionPanel
 @onready var phase_label   : Label       = exec_panel.get_node("PhaseLabel")
 @onready var next_button   : Button      = exec_panel.get_node("NextButton")
 @onready var cancel_done_button = $CancelDoneButton as Button
 @onready var dev_mode_toggle = get_node(dev_mode_toggle_path) as CheckButton
 @onready var dev_panel = $DevPanel
+@onready var respawn_timers_toggle = $DevPanel/VBoxContainer/RespawnTimersCheckButton as CheckButton
+@onready var resync_button = $DevPanel/VBoxContainer/ResyncButton as Button
 @onready var finish_move_button = $Panel/FinishMoveButton
 
 const ArrowScene = preload("res://scenes/Arrow.tscn")
@@ -43,6 +51,15 @@ const AttackArrowScene = preload("res://scenes/AttackArrow.tscn")
 const SupportArrowScene = preload("res://scenes/SupportArrow.tscn")
 const HealScene = preload("res://scenes/Healing.tscn")
 const DefendScene = preload("res://scenes/Defending.tscn")
+const BuildIcon = preload("res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Objects/HSI_icon_162.png")
+
+const BUILD_OPTIONS = [
+	{"id": 0, "label": "Fortification", "type": "fortification"},
+	{"id": 1, "label": "Road", "type": "road"},
+	{"id": 2, "label": "Railroad", "type": "rail"},
+	{"id": 3, "label": "Spawn Tower", "type": "spawn_tower"},
+	{"id": 4, "label": "Trap", "type": "trap"}
+]
 
 const ArcherScene = preload("res://scenes/Archer.tscn")
 const SoldierScene = preload("res://scenes/Soldier.tscn")
@@ -50,12 +67,14 @@ const ScoutScene = preload("res://scenes/Scout.tscn")
 const MinerScene = preload("res://scenes/Miner.tscn")
 const PhalanxScene = preload("res://scenes/Tank.tscn")
 const CavalryScene = preload("res://scenes/Cavalry.tscn")
+const BuilderScene = preload("res://scenes/Builder.tscn")
 
 const MineScene = preload("res://scenes/GemMine.tscn")
 
 func _ready():
 	# Enable unhandled input processing
 	set_process_unhandled_input(true)
+	set_process(true)
 	
 	$HostButton.connect("pressed",
 					Callable(self, "_on_host_pressed"))
@@ -71,12 +90,24 @@ func _ready():
 					 Callable(self, "_on_fog_toggled"))
 	$DevPanel/VBoxContainer/GiveIncomeButton.connect("pressed",
 					 Callable(self, "_on_give_income_pressed"))
+	$DevPanel/VBoxContainer/RespawnTimersCheckButton.connect("toggled",
+					 Callable(self, "_on_respawn_timers_toggled"))
+	$DevPanel/VBoxContainer/ResyncButton.connect("pressed",
+					 Callable(self, "_on_resync_pressed"))
+	NetworkManager.connect("buy_result",
+					Callable(self, "_on_buy_result"))
+	NetworkManager.connect("undo_result",
+					Callable(self, "_on_undo_result"))
+	NetworkManager.connect("order_result",
+					Callable(self, "_on_order_result"))
 	
 	# turn flow connections
 	turn_mgr.connect("orders_phase_begin",
 					Callable(self, "_on_orders_phase_begin"))
 	turn_mgr.connect("orders_phase_end",
 					Callable(self, "_on_orders_phase_end"))
+	turn_mgr.connect("state_applied",
+					Callable(self, "_on_state_applied"))
 	turn_mgr.connect("execution_paused",
 					Callable(self, "_on_execution_paused"))
 	turn_mgr.connect("execution_complete",
@@ -93,6 +124,8 @@ func _ready():
 					 Callable(self, "_on_scout_pressed"))
 	$Panel/VBoxContainer/MinerButton.connect("pressed",
 					 Callable(self, "_on_miner_pressed"))
+	$Panel/VBoxContainer/BuilderButton.connect("pressed",
+					 Callable(self, "_on_builder_pressed"))
 	$Panel/VBoxContainer/PhalanxButton.connect("pressed",
 					 Callable(self, "_on_tank_pressed"))
 	$Panel/VBoxContainer/CavalryButton.connect("pressed",
@@ -103,49 +136,173 @@ func _ready():
 					 Callable(self, "_on_cancel_pressed"))
 	$UnitStatsCheckButton.connect("toggled",
 					Callable(self, "_on_stats_toggled"))
+	$BuildingStatsCheckButton.connect("toggled",
+					Callable(self, "_on_building_stats_toggled"))
 	$Panel/FinishMoveButton.connect("pressed",
 					Callable(self, "_on_finish_move_button_pressed"))
 	
 	# setting gold labels and stats for units
 	var base_font: FontFile = load("res://fonts/JetBrainsMono-Medium.ttf")
-	var unit_scenes = [ScoutScene, SoldierScene, MinerScene, ArcherScene, PhalanxScene, CavalryScene]
-	var unit_names = ["Scout", "Soldier", "Miner", "Archer", "Phalanx", "Cavalry"]
+	var unit_scenes = [ScoutScene, SoldierScene, MinerScene, BuilderScene, ArcherScene, PhalanxScene, CavalryScene]
+	var unit_names = ["Scout", "Soldier", "Miner", "Builder", "Archer", "Phalanx", "Cavalry"]
 	var unit_buy_buttons = [$Panel/VBoxContainer/ScoutButton,
 							$Panel/VBoxContainer/SoldierButton,
 							$Panel/VBoxContainer/MinerButton,
+							$Panel/VBoxContainer/BuilderButton,
 							$Panel/VBoxContainer/ArcherButton,
 							$Panel/VBoxContainer/PhalanxButton,
 							$Panel/VBoxContainer/CavalryButton]
-	var stats_string = "%-7s|%-6s|%-6s|%-6s|%-6s|%s"
-	var label = Label.new()
-	label.add_theme_font_override("font", base_font)
-	label.text = stats_string % ["Unit", "Melee", "Ranged", "Move", "Regen", "Special"]
-	$StatsPanel/VBoxContainer.add_child(label)
+	var unit_container = $StatsPanel/VBoxContainer
+	var unit_col_widths = [80.0, 60.0, 60.0, 60.0, 60.0]
+	_add_unit_stats_row(unit_container, ["Unit", "Melee", "Ranged", "Move", "Regen", "Special"], unit_col_widths, base_font, true, true)
 	var temp
 	for i in range(unit_scenes.size()):
 		temp = unit_scenes[i].instantiate()
 		unit_buy_buttons[i].text = "Buy %s (%dG)" % [unit_names[i], temp.cost]
-		label = Label.new()
-		label.add_theme_font_override("font", base_font)
-		label.text = stats_string % [unit_names[i], temp.melee_strength, temp.ranged_strength, temp.move_range, temp.regen, temp.special_skills]
-		$StatsPanel/VBoxContainer.add_child(label)
+		_add_unit_stats_row(
+			unit_container,
+			[unit_names[i], str(temp.melee_strength), str(temp.ranged_strength), str(temp.move_range), str(temp.regen), temp.special_skills],
+			unit_col_widths,
+			base_font,
+			true,
+			i < unit_scenes.size() - 1
+		)
 	temp.free()
+
+	var build_container = $BuildingStatsPanel/VBoxContainer
+	var build_col_widths = [140.0, 90.0, 60.0]
+	_add_build_stats_row(build_container, ["Building", "Cost", "Turns", "Effect"], build_col_widths, base_font, true, true)
+	var short_turns = int(turn_mgr.BUILD_TURNS_SHORT)
+	var tower_turns = int(turn_mgr.BUILD_TURNS_TOWER)
+	var fort_bonus = "%d/%d" % [turn_mgr.fort_melee_bonus, turn_mgr.fort_ranged_bonus]
+	var build_rows = [
+		{"name": "Fortification", "cost": turn_mgr.get_build_turn_cost("fortification"), "turns": short_turns, "effect": "+%s melee/ranged" % fort_bonus},
+		{"name": "Road", "cost": turn_mgr.get_build_turn_cost("road"), "turns": short_turns, "effect": "Move x0.5; +1 turn on river"},
+		{"name": "Railroad", "cost": turn_mgr.get_build_turn_cost("rail"), "turns": short_turns, "effect": "Move x0.25; upgrade road; +1 turn on river"},
+		{"name": "Spawn Tower", "cost": turn_mgr.get_build_turn_cost("spawn_tower"), "turns": tower_turns, "effect": "Spawns units; needs road link"},
+		{"name": "Trap", "cost": turn_mgr.get_build_turn_cost("trap"), "turns": short_turns, "effect": "Hidden; triggered by enemy: becomes disabled, stops movement, deals 30 dmg"}
+	]
+	for i in range(build_rows.size()):
+		var row = build_rows[i]
+		var add_sep = i < build_rows.size() - 1
+		_add_build_stats_row(
+			build_container,
+			[row["name"], "%dg/step" % int(row["cost"]), str(row["turns"]), row["effect"]],
+			build_col_widths,
+			base_font,
+			true,
+			add_sep
+		)
 	
 	# unit order menu
 	action_menu.connect("id_pressed", Callable(self, "_on_action_selected"))
 	action_menu.hide()
+	build_menu.name = "BuildMenu"
+	add_child(build_menu)
+	build_menu.connect("id_pressed", Callable(self, "_on_build_selected"))
+	build_menu.hide()
+	for entry in BUILD_OPTIONS:
+		build_menu.add_item(entry["label"], entry["id"])
+	_init_build_hover()
+
+func _add_build_stats_row(container: VBoxContainer, columns: Array, widths: Array, font: FontFile, wrap_last: bool, add_separator: bool = true) -> void:
+	var row = HBoxContainer.new()
+	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	container.add_child(row)
+	for i in range(columns.size()):
+		var col_label = Label.new()
+		col_label.add_theme_font_override("font", font)
+		col_label.text = str(columns[i])
+		if i == columns.size() - 1 and wrap_last:
+			col_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			col_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		else:
+			col_label.custom_minimum_size = Vector2(float(widths[i]), 0.0)
+			col_label.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+		row.add_child(col_label)
+	if add_separator:
+		var sep = HSeparator.new()
+		sep.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		sep.custom_minimum_size = Vector2(0.0, 2.0)
+		container.add_child(sep)
+
+func _add_unit_stats_row(container: VBoxContainer, columns: Array, widths: Array, font: FontFile, wrap_last: bool, add_separator: bool = true) -> void:
+	var row = HBoxContainer.new()
+	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	container.add_child(row)
+	for i in range(columns.size()):
+		var col_label = Label.new()
+		col_label.add_theme_font_override("font", font)
+		col_label.text = str(columns[i])
+		if i == columns.size() - 1 and wrap_last:
+			col_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			col_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		else:
+			col_label.custom_minimum_size = Vector2(float(widths[i]), 0.0)
+			col_label.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+		row.add_child(col_label)
+	if add_separator:
+		var sep = HSeparator.new()
+		sep.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		sep.custom_minimum_size = Vector2(0.0, 2.0)
+		container.add_child(sep)
+
+func _init_build_hover() -> void:
+	_build_hover_root = Node2D.new()
+	_build_hover_root.name = "BuildHover"
+	_build_hover_root.z_index = 12
+	hex.add_child(_build_hover_root)
+	_build_hover_label = Label.new()
+	_build_hover_label.visible = false
+	_build_hover_label.add_theme_color_override("font_color", Color(0.98, 0.93, 0.2))
+	_build_hover_label.add_theme_font_size_override("font_size", 14)
+	_build_hover_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_build_hover_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_build_hover_label.z_index = 12
+	_build_hover_root.add_child(_build_hover_label)
+
+func _process(_delta: float) -> void:
+	_update_build_hover()
+
+func _update_build_hover() -> void:
+	if _build_hover_label == null:
+		return
+	var cam = get_viewport().get_camera_2d()
+	if cam == null:
+		_hide_build_hover()
+		return
+	var world_pos = cam.get_global_mouse_position()
+	var cell = hex.world_to_map(world_pos)
+	var text = turn_mgr.get_build_hover_text(cell)
+	if text == "":
+		_hide_build_hover()
+		return
+	_build_hover_cell = cell
+	var tile_size = hex.tile_size
+	_build_hover_label.text = text
+	_build_hover_label.size = Vector2(tile_size.x, tile_size.y * 0.25)
+	_build_hover_label.position = hex.map_to_world(cell) + Vector2(0, tile_size.y * 0.05)
+	_build_hover_label.visible = true
+
+func _hide_build_hover() -> void:
+	_build_hover_cell = Vector2i(-99999, -99999)
+	if _build_hover_label != null:
+		_build_hover_label.visible = false
+
+func _refresh_build_menu_labels() -> void:
+	for entry in BUILD_OPTIONS:
+		var label = entry["label"]
+		var cost = int(turn_mgr.get_build_turn_cost(entry["type"]))
+		if cost > 0:
+			label = "%s (%dg/step)" % [label, cost]
+		var idx = -1
+		for i in range(build_menu.get_item_count()):
+			if build_menu.get_item_id(i) == entry["id"]:
+				idx = i
+				break
+		if idx >= 0:
+			build_menu.set_item_text(idx, label)
 	
-	# spawn mines
-	var structures_node = hex.get_node("Structures")
-	for tile in turn_mgr.special_tiles["unclaimed"]:
-		var root = Node2D.new()
-		structures_node.add_child(root)
-		var mine = MineScene.instantiate() as Sprite2D
-		mine.position = hex.map_to_world(tile) + hex.tile_size * 0.5
-		mine.z_index = 0
-		mine.grid_pos = tile
-		$"../GameBoardNode".set_structure_at(tile, mine)
-		root.add_child(mine)
 
 func _on_orders_phase_begin(player: String) -> void:
 	# show the UI and reset state
@@ -183,6 +340,11 @@ func _on_miner_pressed():
 	gold_lbl.text = "Click map to place Miner\nGold: %d" % turn_mgr.player_gold[current_player]
 	_find_placeable()
 
+func _on_builder_pressed():
+	placing_unit = "builder"
+	gold_lbl.text = "Click map to place Builder\nGold: %d" % turn_mgr.player_gold[current_player]
+	_find_placeable()
+
 func _on_tank_pressed():
 	placing_unit = "phalanx"
 	gold_lbl.text = "Click map to place Phalanx\nGold: %d" % turn_mgr.player_gold[current_player]
@@ -194,7 +356,7 @@ func _on_cavalry_pressed():
 	_find_placeable()
 
 func _find_placeable():
-	var base = game_board.get_unit_at(turn_mgr.base_positions[current_player])
+	var base = game_board.get_structure_unit_at(turn_mgr.base_positions[current_player])
 	if dev_mode_toggle.button_pressed:
 		action_mode = "dev_place"
 	else:
@@ -210,6 +372,8 @@ func _on_dev_mode_toggled(pressed:bool):
 		dev_panel.visible = true
 	else:
 		dev_panel.visible = false
+		respawn_timers_toggle.button_pressed = false
+		_on_respawn_timers_toggled(false)
 
 func _on_fog_toggled(pressed:bool):
 	print("Fog of War -> ", pressed)
@@ -224,6 +388,110 @@ func _on_give_income_pressed():
 	for player in ["player1", "player2"]:
 		turn_mgr.player_gold[player] += turn_mgr.player_income[player]
 	gold_lbl.text = "%s Gold: %d" % [current_player, turn_mgr.player_gold[current_player]]
+
+func _on_respawn_timers_toggled(pressed: bool) -> void:
+	turn_mgr.set_respawn_timer_override(pressed)
+
+func _on_resync_pressed() -> void:
+	NetworkManager.request_state()
+
+func _buy_error_message(reason: String, cost: int) -> String:
+	match reason:
+		"not_enough_gold":
+			if cost > 0:
+				return "[Not enough gold] Need %d" % cost
+			return "[Not enough gold]"
+		"unknown_unit":
+			return "[Unknown unit]"
+		_:
+			return "[Purchase failed]"
+
+func _undo_error_message(reason: String) -> String:
+	match reason:
+		"not_owner":
+			return "[Undo failed: not owner]"
+		"not_just_purchased":
+			return "[Undo failed: not a fresh buy]"
+		"not_found":
+			return "[Undo failed: unit missing]"
+		_:
+			return "[Undo failed]"
+
+func _order_error_message(reason: String) -> String:
+	match reason:
+		"wrong_phase":
+			return "[Orders closed]"
+		"not_owner":
+			return "[Order failed: not owner]"
+		"not_builder":
+			return "[Order failed: builder only]"
+		"unit_missing":
+			return "[Order failed: unit missing]"
+		"invalid_unit":
+			return "[Order failed: invalid unit]"
+		"invalid_path":
+			return "[Order failed: invalid path]"
+		"invalid_target":
+			return "[Order failed: invalid target]"
+		"invalid_structure":
+			return "[Order failed: invalid structure]"
+		"invalid_tile":
+			return "[Order failed: invalid tile]"
+		"out_of_range":
+			return "[Order failed: out of range]"
+		"not_ready":
+			return "[Order failed: unit not ready]"
+		"not_enough_gold":
+			return "[Order failed: not enough gold]"
+		_:
+			return "[Order failed]"
+
+func _on_buy_result(player_id: String, unit_type: String, grid_pos: Vector2i, ok: bool, reason: String, cost: int) -> void:
+	if player_id != turn_mgr.local_player_id:
+		return
+	if turn_mgr.is_host():
+		return
+	if ok:
+		gold_lbl.text = "%s Gold: %d" % [current_player, turn_mgr.player_gold[current_player]]
+	else:
+		gold_lbl.text = _buy_error_message(reason, cost)
+
+func _on_undo_result(player_id: String, unit_net_id: int, ok: bool, reason: String, refund: int) -> void:
+	if player_id != turn_mgr.local_player_id:
+		return
+	if turn_mgr.is_host():
+		return
+	if ok:
+		gold_lbl.text = "%s Gold: %d" % [current_player, turn_mgr.player_gold[current_player]]
+	else:
+		gold_lbl.text = _undo_error_message(reason)
+
+func _on_order_result(player_id: String, unit_net_id: int, order: Dictionary, ok: bool, reason: String) -> void:
+	if player_id != turn_mgr.local_player_id:
+		return
+	if ok:
+		turn_mgr.player_orders[player_id][unit_net_id] = order
+		NetworkManager.player_orders[player_id][unit_net_id] = order
+		var unit = unit_mgr.get_unit_by_net_id(unit_net_id)
+		if unit != null:
+			unit.is_defending = false
+			unit.is_healing = false
+			unit.is_moving = false
+			match order.get("type", ""):
+				"move":
+					unit.is_moving = true
+					var path = order.get("path", [])
+					if path.size() > 1:
+						unit.moving_to = path[1]
+				"heal":
+					unit.is_healing = true
+				"defend":
+					unit.is_defending = true
+			unit.ordered = true
+		_draw_all()
+		$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
+	else:
+		gold_lbl.text = _order_error_message(reason)
 	
 
 func _on_host_pressed():
@@ -270,6 +538,12 @@ func _on_stats_toggled(toggled):
 	else:
 		$StatsPanel.visible = false
 
+func _on_building_stats_toggled(toggled):
+	if toggled:
+		$BuildingStatsPanel.visible = true
+	else:
+		$BuildingStatsPanel.visible = false
+
 func _on_unit_selected(unit: Node) -> void:
 	game_board.clear_highlights()
 	currently_selected_unit = unit
@@ -287,26 +561,27 @@ func _on_unit_selected(unit: Node) -> void:
 		action_menu.add_item("Melee Attack", 3)
 	action_menu.add_item("Heal", 4)
 	action_menu.add_item("Defend", 5)
+	action_menu.add_item("Sabotage", 6)
+	if unit.is_builder:
+		action_menu.add_item("Build", 7)
+		action_menu.add_item("Repair", 8)
 
 func _on_action_selected(id: int) -> void:
-	currently_selected_unit.is_defending = false
-	currently_selected_unit.is_healing = false
-	currently_selected_unit.is_moving = false
 	match id:
 		0:
-			turn_mgr.player_gold[currently_selected_unit.player_id] += currently_selected_unit.cost
-			gold_lbl.text = "%s Gold: %d" % [current_player, turn_mgr.player_gold[current_player]]
-			turn_mgr.player_orders[currently_selected_unit.player_id][currently_selected_unit.net_id]["undo"] = true
-			$"../GameBoardNode/Units".unit_by_net_id.erase(currently_selected_unit.net_id)
-			$"../GameBoardNode".vacate(currently_selected_unit.grid_pos)
-			$"../GameBoardNode/HexTileMap".set_player_tile(currently_selected_unit.grid_pos, "")
-			currently_selected_unit.ordered = true
-			currently_selected_unit.queue_free()
+			var player_id = currently_selected_unit.player_id
+			var unit_id = currently_selected_unit.net_id
+			if turn_mgr.is_host():
+				if NetworkManager.request_undo_buy(player_id, unit_id):
+					gold_lbl.text = "%s Gold: %d" % [current_player, turn_mgr.player_gold[current_player]]
+			else:
+				NetworkManager.request_undo_buy(player_id, unit_id)
+			currently_selected_unit = null
 			$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
 		1:
 			action_mode = "move"
 			current_path = [currently_selected_unit.grid_pos]
-			remaining_moves = currently_selected_unit.move_range
+			remaining_moves = float(currently_selected_unit.move_range)
 			var result = game_board.get_reachable_tiles(currently_selected_unit.grid_pos, currently_selected_unit.move_range, action_mode)
 			var tiles = result["tiles"].slice(1)
 			game_board.show_highlights(tiles)
@@ -315,14 +590,14 @@ func _on_action_selected(id: int) -> void:
 		
 		2:
 			action_mode = "ranged"
-			var result = game_board.get_reachable_tiles(currently_selected_unit.grid_pos, currently_selected_unit.ranged_range, action_mode)
+			var ranged_range = turn_mgr.get_effective_ranged_range(currently_selected_unit)
+			var result = game_board.get_reachable_tiles(currently_selected_unit.grid_pos, ranged_range, action_mode)
 			var tiles = result["tiles"]
 			enemy_tiles = []
 			for tile in tiles:
-				if game_board.is_occupied(tile):
-					var other_unit = game_board.get_unit_at(tile)
-					if other_unit.player_id != current_player:
-						enemy_tiles.append(tile)
+				var target = game_board.get_primary_attack_target(tile, current_player)
+				if target != null:
+					enemy_tiles.append(tile)
 			game_board.show_highlights(enemy_tiles)
 			print("Ranged Attack selected for %s" % currently_selected_unit.name)
 		
@@ -332,34 +607,45 @@ func _on_action_selected(id: int) -> void:
 			var tiles = result["tiles"]
 			enemy_tiles = []
 			for tile in tiles:
-				if game_board.is_occupied(tile):
-					var other_unit = game_board.get_unit_at(tile)
-					if other_unit.player_id != current_player:
-						enemy_tiles.append(tile)
+				var target = game_board.get_primary_attack_target(tile, current_player)
+				if target != null:
+					enemy_tiles.append(tile)
 			game_board.show_highlights(enemy_tiles)
 			print("Melee Attack selected for %s" % currently_selected_unit.name)
 		
 		4:
 			print("Heal selected for %s" % currently_selected_unit.name)
-			currently_selected_unit.is_healing = true
-			currently_selected_unit.ordered = true
-			turn_mgr.add_order(current_player, {
+			NetworkManager.request_order(current_player, {
 				"unit_net_id": currently_selected_unit.net_id,
 				"type": "heal",
 			})
-			_draw_all()
-			$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
+			action_mode = ""
 		
 		5:
 			print("Defend selected for %s" % currently_selected_unit.name)
-			turn_mgr.add_order(current_player, {
+			NetworkManager.request_order(current_player, {
 				"unit_net_id": currently_selected_unit.net_id,
 				"type": "defend",
 			})
-			currently_selected_unit.is_defending = true
-			currently_selected_unit.ordered = true
-			_draw_all()
-			$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
+			action_mode = ""
+		6:
+			print("Sabotage selected for %s" % currently_selected_unit.name)
+			NetworkManager.request_order(current_player, {
+				"unit_net_id": currently_selected_unit.net_id,
+				"type": "sabotage",
+				"target_tile": currently_selected_unit.grid_pos
+			})
+			action_mode = ""
+		7:
+			print("Build selected for %s" % currently_selected_unit.name)
+			_refresh_build_menu_labels()
+			build_menu.set_position(last_click_pos)
+			build_menu.popup()
+		8:
+			print("Repair selected for %s" % currently_selected_unit.name)
+			action_mode = "repair"
+			repair_tiles = _get_repair_targets(currently_selected_unit)
+			game_board.show_highlights(repair_tiles)
 	action_menu.hide()
 
 func _clear_all_drawings():
@@ -379,15 +665,21 @@ func _on_done_pressed():
 	#_clear_all_drawings()
 	$Panel.visible = false
 	cancel_done_button.visible = true
-	var my_orders = turn_mgr.get_all_orders(current_player)
-	NetworkManager.submit_orders(current_player, my_orders)
+	NetworkManager.submit_orders(current_player, [])
 	# prevent further clicks
 	placing_unit = ""
 	allow_clicks = false
 
 func _on_cancel_pressed():
 	NetworkManager.cancel_orders(current_player)
+	gold_lbl.text = "Orders cancelled - waiting on host"
 	_draw_all()
+	currently_selected_unit = null
+	action_mode = ""
+	current_path = []
+	remaining_moves = 0
+	finish_move_button.visible = false
+	game_board.clear_highlights()
 	allow_clicks = true
 	$Panel.visible = true
 	cancel_done_button.visible = false
@@ -395,7 +687,10 @@ func _on_cancel_pressed():
 func _on_execution_paused(phase_idx):
 	_current_exec_step_idx = phase_idx
 	exec_panel.visible = true
-	var phase_names = ["Unit Spawns", "Attacks","Movement"]
+	var phase_names = ["Unit Spawns", "Attacks", "Engineering", "Movement"]
+	if phase_idx == turn_mgr.neutral_step_index:
+		phase_label.text = "Processed: Neutral Attacks\n(Click here to continue)"
+		return
 	if phase_idx >= phase_names.size():
 		for i in range(phase_idx - phase_names.size()+1):
 			phase_names.append("Movement")
@@ -423,7 +718,7 @@ func _draw_paths() -> void:
 	else:
 		players = ["player1", "player2"]
 	for player in players:
-		var all_orders = turn_mgr.get_all_orders(player)
+		var all_orders = turn_mgr.get_all_orders_for_phase(player)
 		for order in all_orders:
 			if order["type"] == "move":
 				var root = Node2D.new()
@@ -488,7 +783,7 @@ func _draw_attacks():
 	else:
 		players = ["player1", "player2"]
 	for player in players:
-		var all_orders = turn_mgr.get_all_orders(player)
+		var all_orders = turn_mgr.get_all_orders_for_phase(player)
 		for order in all_orders:
 			if order["type"] == "ranged" or order["type"] == "melee":
 				var root = Node2D.new()
@@ -530,7 +825,7 @@ func _draw_supports():
 	else:
 		players = ["player1", "player2"]
 	for player in players:
-		var all_orders = turn_mgr.get_all_orders(player)
+		var all_orders = turn_mgr.get_all_orders_for_phase(player)
 		for order in all_orders:
 			if order["type"] == "support":
 				var root = Node2D.new()
@@ -563,7 +858,7 @@ func _draw_heals():
 	else:
 		players = ["player1", "player2"]
 	for player in players:
-		var all_orders = turn_mgr.get_all_orders(player)
+		var all_orders = turn_mgr.get_all_orders_for_phase(player)
 		for order in all_orders:
 			if order["type"] == "heal":
 				var root = Node2D.new()
@@ -583,7 +878,7 @@ func _draw_defends():
 	else:
 		players = ["player1", "player2"]
 	for player in players:
-		var all_orders = turn_mgr.get_all_orders(player)
+		var all_orders = turn_mgr.get_all_orders_for_phase(player)
 		for order in all_orders:
 			if order["type"] == "defend":
 				var root = Node2D.new()
@@ -593,28 +888,99 @@ func _draw_defends():
 				defend.z_index = 0
 				root.add_child(defend)
 
+func _get_building_sprites_root() -> Node2D:
+	var root = hex.get_node_or_null("BuildingSprites")
+	if root == null:
+		root = Node2D.new()
+		root.name = "BuildingSprites"
+		hex.add_child(root)
+	return root
+
+func _draw_builds():
+	var build_node = _get_building_sprites_root()
+	for child in build_node.get_children():
+		child.queue_free()
+	var players = []
+	if turn_mgr.current_phase == turn_mgr.Phase.ORDERS:
+		players.append(current_player)
+	else:
+		players = ["player1", "player2"]
+	for player in players:
+		var all_orders = turn_mgr.get_all_orders_for_phase(player)
+		for order in all_orders:
+			if order.get("type", "") == "build":
+				var unit = unit_mgr.get_unit_by_net_id(order["unit_net_id"])
+				if unit == null:
+					continue
+				var root = Node2D.new()
+				build_node.add_child(root)
+				var build_icon = Sprite2D.new()
+				build_icon.texture = BuildIcon
+				var tex_size = BuildIcon.get_size()
+				if tex_size.x > 0:
+					var scale = (hex.tile_size.x * 0.3) / tex_size.x
+					build_icon.scale = Vector2(scale, scale)
+				build_icon.position = hex.map_to_world(unit.grid_pos) + (hex.tile_size * Vector2(0.5, 0.7))
+				build_icon.z_index = 10
+				root.add_child(build_icon)
+
 func _draw_all():
 	_draw_attacks()
 	_draw_heals()
 	_draw_paths()
 	_draw_supports()
 	_draw_defends()
+	_draw_builds()
+
+func _get_repair_targets(unit: Node) -> Array:
+	var targets := []
+	if unit == null or not unit.is_builder:
+		return targets
+	var state = turn_mgr.buildable_structures.get(unit.grid_pos, {})
+	if state.size() > 0:
+		if str(state.get("owner", "")) == current_player and str(state.get("status", "")) == "disabled":
+			targets.append(unit.grid_pos)
+	for neighbor in game_board.get_offset_neighbors(unit.grid_pos):
+		var target_unit = game_board.get_structure_unit_at(neighbor)
+		if target_unit == null:
+			continue
+		if not (target_unit.is_base or target_unit.is_tower):
+			continue
+		if target_unit.player_id != current_player:
+			continue
+		if target_unit.curr_health >= target_unit.max_health:
+			continue
+		targets.append(neighbor)
+	return targets
+
+func _on_build_selected(id: int) -> void:
+	var struct_type = ""
+	for entry in BUILD_OPTIONS:
+		if entry["id"] == id:
+			struct_type = entry["type"]
+			break
+	if struct_type == "" or currently_selected_unit == null:
+		return
+	NetworkManager.request_order(current_player, {
+		"unit_net_id": currently_selected_unit.net_id,
+		"type": "build",
+		"structure_type": struct_type,
+		"target_tile": currently_selected_unit.grid_pos
+	})
+	action_mode = ""
+	build_menu.hide()
 
 func finish_current_path():
 	if current_path.size() == 1:
 		action_mode = ""
 		return
 	move_priority +=1
-	currently_selected_unit.is_moving = true
-	currently_selected_unit.moving_to = current_path[1]
-	currently_selected_unit.ordered = true
-	turn_mgr.add_order(current_player, {
+	NetworkManager.request_order(current_player, {
 				"unit_net_id": currently_selected_unit.net_id,
 				"type": "move",
 				"path": current_path,
 				"priority": move_priority
 			})
-	_draw_all()
 	var preview_node = hex.get_node("PreviewPathArrows")
 	for child in preview_node.get_children():
 		child.queue_free()
@@ -625,6 +991,14 @@ func finish_current_path():
 	game_board.clear_highlights()
 	$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
 	
+func _on_state_applied() -> void:
+	if turn_mgr.current_phase == turn_mgr.Phase.ORDERS:
+		current_player = turn_mgr.local_player_id
+		gold_lbl.text = "Current Gold: %d" % [turn_mgr.player_gold.get(current_player, 0)]
+		income_lbl.text = "Income: %d per turn" % turn_mgr.player_income.get(current_player, 0)
+		$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
+	_draw_all()
+
 
 func _unhandled_input(ev):
 	if not (ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT):
@@ -638,12 +1012,18 @@ func _unhandled_input(ev):
 	if placing_unit != "":
 		# Placement logic
 		if cell in current_reachable["tiles"]:
-			if turn_mgr.buy_unit(turn_mgr.local_player_id, placing_unit, cell):
-				gold_lbl.text = "%s Gold: %d" % [current_player, turn_mgr.player_gold[current_player]]
-				placing_unit = ""
-				$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
+			if turn_mgr.is_host():
+				if NetworkManager.request_buy_unit(current_player, placing_unit, cell):
+					gold_lbl.text = "%s Gold: %d" % [current_player, turn_mgr.player_gold[current_player]]
+					placing_unit = ""
+					$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
+				else:
+					gold_lbl.text = "[Not enough gold]\nGold: %d" % turn_mgr.player_gold[current_player]
 			else:
-				gold_lbl.text = "[Not enough gold]\nGold: %d" % turn_mgr.player_gold[current_player]
+				NetworkManager.request_buy_unit(current_player, placing_unit, cell)
+				placing_unit = ""
+				gold_lbl.text = "Purchase requested"
+				$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
 		else:
 			gold_lbl.text = "[Can't place there]\nGold: %d" % turn_mgr.player_gold[current_player]
 		return
@@ -661,13 +1041,15 @@ func _unhandled_input(ev):
 			cur = prev[cur]
 		
 		current_path += path
-		var steps_used = path.size()
-		remaining_moves -= steps_used
+		var cost_used: float = 0.0
+		for step_cell in path:
+			cost_used += game_board.get_move_cost(step_cell)
+		remaining_moves -= cost_used
 		
 		_draw_partial_path()
 		finish_move_button.set_position(ev.position)
 		finish_move_button.visible = true
-		if remaining_moves <= 0:
+		if remaining_moves <= 0.001:
 			finish_current_path()
 			return
 		
@@ -678,24 +1060,33 @@ func _unhandled_input(ev):
 		game_board.show_highlights(tiles)
 		current_reachable = result
 		return
+
+	if action_mode == "repair" and currently_selected_unit:
+		if cell in repair_tiles:
+			NetworkManager.request_order(current_player, {
+				"unit_net_id": currently_selected_unit.net_id,
+				"type": "repair",
+				"target_tile": cell
+			})
+		action_mode = ""
+		repair_tiles = []
+		game_board.clear_highlights()
+		return
 	
 	if action_mode == "ranged" or action_mode == "melee" and currently_selected_unit:
 		if cell in enemy_tiles:
 			move_priority += 1
-			if action_mode == "melee":
-				#currently_selected_unit.is_moving = true
-				#currently_selected_unit.moving_to = cell
-				pass
-			currently_selected_unit.ordered = true
-			$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
-			turn_mgr.add_order(current_player, {
+			var target_unit = game_board.get_primary_attack_target(cell, current_player)
+			if target_unit == null:
+				action_mode = ""
+				return
+			NetworkManager.request_order(current_player, {
 				"unit_net_id": currently_selected_unit.net_id,
 				"type": action_mode,
 				"target_tile": cell,
-				"target_unit_net_id": game_board.get_unit_at(cell).net_id,
+				"target_unit_net_id": target_unit.net_id,
 				"priority": move_priority
 			})
-		_draw_all()
 		action_mode = ""
 		return
 	
@@ -709,5 +1100,6 @@ func _unhandled_input(ev):
 				if unit.is_tower:
 					return
 				_on_unit_selected(unit)
+				last_click_pos = ev.position
 				action_menu.set_position(ev.position)
 				action_menu.show()

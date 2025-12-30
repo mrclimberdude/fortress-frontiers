@@ -1,0 +1,44 @@
+[gd_scene load_steps=6 format=3 uid="uid://c2r8h5m3y6k7a"]
+
+[ext_resource type="PackedScene" uid="uid://c62dn8sldq572" path="res://scenes/Unit.tscn" id="1_4w2am"]
+[ext_resource type="Texture2D" uid="uid://biedribp4yh4x" path="res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Objects Light/HSI_icon_190l.png" id="2_8ssq0"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_5qv8u"]
+bg_color = Color(0.988235, 0.227451, 0.152941, 0.603922)
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_w2j8s"]
+bg_color = Color(0, 0.843137, 0.0941176, 0.92549)
+
+[sub_resource type="LabelSettings" id="LabelSettings_5qv8u"]
+font_size = 30
+font_color = Color(0.989583, 0.989583, 0, 1)
+
+[node name="CampArcher" instance=ExtResource("1_4w2am")]
+is_ranged = true
+melee_strength = 15
+ranged_strength = 35
+move_range = 0
+ranged_range = 2
+special_skills = "Neutral Camp"
+
+[node name="Sprite2D" parent="." index="0"]
+texture = ExtResource("2_8ssq0")
+
+[node name="HealthBar" type="ProgressBar" parent="." index="1"]
+offset_left = 36.0
+offset_top = -52.0
+offset_right = 75.0
+offset_bottom = 43.0
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+theme_override_styles/background = SubResource("StyleBoxFlat_5qv8u")
+theme_override_styles/fill = SubResource("StyleBoxFlat_w2j8s")
+step = 1.0
+fill_mode = 3
+
+[node name="NetIDLabel" type="Label" parent="." index="2"]
+offset_left = -20.0
+offset_top = -67.0
+offset_right = 20.0
+offset_bottom = -44.0
+label_settings = SubResource("LabelSettings_5qv8u")
+horizontal_alignment = 1
