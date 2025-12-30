@@ -122,13 +122,15 @@ const RAIL_COST_PER_TURN: int = 10
 const FORT_COST_PER_TURN: int = 15
 const TRAP_COST_PER_TURN: int = 15
 const TOWER_COST_PER_TURN: int = 10
+@export var mine_road_bonus: int = 10
+@export var mine_rail_bonus: int = 20
 
 @export var fort_sprite: Texture2D
 @export var road_sprite: Texture2D
 @export var rail_sprite: Texture2D
 @export var trap_sprite: Texture2D
 @export var spawn_tower_sprite: Texture2D
-@export var structure_sprite_scale: float = 1.25
+@export var structure_sprite_scale: float = 1.35
 
 @export var fort_melee_bonus: int = 3
 @export var fort_ranged_bonus: int = 3
@@ -196,6 +198,39 @@ func _structure_counts_as_road(state: Dictionary) -> bool:
 		return status == STRUCT_STATUS_INTACT
 	if stype == STRUCT_RAIL:
 		return status == STRUCT_STATUS_INTACT or status == STRUCT_STATUS_BUILDING
+	return false
+
+func _structure_counts_as_rail(state: Dictionary) -> bool:
+	if state.is_empty():
+		return false
+	var status = str(state.get("status", ""))
+	if status == STRUCT_STATUS_DISABLED:
+		return false
+	var stype = str(state.get("type", ""))
+	if stype == STRUCT_RAIL:
+		return status == STRUCT_STATUS_INTACT
+	return false
+
+func _tile_counts_as_road(tile: Vector2i, player_id: String) -> bool:
+	if _structure_counts_as_road(_structure_state(tile)):
+		return true
+	if player_id == "":
+		return false
+	if base_positions.get(player_id, Vector2i(-9999, -9999)) == tile:
+		return true
+	if tile in tower_positions.get(player_id, []):
+		return true
+	return false
+
+func _tile_counts_as_rail(tile: Vector2i, player_id: String) -> bool:
+	if _structure_counts_as_rail(_structure_state(tile)):
+		return true
+	if player_id == "":
+		return false
+	if base_positions.get(player_id, Vector2i(-9999, -9999)) == tile:
+		return true
+	if tile in tower_positions.get(player_id, []):
+		return true
 	return false
 
 func _structure_move_cost(base_cost: float, state: Dictionary) -> float:
@@ -451,18 +486,50 @@ func refresh_structure_markers() -> void:
 func _connected_road_tiles(player_id: String) -> Dictionary:
 	var connected := {}
 	var queue: Array = []
-	for tower_pos in income_tower_positions.get(player_id, []):
-		for neighbor in $GameBoardNode.get_offset_neighbors(tower_pos):
-			if _structure_counts_as_road(_structure_state(neighbor)) and not connected.has(neighbor):
-				connected[neighbor] = true
-				queue.append(neighbor)
+	var starts := []
+	if base_positions.has(player_id):
+		starts.append(base_positions[player_id])
+	for tower_pos in tower_positions.get(player_id, []):
+		starts.append(tower_pos)
+	for start in starts:
+		if _tile_counts_as_road(start, player_id) and not connected.has(start):
+			connected[start] = true
+			queue.append(start)
 	while queue.size() > 0:
 		var current: Vector2i = queue.pop_front()
 		for neighbor in $GameBoardNode.get_offset_neighbors(current):
-			if _structure_counts_as_road(_structure_state(neighbor)) and not connected.has(neighbor):
+			if _tile_counts_as_road(neighbor, player_id) and not connected.has(neighbor):
 				connected[neighbor] = true
 				queue.append(neighbor)
 	return connected
+
+func _connected_rail_tiles(player_id: String) -> Dictionary:
+	var connected := {}
+	var queue: Array = []
+	var starts := []
+	if base_positions.has(player_id):
+		starts.append(base_positions[player_id])
+	for tower_pos in tower_positions.get(player_id, []):
+		starts.append(tower_pos)
+	for start in starts:
+		if _tile_counts_as_rail(start, player_id) and not connected.has(start):
+			connected[start] = true
+			queue.append(start)
+	while queue.size() > 0:
+		var current: Vector2i = queue.pop_front()
+		for neighbor in $GameBoardNode.get_offset_neighbors(current):
+			if _tile_counts_as_rail(neighbor, player_id) and not connected.has(neighbor):
+				connected[neighbor] = true
+				queue.append(neighbor)
+	return connected
+
+func _mine_connected_to_roads(pos: Vector2i, connected: Dictionary) -> bool:
+	if connected.has(pos):
+		return true
+	for neighbor in $GameBoardNode.get_offset_neighbors(pos):
+		if connected.has(neighbor):
+			return true
+	return false
 
 func get_spawn_points(player_id: String) -> Array:
 	var points := []
@@ -1119,6 +1186,8 @@ func _do_upkeep() -> void:
 	print("--- Upkeep Phase ---")
 	for player in ["player1", "player2"]:
 		var income = 0
+		var connected_roads = _connected_road_tiles(player)
+		var connected_rails = _connected_rail_tiles(player)
 		if _controls_tile(player, base_positions[player]):
 			income += BASE_INCOME
 		for tower in income_tower_positions.get(player, []):
@@ -1129,6 +1198,10 @@ func _do_upkeep() -> void:
 					if $GameBoardNode.get_unit_at(pos).is_miner:
 						income += MINER_BONUS
 				income += SPECIAL_INCOME
+				if mine_rail_bonus > 0 and _mine_connected_to_roads(pos, connected_rails):
+					income += mine_rail_bonus
+				elif mine_road_bonus > 0 and _mine_connected_to_roads(pos, connected_roads):
+					income += mine_road_bonus
 		player_gold[player] += income
 		player_income[player] = income
 		print("%s income: %d  → total gold: %d" % [player.capitalize(), income, player_gold[player]])
@@ -1422,15 +1495,24 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 			var repair_tile: Vector2i = repair_raw
 			if repair_tile == unit.grid_pos:
 				var repair_state = _structure_state(repair_tile)
-				if repair_state.is_empty():
-					result["reason"] = "invalid_target"
-					return result
-				if str(repair_state.get("owner", "")) != player_id:
-					result["reason"] = "not_owner"
-					return result
-				if str(repair_state.get("status", "")) != STRUCT_STATUS_DISABLED:
-					result["reason"] = "invalid_target"
-					return result
+				if not repair_state.is_empty():
+					if str(repair_state.get("owner", "")) != player_id:
+						result["reason"] = "not_owner"
+						return result
+					if str(repair_state.get("status", "")) != STRUCT_STATUS_DISABLED:
+						result["reason"] = "invalid_target"
+						return result
+				else:
+					var same_tile = $GameBoardNode.get_structure_unit_at(repair_tile)
+					if same_tile == null or not (same_tile.is_base or same_tile.is_tower):
+						result["reason"] = "invalid_target"
+						return result
+					if same_tile.player_id != player_id:
+						result["reason"] = "not_owner"
+						return result
+					if same_tile.curr_health >= same_tile.max_health:
+						result["reason"] = "invalid_target"
+						return result
 			else:
 				if _hex_distance(unit.grid_pos, repair_tile) != 1:
 					result["reason"] = "invalid_target"
@@ -1939,14 +2021,22 @@ func _apply_repair_at(player_id: String, unit, tile: Vector2i) -> void:
 		return
 	if tile == unit.grid_pos:
 		var state = _structure_state(tile)
-		if state.is_empty():
+		if not state.is_empty():
+			if str(state.get("owner", "")) != player_id:
+				return
+			if str(state.get("status", "")) != STRUCT_STATUS_DISABLED:
+				return
+			state["status"] = STRUCT_STATUS_INTACT
+			buildable_structures[tile] = state
 			return
-		if str(state.get("owner", "")) != player_id:
-			return
-		if str(state.get("status", "")) != STRUCT_STATUS_DISABLED:
-			return
-		state["status"] = STRUCT_STATUS_INTACT
-		buildable_structures[tile] = state
+		var same_tile = $GameBoardNode.get_structure_unit_at(tile)
+		if same_tile != null and (same_tile.is_base or same_tile.is_tower):
+			if same_tile.player_id != player_id:
+				return
+			if same_tile.curr_health >= same_tile.max_health:
+				return
+			same_tile.curr_health = min(same_tile.max_health, same_tile.curr_health + REPAIR_AMOUNT)
+			same_tile.set_health_bar()
 		return
 	var target = $GameBoardNode.get_structure_unit_at(tile)
 	if target == null or not (target.is_base or target.is_tower):

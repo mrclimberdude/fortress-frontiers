@@ -72,6 +72,7 @@ fort_sprite = ExtResource("10_o2enx")
 road_sprite = ExtResource("11_eerdt")
 rail_sprite = ExtResource("12_2sbk6")
 trap_sprite = ExtResource("13_54ie0")
+structure_sprite_scale = 1.0
 
 [node name="GameBoardNode" type="Node2D" parent="."]
 script = ExtResource("4_6lofv")

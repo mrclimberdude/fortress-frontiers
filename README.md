@@ -1,132 +1,263 @@
-# Fortress Frontiers
+# Fortress Frontiers Rulebook
 
 ## Overview
 
-**Fortress Frontiers** is a two‑player, networked, turn‑based strategy game built in Godot. Each match takes place on a hex‑grid map where players deploy and command units to capture special tiles and towers, earn gold, and ultimately destroy the opponent’s base. The game uses simultaneous orders: both players submit their actions in secret, after which the game engine resolves the turn in a deterministic sequence.
+Fortress Frontiers is a two-player, host-authoritative, turn-based strategy game on a hex grid. Both players submit orders simultaneously. The host resolves those orders step-by-step and broadcasts authoritative snapshots to clients.
 
-## Turn Structure
+## Core Loop
 
-Every turn follows a three‑phase cycle governed by the TurnManager class:
+Each turn has three phases:
 
-1. **Upkeep phase** – gold income is awarded and unit statuses reset. The host broadcasts the phase to all clients and updates the fog of war. During this phase, each player receives a base income and additional income for controlled towers, mines and miners[\[1\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scripts/TurnManager.gd#L120-L138). Units that were set to heal during the previous turn regain health up to their maximum[\[2\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scripts/TurnManager.gd#L141-L155).
-2. **Orders phase** – both players secretly queue orders for each unit. Valid orders include moving, ranged attack, melee attack, healing, defending and spawning new units. After a player submits their orders via the UI, the turn manager waits until both players have submitted before proceeding[\[3\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scripts/TurnManager.gd#L161-L171).
-3. **Execution phase** – the orders are resolved in a deterministic sequence. Spawn orders are processed first, followed by ranged attacks, melee combats and finally movements[\[4\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scripts/TurnManager.gd#L250-L307). Each execution step pauses briefly so that both clients stay in sync.
+1) Upkeep
+- Income is granted.
+- Healing from the previous turn is applied.
+- Orders and action flags reset.
+- Neutral respawn timers tick.
+- Fog of war updates.
 
-### Upkeep and Economy
+2) Orders
+- Each unit can receive exactly one order.
+- Orders are hidden from the opponent until execution.
+- Units purchased during Orders are visible and interactable only to the purchasing player until the Spawn step.
 
-The economy determines how many units a player can purchase. At the start of each turn, gold is awarded according to these rules (from TurnManager.gd):
+3) Execution (step-by-step)
+- Spawns
+- Attacks
+- Engineering (sabotage, repair, build)
+- Movement
+- Neutral attacks
 
-- **Base income (10 gold)** – earned if a player still controls their base tile[\[5\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scripts/TurnManager.gd#L125-L138).
-- **Tower income (5 gold)** – each tower controlled awards five gold per turn[\[6\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scripts/TurnManager.gd#L32-L36).
-- **Mines (10 gold)** – capturing mines grants ten gold each turn. Once a mine is captured, it will generate gold for that player, regardless of whether or not they have a unit on the mine, until the other player captures it for themselves.[\[6\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scripts/TurnManager.gd#L32-L36).
-- **Miner bonus (15 gold)** – when a miner unit occupies a mine, an additional 15 gold is earned[\[6\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scripts/TurnManager.gd#L32-L36).
+## Orders and Restrictions
 
-After income is tallied, unit statuses are reset: orders are cleared, defending/healing flags are reset, and units healing from the previous turn regain health[\[2\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scripts/TurnManager.gd#L141-L155).
+Available orders:
+- Move
+- Ranged attack (ranged units only)
+- Melee attack (units with can_melee)
+- Heal
+- Defend
+- Build (builders only)
+- Repair (builders only)
+- Sabotage (any unit)
+- Spawn (purchase during Orders)
+- Undo Buy (for units purchased this turn)
 
-### Orders Phase
+Newly purchased units:
+- Cannot act on the turn they are purchased.
+- May be undone for a full refund during Orders.
 
-During the orders phase, players decide how each unit will act. Orders are collected per unit using a dictionary keyed by the unit’s network ID[\[8\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scripts/TurnManager.gd#L171-L190). Units which have not received an order yet are highlighted. Available actions are:
+## Visibility and Fog of War
 
-- **Move** – select a path up to the unit’s move range. Units can move through friendly units but may clash with enemies during execution.
-- **Ranged attack** – available only to ranged units (archers). Requires a target within the unit’s ranged range.
-- **Melee attack** – adjacent attack; all units with can_melee = true may perform melee attacks[\[9\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scripts/unit.gd#L9-L20).
-- **Defend** – unit assumes a defensive stance, increasing its melee defence. Phalanx units gain an extra bonus when defending[\[10\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scripts/TurnManager.gd#L334-L349).
-- **Heal** – unit forfeits other actions to regenerate health equal to its regeneration stat during the upkeep of the next turn[\[2\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scripts/TurnManager.gd#L141-L155).
-- **Spawn** – purchase and place a new unit adjacent to your base. Spawn orders are executed before other orders during the execution phase[\[11\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scripts/TurnManager.gd#L212-L227).
-- **Undo Buy** - if a unit was purchased during this turn, it can be fully refunded
+- Each unit reveals tiles within sight range.
+- Forests and mountains block line of sight.
+- A blocking tile is still visible, but tiles beyond it are not.
+- Intact traps are hidden from enemies.
+- Newly purchased units are hidden from the opponent during Orders.
 
-Players can purchase units as long as they have enough gold. Unit costs are shown in the unit summary table below.
+## Terrain Rules
 
-### Execution Phase
+Terrain data comes from the tileset custom data:
 
-Once both players have submitted their orders, the game resolves actions in this order:
+| Terrain | Move Cost | Blocks Sight | Melee Attack Bonus | Melee Defense Bonus | Ranged Defense Bonus | Notes |
+| --- | --- | --- | --- | --- | --- | --- |
+| Open ground | 1 | No | 0 | 0 | 0 | Default if no terrain data. |
+| Forest | 2 | Yes | 0 | +2 | +2 | Blocks line of sight. |
+| Mountain | 9999 | Yes | 0 | 0 | 0 | Impassable. |
+| River | 2 | No | -2 | -2 | -2 | Passable with combat penalties. |
+| Lake | 2 | No | -2 | +3 | -3 | Passable with mixed defenses. |
 
-1. **Spawns** – new units are added to the board.[\[11\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scripts/TurnManager.gd#L212-L227).
-2. **Ranged attacks** – archers fire at targets within range. Damage is calculated using an exponential formula based on the attacker’s ranged strength and the defender’s melee strength; damage is modified by the current health of both attacker and defender[\[12\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scripts/TurnManager.gd#L250-L277). Defending phalanxes use their melee strength plus a bonus when calculating defence[\[13\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scripts/TurnManager.gd#L268-L274).
-3. **Melee combats** – simultaneous melee fights are grouped per target. Attack priorities determine which attacker strikes first. When multiple attackers gang up on a defender, the defender’s effective melee strength is reduced by its multi_def_penalty for each additional attacker[\[14\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scripts/TurnManager.gd#L331-L338). Damage is calculated similarly to ranged combat, and units may retaliate if defending[\[15\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scripts/TurnManager.gd#L345-L356).
-4. **Movement** – units move one tile along their planned paths. If a unit enters a tile with an enemy, a quick melee skirmish occurs. Multiple units entering the same tile are processed in the order in which those units recieved orders, and units that survive may occupy the tile[\[16\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scripts/TurnManager.gd#L395-L512). If there are still units which have further to move, this phase is repeated.
+## Spawning Units
+
+- You can spawn units on your base tile and on any tower tile you control.
+- You can also spawn on tiles adjacent to those spawn points.
+- Spawn towers only count if they are connected to your road or rail network.
+- Spawn orders resolve first during Execution.
+
+## Movement and Pathing
+
+### Movement Costs
+- Base movement cost is determined by terrain.
+- Roads and rails modify terrain costs:
+  - Road (intact): base_cost * 0.5
+  - Rail (building): base_cost * 0.5
+  - Rail (intact): base_cost * 0.25
+
+### Movement Rules
+- Mountains are impassable.
+- Enemy bases and towers are impassable.
+- Roads and rails can be built across forest and river.
+- Road or rail built on a river tile takes +1 turn to complete.
+
+### Movement Resolution (Execution)
+Movement resolves one step per tick with the following logic:
+
+1) Enemy swaps
+- If two enemy units move into each other's tiles on the same tick, they fight immediately.
+- Both deal damage. If one dies, the survivor occupies the fallen unit's tile. If both live, they both stop.
+
+2) Uncontested rotations
+- Pure cycles of friendly movers with no external entrants rotate atomically.
+
+3) Contested cycle entries
+- When a cycle has external entrants, a FIFO melee clash occurs at contested entry tiles before resolving the cycle.
+
+4) Chain resolution from sinks
+- For each sink (an empty tile with entrants, or a tile with a stationary occupant), entrants are resolved FIFO:
+  - If the tile is empty, the next unfought entrant from each side clashes; survivors may requeue once.
+  - If the tile has a stationary defender, enemy entrants fight the defender in FIFO order.
+  - If the defender survives, friendly entrants cannot pass that tile this tick.
+
+5) Path trimming
+- Any unit that successfully moved one step pops that step from its path.
+- If the path finishes, the order is cleared.
+
+6) Traps
+- If a unit moves onto an intact enemy trap, it takes 30 damage, stops, and the trap becomes disabled.
+
+## Combat
+
+### Targeting
+- Ranged attacks require line of sight and range.
+- Melee attacks require adjacency.
+- If a unit and a structure share a tile, the structure is the primary attack target.
+
+### Retaliation
+- A defending unit retaliates when attacked.
+- For ranged attacks, the defender retaliates if they are ranged OR the attacker is adjacent.
+- When a tower or base is attacked, a defending garrison unit on that tile retaliates instead.
+
+### Damage Formula
+
+Damage is symmetric and exponential:
+
+- Damage = 30 * 1.041^(attack_strength - defense_strength)
+- Attack and defense strength scale with current health:
+  - at full health: 100 percent strength
+  - at 0 health: 50 percent strength
+
+### Strength Modifiers
+- Fortification (intact): +3 melee and +3 ranged (attack and defense).
+- Tower garrison bonus: +3 melee, +3 ranged, +1 ranged range.
+- Dragon rewards: +3 melee or +3 ranged (stacking per reward).
+- Terrain bonuses (see terrain table).
+- Multi-attack penalty: defender loses multi_def_penalty per additional attacker.
+- Phalanx defending bonus: +20 and negates multi-attack penalty.
 
 ## Units
 
-All units inherit default properties from scripts/unit.gd. Default stats include melee strength 1, ranged strength 0, move range 2, sight range 2, maximum health 100 and regeneration 10 per turn[\[17\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scripts/unit.gd#L9-L18). Each scene overrides these values to create unique unit types. The table below summarises all playable units and their key statistics (values not shown inherit the default):
+All units have default stats unless overridden:
+- melee_strength: 1
+- ranged_strength: 0
+- move_range: 2
+- ranged_range: 0
+- sight_range: 2
+- max_health: 100
+- regen: 10
+- multi_def_penalty: 2
+- can_melee: true
 
-| Unit | Cost (gold) | Key traits and overrides |
-| --- | --- | --- |
-| **Archer** | 100 | Ranged unit; melee 10; ranged 30; ranged range 2[\[18\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scenes/Archer.tscn#L16-L22). |
-| **Soldier** | 75  | Melee strength 20[\[19\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scenes/Soldier.tscn#L16-L19); no ranged attack. |
-| **Scout** | 50  | Melee strength 4; move range 3; sight range 3; regeneration 15[\[20\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scenes/Scout.tscn#L16-L21). |
-| **Miner** | 75  | Regeneration 15; provides +15 income bonus when starting a turn on a mine. |
-| **Phalanx** | 100 | Melee strength 10; multi_def_penalty = 0[\[22\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scenes/Tank.tscn#L16-L21); receives a +20 defense bonus when defending[\[7\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scripts/TurnManager.gd#L32-L39). |
-| **Cavalry** | 125  | Move range 3; melee strength 20|
-| **Tower** | –   | Static structure; melee strength 20; cannot move[\[23\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scenes/Tower.tscn#L16-L19). Generates 5 gold per turn when controlled[\[6\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scripts/TurnManager.gd#L32-L36).; Player can spawn units adjacent to Tower |
-| **Base** | –   | Player’s headquarters; melee strength 20; cannot move; maximum health 500[\[24\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scenes/Base.tscn#L16-L20);Player can spawn units adjacent to Tower; Generates 10 gold per turn; Losing your base means losing the game. |
+### Player Units
 
-### Combat Formula
+| Unit | Cost | Melee | Ranged | Move | Range | Sight | Regen | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Archer | 100 | 10 | 25 | 2 | 2 | 2 | 10 | Ranged unit. |
+| Soldier | 75 | 20 | 0 | 2 | 0 | 2 | 10 | Melee unit. |
+| Scout | 50 | 4 | 0 | 3 | 0 | 3 | 15 | Fast and high vision. |
+| Miner | 75 | 1 | 0 | 2 | 0 | 2 | 15 | Provides mine bonus. |
+| Builder | 50 | 3 | 0 | 2 | 0 | 2 | 10 | Builds, repairs, sabotages. |
+| Phalanx | 100 | 10 | 0 | 2 | 0 | 2 | 10 | Defend bonus; no multi-attack penalty. |
+| Cavalry | 125 | 20 | 0 | 3 | 0 | 3 | 10 | Fast melee unit. |
+| Tower | - | 20 | 0 | 0 | 0 | 2 | 0 | Static structure. |
+| Base | - | 20 | 0 | 0 | 0 | 2 | 0 | 500 max health; losing it ends the game. |
 
-Damage is computed using a symmetric exponential formula. Attack and Defense strength is scaled based on current unit health. Full health has full strength down to 50% strength at 0 health. For an attack with strength atk against a defender with strength def, the damage inflicted is 30 × 1.041^(atk − def)[\[25\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scripts/TurnManager.gd#L274-L275). 
+### Neutral Units
 
-## Hosting and Network Setup
+| Unit | Melee | Ranged | Range | Sight | Move | Notes |
+| --- | --- | --- | --- | --- | --- | --- |
+| Camp Archer | 15 | 35 | 2 | 2 | 0 | Ranged attacker. |
+| Dragon | 25 | 40 | 3 | 3 | 0 | Ranged fire and melee cleave. |
 
-Fortress Frontiers uses Godot’s ENet networking. One player hosts the game while the other connects as a client. To host a match:
+## Structures and Engineering
 
-1. **Choose a port** – in the main menu, enter a port number (for example, 8910) in the PortLineEdit field, then click **Host**. The UI calls NetworkManager.host_game(port), which creates an ENet server on the chosen port[\[26\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scripts/NetworkManager.gd#L28-L34).
-2. **Configure your router** – to allow an external client to connect, forward the chosen UDP port on your router to the internal IP address of the host computer. Consult your router’s manual for port‑forwarding instructions. When forwarding, specify both UDP and TCP protocols if possible.
-3. **Share your public IP and port** – tell the client your public IP address and the port you opened. The host’s game will start when a client connects.
+Builders construct structures over multiple turns. Costs are paid per build step.
 
-To join a game as a client:
+| Structure | Turns | Cost per Step | Rules | Effect |
+| --- | --- | --- | --- | --- |
+| Fortification | 2 | 15 | Open terrain only | +3 melee, +3 ranged on tile. |
+| Road | 2 | 5 | Can cross forest and river | Movement cost x0.5. |
+| Railroad | 2 | 10 | Must upgrade an intact road | Movement cost x0.25. |
+| Spawn Tower | 4 | 10 | Open terrain only | Adds a new spawn point. |
+| Trap | 2 | 15 | Open terrain only | Hidden; triggers on entry. |
 
-1. Enter the host’s IP address and port in the IPLineEdit and PortLineEdit fields and click **Join**. This calls NetworkManager.join_game(ip, port)[\[27\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scripts/NetworkManager.gd#L28-L40).
-2. Ensure that your own firewall permits outbound connections to that port.
+Roads and rails built on river tiles take +1 additional turn.
 
-If you are hosting on a local network (LAN), port forwarding may not be required. For internet matches, port forwarding and firewall configuration are critical.
+### Structure States
+- Building: under construction, no benefits.
+- Intact: full benefits.
+- Disabled: no benefits, can be repaired or destroyed.
 
-## Getting Started
+### Engineering Phase
+The Engineering step resolves after Attacks and before Movement:
 
-1. Download the most recent version from the releases.
-2. Run the project. On the title screen, enter your desired port and click **Host** to create a game, or enter the host’s IP/port and click **Join** to connect.
-3. During the game, use the unit buttons on the left panel to purchase units. Click a unit on the map to select it, then choose an action from the contextual menu.
-4. When you have finished planning your turn, click **Done**. Wait for your opponent to submit orders; the game will then resolve the turn.
+- Sabotage (any unit, same tile):
+  - Intact -> Disabled
+  - Disabled -> Destroyed
+  - Building -> Canceled
+- Repair (builder only, same tile):
+  - Disabled structure -> Intact in one step.
+  - Base or tower on the same tile -> +30 health (capped).
+- Build (builder only, same tile):
+  - Deducts gold per step. If insufficient gold, the step does not progress.
+
+### Traps
+- Intact traps are hidden from enemies.
+- When an enemy enters the tile, the trap deals 30 damage and ends their movement.
+- After triggering, the trap becomes disabled (visible to enemies).
+
+## Bases and Towers
+
+- Friendly units can occupy base or tower tiles.
+- Towers grant garrison bonuses (+3 melee, +3 ranged, +1 ranged range).
+- Bases grant no combat bonuses.
+- Enemy units cannot enter enemy base or tower tiles.
+- Bases and towers are primary attack targets when a unit shares the tile.
+- Destroying a base ends the game.
+
+## Mines
+
+- Mines are captured by occupying their tile.
+- The owner retains control until the other player occupies the mine.
+- Mine income is granted each Upkeep if the owner controls the tile.
+
+## Neutral Monsters
+
+- Camps spawn neutral archers.
+- Dragons use two attack modes per neutral step:
+  - Fire: ranged attack within range 3, hitting two adjacent targets.
+  - Cleave: melee attack within range 1, hitting up to three adjacent targets.
+- Neutrals do not move.
+- Neutrals attack after player actions resolve.
+- If no targets are in range, neutrals heal instead.
+
+### Target Selection
+Targets are weighted by distance and health:
+- weight = (1 + 3 * (1 - hp_ratio)) * (1 / (distance + 1))
+- Lower health and closer distance increase the chance of being targeted.
+
+### Respawns and Rewards
+- Camp respawn: 6 to 10 turns after cleared.
+- Dragon respawn: 12 to 20 turns after cleared.
+- Respawn countdown starts only when the tile is empty.
+- If a unit steps on a camp or dragon tile before respawn, the timer resets.
+- Camp rewards: random gold from 150 to 300.
+- Dragon rewards: predetermined per spawn (gold, melee bonus, or ranged bonus).
+- Respawn timers are only shown when close to respawn (3 turns for camps, 5 for dragons) unless dev override is enabled.
+
+## Multiplayer
+
+- The host validates all orders and advances execution.
+- Clients receive authoritative snapshots each step.
+- Execution pauses between steps so both players stay in sync.
 
 ## License
 
-This codebase is provided as‑is under the repository’s license. See LICENSE for details.
-
-[\[1\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scripts/TurnManager.gd#L120-L138) [\[2\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scripts/TurnManager.gd#L141-L155) [\[3\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scripts/TurnManager.gd#L161-L171) [\[4\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scripts/TurnManager.gd#L250-L307) [\[5\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scripts/TurnManager.gd#L125-L138) [\[6\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scripts/TurnManager.gd#L32-L36) [\[7\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scripts/TurnManager.gd#L32-L39) [\[8\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scripts/TurnManager.gd#L171-L190) [\[10\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scripts/TurnManager.gd#L334-L349) [\[11\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scripts/TurnManager.gd#L212-L227) [\[12\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scripts/TurnManager.gd#L250-L277) [\[13\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scripts/TurnManager.gd#L268-L274) [\[14\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scripts/TurnManager.gd#L331-L338) [\[15\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scripts/TurnManager.gd#L345-L356) [\[16\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scripts/TurnManager.gd#L395-L512) [\[25\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scripts/TurnManager.gd#L274-L275) GitHub
-
-<https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scripts/TurnManager.gd>
-
-[\[9\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scripts/unit.gd#L9-L20) [\[17\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scripts/unit.gd#L9-L18) GitHub
-
-<https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scripts/unit.gd>
-
-[\[18\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scenes/Archer.tscn#L16-L22) GitHub
-
-<https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scenes/Archer.tscn>
-
-[\[19\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scenes/Soldier.tscn#L16-L19) GitHub
-
-<https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scenes/Soldier.tscn>
-
-[\[20\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scenes/Scout.tscn#L16-L21) GitHub
-
-<https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scenes/Scout.tscn>
-
-[\[21\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scenes/Miner.tscn#L16-L20) GitHub
-
-<https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scenes/Miner.tscn>
-
-[\[22\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scenes/Tank.tscn#L16-L21) GitHub
-
-<https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scenes/Tank.tscn>
-
-[\[23\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scenes/Tower.tscn#L16-L19) GitHub
-
-<https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scenes/Tower.tscn>
-
-[\[24\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scenes/Base.tscn#L16-L20) GitHub
-
-<https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scenes/Base.tscn>
-
-[\[26\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scripts/NetworkManager.gd#L28-L34) [\[27\]](https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scripts/NetworkManager.gd#L28-L40) GitHub
-
-<https://github.com/mrclimberdude/fortress-frontiers/blob/64710fdc74c26bad2a6e1691e0df1491cd5508b8/scripts/NetworkManager.gd>
+See `LICENSE`.

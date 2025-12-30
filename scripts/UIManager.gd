@@ -52,6 +52,8 @@ const SupportArrowScene = preload("res://scenes/SupportArrow.tscn")
 const HealScene = preload("res://scenes/Healing.tscn")
 const DefendScene = preload("res://scenes/Defending.tscn")
 const BuildIcon = preload("res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Objects/HSI_icon_162.png")
+const RepairIcon = preload("res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Objects/HSI_icon_141.png")
+const SabotageIcon = preload("res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Objects/HSI_icon_180.png")
 
 const BUILD_OPTIONS = [
 	{"id": 0, "label": "Fortification", "type": "fortification"},
@@ -643,9 +645,16 @@ func _on_action_selected(id: int) -> void:
 			build_menu.popup()
 		8:
 			print("Repair selected for %s" % currently_selected_unit.name)
-			action_mode = "repair"
-			repair_tiles = _get_repair_targets(currently_selected_unit)
-			game_board.show_highlights(repair_tiles)
+			if not _has_repair_target_here(currently_selected_unit):
+				gold_lbl.text = "[Nothing to repair]"
+				action_menu.hide()
+				return
+			NetworkManager.request_order(current_player, {
+				"unit_net_id": currently_selected_unit.net_id,
+				"type": "repair",
+				"target_tile": currently_selected_unit.grid_pos
+			})
+			action_mode = ""
 	action_menu.hide()
 
 func _clear_all_drawings():
@@ -659,6 +668,14 @@ func _clear_all_drawings():
 		child.queue_free()
 	for child in hex.get_node("DefendingSprites").get_children():
 		child.queue_free()
+	var repair_node = hex.get_node_or_null("RepairSprites")
+	if repair_node != null:
+		for child in repair_node.get_children():
+			child.queue_free()
+	var sabotage_node = hex.get_node_or_null("SabotageSprites")
+	if sabotage_node != null:
+		for child in sabotage_node.get_children():
+			child.queue_free()
 
 func _on_done_pressed():
 	game_board.clear_highlights()
@@ -896,6 +913,22 @@ func _get_building_sprites_root() -> Node2D:
 		hex.add_child(root)
 	return root
 
+func _get_repair_sprites_root() -> Node2D:
+	var root = hex.get_node_or_null("RepairSprites")
+	if root == null:
+		root = Node2D.new()
+		root.name = "RepairSprites"
+		hex.add_child(root)
+	return root
+
+func _get_sabotage_sprites_root() -> Node2D:
+	var root = hex.get_node_or_null("SabotageSprites")
+	if root == null:
+		root = Node2D.new()
+		root.name = "SabotageSprites"
+		hex.add_child(root)
+	return root
+
 func _draw_builds():
 	var build_node = _get_building_sprites_root()
 	for child in build_node.get_children():
@@ -924,6 +957,62 @@ func _draw_builds():
 				build_icon.z_index = 10
 				root.add_child(build_icon)
 
+func _draw_repairs():
+	var repair_node = _get_repair_sprites_root()
+	for child in repair_node.get_children():
+		child.queue_free()
+	var players = []
+	if turn_mgr.current_phase == turn_mgr.Phase.ORDERS:
+		players.append(current_player)
+	else:
+		players = ["player1", "player2"]
+	for player in players:
+		var all_orders = turn_mgr.get_all_orders_for_phase(player)
+		for order in all_orders:
+			if order.get("type", "") == "repair":
+				var unit = unit_mgr.get_unit_by_net_id(order["unit_net_id"])
+				if unit == null:
+					continue
+				var root = Node2D.new()
+				repair_node.add_child(root)
+				var repair_icon = Sprite2D.new()
+				repair_icon.texture = RepairIcon
+				var tex_size = RepairIcon.get_size()
+				if tex_size.x > 0:
+					var scale = (hex.tile_size.x * 0.18) / tex_size.x
+					repair_icon.scale = Vector2(scale, scale)
+				repair_icon.position = hex.map_to_world(unit.grid_pos) + (hex.tile_size * Vector2(0.5, 0.7))
+				repair_icon.z_index = 10
+				root.add_child(repair_icon)
+
+func _draw_sabotages():
+	var sabotage_node = _get_sabotage_sprites_root()
+	for child in sabotage_node.get_children():
+		child.queue_free()
+	var players = []
+	if turn_mgr.current_phase == turn_mgr.Phase.ORDERS:
+		players.append(current_player)
+	else:
+		players = ["player1", "player2"]
+	for player in players:
+		var all_orders = turn_mgr.get_all_orders_for_phase(player)
+		for order in all_orders:
+			if order.get("type", "") == "sabotage":
+				var unit = unit_mgr.get_unit_by_net_id(order["unit_net_id"])
+				if unit == null:
+					continue
+				var root = Node2D.new()
+				sabotage_node.add_child(root)
+				var sabotage_icon = Sprite2D.new()
+				sabotage_icon.texture = SabotageIcon
+				var tex_size = SabotageIcon.get_size()
+				if tex_size.x > 0:
+					var scale = (hex.tile_size.x * 0.18) / tex_size.x
+					sabotage_icon.scale = Vector2(scale, scale)
+				sabotage_icon.position = hex.map_to_world(unit.grid_pos) + (hex.tile_size * Vector2(0.5, 0.7))
+				sabotage_icon.z_index = 10
+				root.add_child(sabotage_icon)
+
 func _draw_all():
 	_draw_attacks()
 	_draw_heals()
@@ -931,6 +1020,8 @@ func _draw_all():
 	_draw_supports()
 	_draw_defends()
 	_draw_builds()
+	_draw_repairs()
+	_draw_sabotages()
 
 func _get_repair_targets(unit: Node) -> Array:
 	var targets := []
@@ -940,18 +1031,15 @@ func _get_repair_targets(unit: Node) -> Array:
 	if state.size() > 0:
 		if str(state.get("owner", "")) == current_player and str(state.get("status", "")) == "disabled":
 			targets.append(unit.grid_pos)
-	for neighbor in game_board.get_offset_neighbors(unit.grid_pos):
-		var target_unit = game_board.get_structure_unit_at(neighbor)
-		if target_unit == null:
-			continue
-		if not (target_unit.is_base or target_unit.is_tower):
-			continue
-		if target_unit.player_id != current_player:
-			continue
-		if target_unit.curr_health >= target_unit.max_health:
-			continue
-		targets.append(neighbor)
+	var target_unit = game_board.get_structure_unit_at(unit.grid_pos)
+	if target_unit != null:
+		if (target_unit.is_base or target_unit.is_tower) and target_unit.player_id == current_player:
+			if target_unit.curr_health < target_unit.max_health:
+				targets.append(unit.grid_pos)
 	return targets
+
+func _has_repair_target_here(unit: Node) -> bool:
+	return _get_repair_targets(unit).size() > 0
 
 func _on_build_selected(id: int) -> void:
 	var struct_type = ""
@@ -1061,18 +1149,6 @@ func _unhandled_input(ev):
 		current_reachable = result
 		return
 
-	if action_mode == "repair" and currently_selected_unit:
-		if cell in repair_tiles:
-			NetworkManager.request_order(current_player, {
-				"unit_net_id": currently_selected_unit.net_id,
-				"type": "repair",
-				"target_tile": cell
-			})
-		action_mode = ""
-		repair_tiles = []
-		game_board.clear_highlights()
-		return
-	
 	if action_mode == "ranged" or action_mode == "melee" and currently_selected_unit:
 		if cell in enemy_tiles:
 			move_priority += 1
