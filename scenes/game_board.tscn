@@ -1,4 +1,4 @@
-[gd_scene load_steps=20 format=4 uid="uid://dnx0cxl4a46lg"]
+[gd_scene load_steps=24 format=4 uid="uid://dnx0cxl4a46lg"]
 
 [ext_resource type="Script" uid="uid://daaph63aiv3vd" path="res://scripts/TurnManager.gd" id="1_xh13x"]
 [ext_resource type="Texture2D" uid="uid://ciitwnd7hxyra" path="res://assets/spritesheet.png" id="2_17g6i"]
@@ -15,8 +15,12 @@
 [ext_resource type="Script" uid="uid://srlpr2fln13a" path="res://scripts/camera.gd" id="7_rs5it"]
 [ext_resource type="Resource" uid="uid://c1o6wwhlvvogu" path="res://maps/map_1.tres" id="8_8auva"]
 [ext_resource type="Resource" uid="uid://x6d0njhmctsc" path="res://maps/map_2.tres" id="9_hrnlr"]
+[ext_resource type="Texture2D" uid="uid://b11h6j3chexl7" path="res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Geometric Light/HSI_icon_083l.png" id="10_o2enx"]
 [ext_resource type="Script" uid="uid://cvqvvdw265adw" path="res://scripts/fog.gd" id="10_sax53"]
 [ext_resource type="Script" uid="uid://cojvvohyejpxa" path="res://scenes/order_reminder.gd" id="11_cac7a"]
+[ext_resource type="Texture2D" uid="uid://p87i1cy5hxa8" path="res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Objects Light/HSI_icon_179l.png" id="11_eerdt"]
+[ext_resource type="Texture2D" uid="uid://5e515yxb63px" path="res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Geometric Light/HSI_icon_122l.png" id="12_2sbk6"]
+[ext_resource type="Texture2D" uid="uid://bh88t66wtrben" path="res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Objects Light/HSI_icon_180l.png" id="13_54ie0"]
 
 [sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_17g6i"]
 texture = ExtResource("2_17g6i")
@@ -64,6 +68,10 @@ miner_scene = ExtResource("5_c1to4")
 phalanx_scene = ExtResource("6_w5uqb")
 cavalry_scene = ExtResource("7_hl2y5")
 map_data = Array[Resource]([ExtResource("8_8auva"), ExtResource("9_hrnlr")])
+fort_sprite = ExtResource("10_o2enx")
+road_sprite = ExtResource("11_eerdt")
+rail_sprite = ExtResource("12_2sbk6")
+trap_sprite = ExtResource("13_54ie0")
 
 [node name="GameBoardNode" type="Node2D" parent="."]
 script = ExtResource("4_6lofv")
@@ -226,6 +234,10 @@ text = "Buy Scout"
 layout_mode = 2
 text = "Buy Miner"
 
+[node name="BuilderButton" type="Button" parent="UI/Panel/VBoxContainer"]
+layout_mode = 2
+text = "Buy Builder"
+
 [node name="SoldierButton" type="Button" parent="UI/Panel/VBoxContainer"]
 custom_minimum_size = Vector2(200, 30)
 layout_mode = 2
@@ -267,19 +279,40 @@ offset_right = 346.0
 offset_bottom = 32.0
 text = "Unit Stats"
 
+[node name="BuildingStatsCheckButton" type="CheckButton" parent="UI"]
+offset_left = 352.0
+offset_top = 1.0
+offset_right = 520.0
+offset_bottom = 32.0
+text = "Building Stats"
+
 [node name="StatsPanel" type="Panel" parent="UI"]
 visible = false
 offset_left = 213.0
 offset_top = 27.0
-offset_right = 650.0
-offset_bottom = 261.0
+offset_right = 814.0
+offset_bottom = 322.0
 
 [node name="VBoxContainer" type="VBoxContainer" parent="UI/StatsPanel"]
 layout_mode = 0
 offset_left = -2.0
 offset_top = 1.0
-offset_right = 434.0
-offset_bottom = 233.0
+offset_right = 591.0
+offset_bottom = 287.0
+
+[node name="BuildingStatsPanel" type="Panel" parent="UI"]
+visible = false
+offset_left = 354.0
+offset_top = 36.0
+offset_right = 1041.0
+offset_bottom = 299.0
+
+[node name="VBoxContainer" type="VBoxContainer" parent="UI/BuildingStatsPanel"]
+layout_mode = 0
+offset_left = -2.0
+offset_top = 1.0
+offset_right = 683.0
+offset_bottom = 250.0
 
 [node name="ExecutionPanel" type="PanelContainer" parent="UI"]
 visible = false
@@ -337,10 +370,10 @@ text = "Resync state"
 
 [node name="DamagePanel" type="Panel" parent="UI"]
 visible = false
-offset_left = 1.0
-offset_top = 301.0
-offset_right = 325.0
-offset_bottom = 643.0
+offset_left = 833.0
+offset_top = 299.0
+offset_right = 1157.0
+offset_bottom = 641.0
 
 [node name="Label" type="Label" parent="UI/DamagePanel"]
 layout_mode = 0

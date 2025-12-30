@@ -102,6 +102,41 @@ const DRAGON_RESPAWN_DISPLAY_TURNS: int = 5
 @export var dragon_fire_range: int = 3
 @export var dragon_cleave_targets: int = 3
 
+const STRUCT_FORTIFICATION: String = "fortification"
+const STRUCT_ROAD: String = "road"
+const STRUCT_RAIL: String = "rail"
+const STRUCT_TRAP: String = "trap"
+const STRUCT_SPAWN_TOWER: String = "spawn_tower"
+
+const STRUCT_STATUS_BUILDING: String = "building"
+const STRUCT_STATUS_INTACT: String = "intact"
+const STRUCT_STATUS_DISABLED: String = "disabled"
+
+const ENGINEERING_PHASE_NAME: String = "Engineering"
+const TRAP_DAMAGE: int = 30
+const REPAIR_AMOUNT: int = 30
+const BUILD_TURNS_SHORT: int = 2
+const BUILD_TURNS_TOWER: int = 4
+const ROAD_COST_PER_TURN: int = 5
+const RAIL_COST_PER_TURN: int = 10
+const FORT_COST_PER_TURN: int = 15
+const TRAP_COST_PER_TURN: int = 15
+const TOWER_COST_PER_TURN: int = 10
+
+@export var fort_sprite: Texture2D
+@export var road_sprite: Texture2D
+@export var rail_sprite: Texture2D
+@export var trap_sprite: Texture2D
+@export var spawn_tower_sprite: Texture2D
+@export var structure_sprite_scale: float = 1.25
+
+@export var fort_melee_bonus: int = 3
+@export var fort_ranged_bonus: int = 3
+
+const TOWER_MELEE_BONUS: int = 3
+const TOWER_RANGED_BONUS: int = 3
+const TOWER_RANGE_BONUS: int = 1
+
 var camp_units := {}
 var dragon_units := {}
 var camp_respawns := {}
@@ -112,6 +147,13 @@ var dragon_spawn_counts := {}
 var show_respawn_timers_override: bool = false
 var player_melee_bonus := { "player1": 0, "player2": 0 }
 var player_ranged_bonus := { "player1": 0, "player2": 0 }
+var damage_log := { "player1": [], "player2": [] }
+
+var buildable_structures := {}
+var spawn_tower_positions := { "player1": [], "player2": [] }
+var income_tower_positions := { "player1": [], "player2": [] }
+var structure_markers := {}
+var _structure_marker_points: PackedVector2Array = PackedVector2Array()
 
 func _get_terrain_tile_data(cell: Vector2i) -> TileData:
 	if terrain_overlay == null:
@@ -126,6 +168,313 @@ func _terrain_bonus(cell: Vector2i, key: String) -> int:
 	if val == null:
 		return 0
 	return int(val)
+
+func _terrain_type(cell: Vector2i) -> String:
+	var td = _get_terrain_tile_data(cell)
+	if td == null:
+		return ""
+	var val = td.get_custom_data("terrain")
+	return "" if val == null else str(val)
+
+func _is_open_terrain(cell: Vector2i) -> bool:
+	var t = _terrain_type(cell)
+	if t == "":
+		return true
+	return not (t in ["forest", "river", "mountain", "lake"])
+
+func _structure_state(cell: Vector2i) -> Dictionary:
+	return buildable_structures.get(cell, {})
+
+func _structure_counts_as_road(state: Dictionary) -> bool:
+	if state.is_empty():
+		return false
+	var status = str(state.get("status", ""))
+	if status == STRUCT_STATUS_DISABLED:
+		return false
+	var stype = str(state.get("type", ""))
+	if stype == STRUCT_ROAD:
+		return status == STRUCT_STATUS_INTACT
+	if stype == STRUCT_RAIL:
+		return status == STRUCT_STATUS_INTACT or status == STRUCT_STATUS_BUILDING
+	return false
+
+func _structure_move_cost(base_cost: float, state: Dictionary) -> float:
+	if state.is_empty():
+		return base_cost
+	var status = str(state.get("status", ""))
+	if status == STRUCT_STATUS_DISABLED:
+		return base_cost
+	var stype = str(state.get("type", ""))
+	if stype == STRUCT_ROAD and status == STRUCT_STATUS_INTACT:
+		return base_cost * 0.5
+	if stype == STRUCT_RAIL and status == STRUCT_STATUS_BUILDING:
+		return base_cost * 0.5
+	if stype == STRUCT_RAIL and status == STRUCT_STATUS_INTACT:
+		return base_cost * 0.25
+	return base_cost
+
+func get_structure_move_cost(cell: Vector2i, base_cost: float) -> float:
+	return _structure_move_cost(base_cost, _structure_state(cell))
+
+func get_build_turn_cost(struct_type: String) -> int:
+	return _structure_turn_cost(struct_type)
+
+func _structure_build_turns(struct_type: String, cell: Vector2i) -> int:
+	var turns: int = BUILD_TURNS_SHORT
+	if struct_type == STRUCT_SPAWN_TOWER:
+		turns = BUILD_TURNS_TOWER
+	if struct_type in [STRUCT_ROAD, STRUCT_RAIL] and _terrain_type(cell) == "river":
+		turns += 1
+	return turns
+
+func _structure_turn_cost(struct_type: String) -> int:
+	if struct_type == STRUCT_ROAD:
+		return ROAD_COST_PER_TURN
+	if struct_type == STRUCT_RAIL:
+		return RAIL_COST_PER_TURN
+	if struct_type == STRUCT_FORTIFICATION:
+		return FORT_COST_PER_TURN
+	if struct_type == STRUCT_TRAP:
+		return TRAP_COST_PER_TURN
+	if struct_type == STRUCT_SPAWN_TOWER:
+		return TOWER_COST_PER_TURN
+	return 0
+
+func _unit_on_friendly_tower(unit) -> bool:
+	if unit == null or unit.is_base or unit.is_tower:
+		return false
+	var tower = $GameBoardNode.get_structure_unit_at(unit.grid_pos)
+	if tower == null:
+		return false
+	return tower.is_tower and tower.player_id == unit.player_id
+
+func _get_retaliator_for_target(target):
+	if target == null:
+		return null
+	if not (target.is_base or target.is_tower):
+		return target
+	var garrison = $GameBoardNode.get_unit_at(target.grid_pos)
+	if garrison == null:
+		return null
+	if garrison.player_id != target.player_id:
+		return null
+	return garrison
+
+func get_effective_ranged_range(unit) -> int:
+	var range = int(unit.ranged_range)
+	if _unit_on_friendly_tower(unit):
+		range += TOWER_RANGE_BONUS
+	return range
+
+func _structure_is_visible_to_local(state: Dictionary) -> bool:
+	if state.is_empty():
+		return false
+	var stype = str(state.get("type", ""))
+	var status = str(state.get("status", ""))
+	if stype == STRUCT_TRAP and status == STRUCT_STATUS_INTACT:
+		return str(state.get("owner", "")) == local_player_id
+	return true
+
+func _structure_marker_color(state: Dictionary) -> Color:
+	var stype = str(state.get("type", ""))
+	var status = str(state.get("status", ""))
+	var color = Color(1, 1, 1, 0.8)
+	match stype:
+		STRUCT_FORTIFICATION:
+			color = Color(0.62, 0.45, 0.25, 0.8)
+		STRUCT_ROAD:
+			color = Color(0.6, 0.6, 0.6, 0.8)
+		STRUCT_RAIL:
+			color = Color(0.35, 0.35, 0.35, 0.8)
+		STRUCT_TRAP:
+			color = Color(0.7, 0.2, 0.7, 0.8)
+		STRUCT_SPAWN_TOWER:
+			color = Color(0.2, 0.6, 0.9, 0.8)
+	if status == STRUCT_STATUS_BUILDING:
+		color.a = 0.45
+	elif status == STRUCT_STATUS_DISABLED:
+		color = color.darkened(0.4)
+		color.a = 0.35
+	return color
+
+func _structure_sprite_for_state(state: Dictionary) -> Texture2D:
+	var stype = str(state.get("type", ""))
+	match stype:
+		STRUCT_FORTIFICATION:
+			return fort_sprite
+		STRUCT_ROAD:
+			return road_sprite
+		STRUCT_RAIL:
+			return rail_sprite
+		STRUCT_TRAP:
+			return trap_sprite
+		STRUCT_SPAWN_TOWER:
+			return spawn_tower_sprite
+	return null
+
+func _structure_sprite_modulate(state: Dictionary) -> Color:
+	var status = str(state.get("status", ""))
+	var color = Color(1, 1, 1, 1)
+	if status == STRUCT_STATUS_DISABLED:
+		color = color.darkened(0.4)
+		color.a = 0.35
+	return color
+
+func _structure_build_marker_color() -> Color:
+	return Color(0.6, 0.6, 0.6, 0.7)
+
+func _structure_display_name(stype: String) -> String:
+	match stype:
+		STRUCT_FORTIFICATION:
+			return "Fort"
+		STRUCT_ROAD:
+			return "Road"
+		STRUCT_RAIL:
+			return "Rail"
+		STRUCT_TRAP:
+			return "Trap"
+		STRUCT_SPAWN_TOWER:
+			return "Tower"
+	return stype.capitalize()
+
+func _structure_build_label(state: Dictionary) -> String:
+	var stype = str(state.get("type", ""))
+	var name = _structure_display_name(stype)
+	var total = int(state.get("build_total", 0))
+	var left = int(state.get("build_left", 0))
+	if total <= 0:
+		return name
+	var done = max(total - left, 0)
+	return "%s %d/%d" % [name, done, total]
+
+func get_build_hover_text(cell: Vector2i) -> String:
+	if local_player_id == "":
+		return ""
+	var state = _structure_state(cell)
+	if state.is_empty():
+		return ""
+	if str(state.get("status", "")) != STRUCT_STATUS_BUILDING:
+		return ""
+	if not _structure_is_visible_to_local(state):
+		return ""
+	var fog = $GameBoardNode/FogOfWar
+	if fog != null and fog.visiblity.has(local_player_id):
+		var vis = fog.visiblity[local_player_id]
+		if int(vis.get(cell, 0)) == 0:
+			return ""
+	return _structure_build_label(state)
+
+func is_unit_hidden_for_viewer(unit, viewer_id: String) -> bool:
+	if unit == null:
+		return false
+	if viewer_id == "":
+		return false
+	if current_phase != Phase.ORDERS:
+		return false
+	if not bool(unit.just_purchased):
+		return false
+	return unit.player_id != viewer_id
+
+func is_unit_hidden_to_local(unit) -> bool:
+	return is_unit_hidden_for_viewer(unit, local_player_id)
+
+func _get_structure_marker_points() -> PackedVector2Array:
+	if _structure_marker_points.size() > 0:
+		return _structure_marker_points
+	var tile_size = $GameBoardNode/HexTileMap.tile_size
+	var w = tile_size.x * 0.25
+	var h = tile_size.y * 0.25
+	var dx = w * 0.866
+	_structure_marker_points = PackedVector2Array([
+		Vector2(0, -h),
+		Vector2(dx, -h * 0.5),
+		Vector2(dx, h * 0.5),
+		Vector2(0, h),
+		Vector2(-dx, h * 0.5),
+		Vector2(-dx, -h * 0.5)
+	])
+	return _structure_marker_points
+
+func _get_structure_marker_root() -> Node2D:
+	var root = $GameBoardNode/HexTileMap.get_node_or_null("BuildableStructures")
+	if root == null:
+		root = Node2D.new()
+		root.name = "BuildableStructures"
+		$GameBoardNode/HexTileMap.add_child(root)
+	return root
+
+func refresh_structure_markers() -> void:
+	var root = _get_structure_marker_root()
+	for child in root.get_children():
+		child.queue_free()
+	structure_markers.clear()
+	var tile_map = $GameBoardNode/HexTileMap
+	var tile_size = tile_map.tile_size
+	var fog = $GameBoardNode/FogOfWar
+	var vis = {}
+	if fog != null and fog.visiblity.has(local_player_id):
+		vis = fog.visiblity[local_player_id]
+	for cell in buildable_structures.keys():
+		var state = buildable_structures[cell]
+		if not _structure_is_visible_to_local(state):
+			continue
+		if vis.size() > 0 and int(vis.get(cell, 0)) == 0:
+			continue
+		var marker_root = Node2D.new()
+		marker_root.position = tile_map.map_to_world(cell) + tile_size * 0.5
+		marker_root.z_index = 6
+		root.add_child(marker_root)
+		var status = str(state.get("status", ""))
+		if status == STRUCT_STATUS_BUILDING:
+			var marker = Polygon2D.new()
+			marker.polygon = _get_structure_marker_points()
+			marker.color = _structure_build_marker_color()
+			marker_root.add_child(marker)
+		else:
+			var sprite = _structure_sprite_for_state(state)
+			if sprite != null:
+				var marker_sprite = Sprite2D.new()
+				marker_sprite.texture = sprite
+				var tex_size = sprite.get_size()
+				if tex_size.x > 0:
+					var scale = (tile_size.x * structure_sprite_scale) / tex_size.x
+					marker_sprite.scale = Vector2(scale, scale)
+				marker_sprite.modulate = _structure_sprite_modulate(state)
+				marker_root.add_child(marker_sprite)
+			else:
+				var marker = Polygon2D.new()
+				marker.polygon = _get_structure_marker_points()
+				marker.color = _structure_marker_color(state)
+				marker_root.add_child(marker)
+		structure_markers[cell] = marker_root
+
+func _connected_road_tiles(player_id: String) -> Dictionary:
+	var connected := {}
+	var queue: Array = []
+	for tower_pos in income_tower_positions.get(player_id, []):
+		for neighbor in $GameBoardNode.get_offset_neighbors(tower_pos):
+			if _structure_counts_as_road(_structure_state(neighbor)) and not connected.has(neighbor):
+				connected[neighbor] = true
+				queue.append(neighbor)
+	while queue.size() > 0:
+		var current: Vector2i = queue.pop_front()
+		for neighbor in $GameBoardNode.get_offset_neighbors(current):
+			if _structure_counts_as_road(_structure_state(neighbor)) and not connected.has(neighbor):
+				connected[neighbor] = true
+				queue.append(neighbor)
+	return connected
+
+func get_spawn_points(player_id: String) -> Array:
+	var points := []
+	for pos in income_tower_positions.get(player_id, []):
+		points.append(pos)
+	var connected = _connected_road_tiles(player_id)
+	for pos in spawn_tower_positions.get(player_id, []):
+		for neighbor in $GameBoardNode.get_offset_neighbors(pos):
+			if connected.has(neighbor):
+				points.append(pos)
+				break
+	return points
 
 func _special_tile_pid(pos: Vector2i) -> String:
 	if pos in camps["basic"]:
@@ -234,22 +583,28 @@ func _pick_adjacent_pair(candidates: Array, origin: Vector2i) -> Array:
 func _queue_neutral_attack(attacker, target, atk_mode: String, dmg_map: Dictionary, src_map: Dictionary, ret_map: Dictionary, ret_src_map: Dictionary) -> void:
 	if attacker == null or target == null:
 		return
+	if not is_instance_valid(attacker) or not is_instance_valid(target):
+		return
 	var dmg_result = calculate_damage(attacker, target, atk_mode, 1)
-	var atkr_in_dmg = dmg_result[0]
 	var defr_in_dmg = dmg_result[1]
+	var ret_dmg = dmg_result[0]
+	var retaliator = _get_retaliator_for_target(target)
 	var retaliate = false
-	if atk_mode == "ranged":
-		var result = $GameBoardNode.get_reachable_tiles(target.grid_pos, 1, "move")
-		var melee_in_range = attacker.grid_pos in result["tiles"]
-		retaliate = target.is_defending and (target.is_ranged or melee_in_range)
-	else:
-		retaliate = target.is_defending
+	if retaliator != null and retaliator.is_defending:
+		if atk_mode == "ranged":
+			var result = $GameBoardNode.get_reachable_tiles(retaliator.grid_pos, 1, "move")
+			var melee_in_range = attacker.grid_pos in result["tiles"]
+			retaliate = retaliator.is_ranged or melee_in_range
+		else:
+			retaliate = true
+		if retaliate and retaliator != target:
+			ret_dmg = calculate_damage(attacker, retaliator, atk_mode, 1)[0]
 	dmg_map[target.net_id] = dmg_map.get(target.net_id, 0) + defr_in_dmg
 	_accumulate_damage_by_player(src_map, target.net_id, attacker.player_id, defr_in_dmg)
 	if retaliate:
-		ret_map[attacker.net_id] = ret_map.get(attacker.net_id, 0) + atkr_in_dmg
-		_accumulate_damage_by_player(ret_src_map, attacker.net_id, target.player_id, atkr_in_dmg)
-	dealt_dmg_report(attacker, target, atkr_in_dmg, defr_in_dmg, retaliate, atk_mode)
+		ret_map[attacker.net_id] = ret_map.get(attacker.net_id, 0) + ret_dmg
+		_accumulate_damage_by_player(ret_src_map, attacker.net_id, retaliator.player_id, ret_dmg)
+	dealt_dmg_report(attacker, target, ret_dmg, defr_in_dmg, retaliate, atk_mode)
 
 func _camp_gold_reward(pos: Vector2i) -> int:
 	var count = camp_respawn_counts.get(pos, 0)
@@ -349,6 +704,12 @@ func _load_map_by_index(map_index: int) -> void:
 	tower_positions = md.tower_positions
 	mines = md.mines
 	camps = md.camps
+	buildable_structures.clear()
+	spawn_tower_positions = { "player1": [], "player2": [] }
+	income_tower_positions = {
+		"player1": tower_positions.get("player1", []).duplicate(),
+		"player2": tower_positions.get("player2", []).duplicate()
+	}
 	
 	for player in tower_positions.keys():
 		for tile in tower_positions[player]:
@@ -411,15 +772,38 @@ func _collect_state() -> Dictionary:
 		"camps": camps,
 		"mines": mines,
 		"structure_positions": structure_positions,
+		"buildable_structures": buildable_structures,
+		"spawn_tower_positions": spawn_tower_positions,
+		"income_tower_positions": income_tower_positions,
 		"base_positions": base_positions,
 		"tower_positions": tower_positions,
 		"neutral_step_index": neutral_step_index,
 		"committed_orders": committed_orders,
-		"units": units
+		"units": units,
+		"damage_log": damage_log
 	}
 
 func get_state_snapshot() -> Dictionary:
 	return _collect_state()
+
+func _collect_state_for(viewer_id: String) -> Dictionary:
+	var state = _collect_state()
+	if viewer_id == "":
+		return state
+	if current_phase != Phase.ORDERS:
+		return state
+	var filtered := []
+	for data in state.get("units", []):
+		var owner = str(data.get("player_id", ""))
+		var just_purchased = bool(data.get("just_purchased", false))
+		if just_purchased and owner != viewer_id:
+			continue
+		filtered.append(data)
+	state["units"] = filtered
+	return state
+
+func get_state_snapshot_for(viewer_id: String) -> Dictionary:
+	return _collect_state_for(viewer_id)
 
 func _broadcast_state() -> void:
 	if not _is_host():
@@ -440,6 +824,7 @@ func _clear_units_only() -> void:
 		child.queue_free()
 	unit_manager.unit_by_net_id.clear()
 	$GameBoardNode.occupied_tiles.clear()
+	$GameBoardNode.structure_units.clear()
 
 func _apply_units(units_data: Array) -> void:
 	_clear_units_only()
@@ -510,6 +895,12 @@ func apply_state(state: Dictionary) -> void:
 		tower_positions = state["tower_positions"]
 	if state.has("structure_positions"):
 		structure_positions = state["structure_positions"]
+	if state.has("buildable_structures"):
+		buildable_structures = state["buildable_structures"]
+	if state.has("spawn_tower_positions"):
+		spawn_tower_positions = state["spawn_tower_positions"]
+	if state.has("income_tower_positions"):
+		income_tower_positions = state["income_tower_positions"]
 	if state.has("camps"):
 		camps = state["camps"]
 	if state.has("mines"):
@@ -526,6 +917,7 @@ func apply_state(state: Dictionary) -> void:
 	camp_respawn_counts = state.get("camp_respawn_counts", camp_respawn_counts)
 	dragon_rewards = state.get("dragon_rewards", dragon_rewards)
 	dragon_spawn_counts = state.get("dragon_spawn_counts", dragon_spawn_counts)
+	damage_log = state.get("damage_log", damage_log)
 	neutral_step_index = int(state.get("neutral_step_index", neutral_step_index))
 	_apply_units(state.get("units", []))
 	player_orders = { "player1": {}, "player2": {} }
@@ -533,6 +925,8 @@ func apply_state(state: Dictionary) -> void:
 	committed_orders = state.get("committed_orders", { "player1": {}, "player2": {} })
 	$GameBoardNode/FogOfWar._update_fog()
 	update_neutral_markers()
+	refresh_structure_markers()
+	_render_damage_log_for_local()
 	emit_signal("state_applied")
 
 func _reset_map_state() -> void:
@@ -548,7 +942,16 @@ func _reset_map_state() -> void:
 	if structures != null:
 		for child in structures.get_children():
 			child.queue_free()
+	var build_root = $GameBoardNode/HexTileMap.get_node_or_null("BuildableStructures")
+	if build_root != null:
+		for child in build_root.get_children():
+			child.queue_free()
 	structure_positions.clear()
+	$GameBoardNode.structure_units.clear()
+	buildable_structures.clear()
+	spawn_tower_positions = { "player1": [], "player2": [] }
+	income_tower_positions = { "player1": [], "player2": [] }
+	structure_markers.clear()
 	camps = {"basic": [], "dragon": []}
 	mines = {"unclaimed": [], "player1": [], "player2": []}
 	camp_units.clear()
@@ -718,7 +1121,7 @@ func _do_upkeep() -> void:
 		var income = 0
 		if _controls_tile(player, base_positions[player]):
 			income += BASE_INCOME
-		for tower in tower_positions[player]:
+		for tower in income_tower_positions.get(player, []):
 			income += TOWER_INCOME
 		for pos in mines[player]:
 			if _controls_tile(player, pos):
@@ -788,6 +1191,10 @@ func reset_orders_for_player(player_id: String) -> void:
 		unit.is_healing = false
 		unit.is_moving = false
 
+func _remove_player_order(player_id: String, unit_net_id: int) -> void:
+	player_orders[player_id].erase(unit_net_id)
+	NetworkManager.player_orders[player_id].erase(unit_net_id)
+
 func _clear_unit_order_flags(unit) -> void:
 	unit.is_defending = false
 	unit.is_healing = false
@@ -856,7 +1263,7 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 			if path[0] != unit.grid_pos:
 				result["reason"] = "invalid_path"
 				return result
-			var total_cost = 0
+			var total_cost: float = 0.0
 			for i in range(1, path.size()):
 				var prev = path[i - 1]
 				var step = path[i]
@@ -869,8 +1276,11 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 				if $GameBoardNode._terrain_is_impassable(step):
 					result["reason"] = "invalid_path"
 					return result
-				total_cost += int($GameBoardNode.get_move_cost(step))
-				if total_cost > unit.move_range:
+				if $GameBoardNode.is_enemy_structure_tile(step, unit.player_id):
+					result["reason"] = "invalid_path"
+					return result
+				total_cost += float($GameBoardNode.get_move_cost(step))
+				if total_cost > float(unit.move_range):
 					result["reason"] = "invalid_path"
 					return result
 			sanitized["path"] = path
@@ -891,7 +1301,8 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 			if target.grid_pos != target_tile:
 				result["reason"] = "invalid_target"
 				return result
-			var ranged_tiles = $GameBoardNode.get_reachable_tiles(unit.grid_pos, unit.ranged_range, "ranged")["tiles"]
+			var ranged_range = get_effective_ranged_range(unit)
+			var ranged_tiles = $GameBoardNode.get_reachable_tiles(unit.grid_pos, ranged_range, "ranged")["tiles"]
 			if target_tile not in ranged_tiles:
 				result["reason"] = "out_of_range"
 				return result
@@ -925,6 +1336,133 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 			pass
 		"defend":
 			pass
+		"build":
+			if not unit.is_builder:
+				result["reason"] = "not_builder"
+				return result
+			if not order.has("structure_type"):
+				result["reason"] = "invalid_structure"
+				return result
+			var target_raw = order.get("target_tile", unit.grid_pos)
+			if typeof(target_raw) != TYPE_VECTOR2I:
+				result["reason"] = "invalid_tile"
+				return result
+			var target_tile: Vector2i = target_raw
+			if target_tile != unit.grid_pos:
+				result["reason"] = "invalid_tile"
+				return result
+			var struct_type = str(order.get("structure_type", ""))
+			if struct_type == "":
+				result["reason"] = "invalid_structure"
+				return result
+			if struct_type not in [STRUCT_FORTIFICATION, STRUCT_ROAD, STRUCT_RAIL, STRUCT_TRAP, STRUCT_SPAWN_TOWER]:
+				result["reason"] = "invalid_structure"
+				return result
+			var state = _structure_state(target_tile)
+			if state.is_empty():
+				if $GameBoardNode.is_occupied(target_tile) and $GameBoardNode.get_unit_at(target_tile) != unit:
+					result["reason"] = "invalid_tile"
+					return result
+				if target_tile in camps["basic"] or target_tile in camps["dragon"]:
+					result["reason"] = "invalid_tile"
+					return result
+				if target_tile in structure_positions:
+					result["reason"] = "invalid_tile"
+					return result
+				if struct_type == STRUCT_RAIL:
+					result["reason"] = "invalid_structure"
+					return result
+				if struct_type in [STRUCT_ROAD, STRUCT_RAIL]:
+					if $GameBoardNode._terrain_is_impassable(target_tile):
+						result["reason"] = "invalid_tile"
+						return result
+					var terrain = _terrain_type(target_tile)
+					if terrain in ["mountain", "lake"]:
+						result["reason"] = "invalid_tile"
+						return result
+				else:
+					if not _is_open_terrain(target_tile) or $GameBoardNode._terrain_is_impassable(target_tile):
+						result["reason"] = "invalid_tile"
+						return result
+			else:
+				var existing_type = str(state.get("type", ""))
+				var existing_status = str(state.get("status", ""))
+				var existing_owner = str(state.get("owner", ""))
+				if existing_owner != player_id:
+					result["reason"] = "not_owner"
+					return result
+				if existing_status == STRUCT_STATUS_DISABLED:
+					result["reason"] = "invalid_structure"
+					return result
+				if existing_status == STRUCT_STATUS_BUILDING:
+					if existing_type != struct_type:
+						result["reason"] = "invalid_structure"
+						return result
+				elif existing_status == STRUCT_STATUS_INTACT:
+					if not (struct_type == STRUCT_RAIL and existing_type == STRUCT_ROAD):
+						result["reason"] = "invalid_structure"
+						return result
+			var turn_cost = _structure_turn_cost(struct_type)
+			if turn_cost > 0 and player_gold[player_id] < turn_cost:
+				result["reason"] = "not_enough_gold"
+				return result
+			sanitized["target_tile"] = target_tile
+			sanitized["structure_type"] = struct_type
+		"repair":
+			if not unit.is_builder:
+				result["reason"] = "not_builder"
+				return result
+			if not order.has("target_tile"):
+				result["reason"] = "invalid_target"
+				return result
+			var repair_raw = order.get("target_tile")
+			if typeof(repair_raw) != TYPE_VECTOR2I:
+				result["reason"] = "invalid_target"
+				return result
+			var repair_tile: Vector2i = repair_raw
+			if repair_tile == unit.grid_pos:
+				var repair_state = _structure_state(repair_tile)
+				if repair_state.is_empty():
+					result["reason"] = "invalid_target"
+					return result
+				if str(repair_state.get("owner", "")) != player_id:
+					result["reason"] = "not_owner"
+					return result
+				if str(repair_state.get("status", "")) != STRUCT_STATUS_DISABLED:
+					result["reason"] = "invalid_target"
+					return result
+			else:
+				if _hex_distance(unit.grid_pos, repair_tile) != 1:
+					result["reason"] = "invalid_target"
+					return result
+				var target_unit = $GameBoardNode.get_structure_unit_at(repair_tile)
+				if target_unit == null or not (target_unit.is_base or target_unit.is_tower):
+					result["reason"] = "invalid_target"
+					return result
+				if target_unit.player_id != player_id:
+					result["reason"] = "not_owner"
+					return result
+				if target_unit.curr_health >= target_unit.max_health:
+					result["reason"] = "invalid_target"
+					return result
+			sanitized["target_tile"] = repair_tile
+		"sabotage":
+			var sabotage_raw = order.get("target_tile", unit.grid_pos)
+			if typeof(sabotage_raw) != TYPE_VECTOR2I:
+				result["reason"] = "invalid_target"
+				return result
+			var sabotage_tile: Vector2i = sabotage_raw
+			if sabotage_tile != unit.grid_pos:
+				result["reason"] = "invalid_target"
+				return result
+			var sab_state = _structure_state(sabotage_tile)
+			if sab_state.is_empty():
+				result["reason"] = "invalid_target"
+				return result
+			if str(sab_state.get("owner", "")) == player_id:
+				result["reason"] = "invalid_target"
+				return result
+			sanitized["target_tile"] = sabotage_tile
 		_:
 			result["reason"] = "invalid_action"
 			return result
@@ -983,12 +1521,27 @@ func submit_player_order(player: String) -> void:
 func calculate_damage(attacker, defender, atk_mode, num_atkrs):
 	# NOTE: Whenever this function is updated, also update all manually calculated damage sections
 	# search: MANUAL_DMG
+	if attacker == null or defender == null:
+		return [0.0, 0.0]
+	if not is_instance_valid(attacker) or not is_instance_valid(defender):
+		return [0.0, 0.0]
 	var atkr_damaged_penalty = 1- ((100 - attacker.curr_health) * 0.005)
 	var atkr_str
 	if atk_mode == "ranged":
 		atkr_str = attacker.ranged_strength * atkr_damaged_penalty
 	else:
 		atkr_str = attacker.melee_strength * atkr_damaged_penalty
+	var atkr_fort = _structure_state(attacker.grid_pos)
+	if str(atkr_fort.get("type", "")) == STRUCT_FORTIFICATION and str(atkr_fort.get("status", "")) == STRUCT_STATUS_INTACT:
+		if atk_mode == "ranged":
+			atkr_str += fort_ranged_bonus
+		else:
+			atkr_str += fort_melee_bonus
+	if _unit_on_friendly_tower(attacker):
+		if atk_mode == "ranged":
+			atkr_str += TOWER_RANGED_BONUS
+		else:
+			atkr_str += TOWER_MELEE_BONUS
 	if atk_mode == "ranged":
 		atkr_str += player_ranged_bonus.get(attacker.player_id, 0)
 	else:
@@ -1000,6 +1553,14 @@ func calculate_damage(attacker, defender, atk_mode, num_atkrs):
 	if defender.is_defending and defender.is_phalanx:
 		defr_str += PHALANX_BONUS + (num_atkrs -1) * defender.multi_def_penalty
 	defr_str = defr_str * defr_damaged_penalty
+	var defr_fort = _structure_state(defender.grid_pos)
+	if str(defr_fort.get("type", "")) == STRUCT_FORTIFICATION and str(defr_fort.get("status", "")) == STRUCT_STATUS_INTACT:
+		if atk_mode == "ranged":
+			defr_str += fort_ranged_bonus
+		else:
+			defr_str += fort_melee_bonus
+	if _unit_on_friendly_tower(defender):
+		defr_str += TOWER_MELEE_BONUS
 	if atk_mode == "ranged":
 		defr_str += _terrain_bonus(defender.grid_pos, "ranged_defense_bonus")
 	else:
@@ -1007,6 +1568,10 @@ func calculate_damage(attacker, defender, atk_mode, num_atkrs):
 	var atkr_in_dmg
 	if defender.is_ranged and atk_mode == "ranged":
 		var defr_ranged_str = (defender.ranged_strength - ((num_atkrs -1) * defender.multi_def_penalty)) * defr_damaged_penalty
+		if str(defr_fort.get("type", "")) == STRUCT_FORTIFICATION and str(defr_fort.get("status", "")) == STRUCT_STATUS_INTACT:
+			defr_ranged_str += fort_ranged_bonus
+		if _unit_on_friendly_tower(defender):
+			defr_ranged_str += TOWER_RANGED_BONUS
 		defr_ranged_str += _terrain_bonus(defender.grid_pos, "ranged_defense_bonus")
 		atkr_in_dmg = 30 * (1.041**(defr_ranged_str - attacker.melee_strength * atkr_damaged_penalty))
 	else:
@@ -1096,50 +1661,83 @@ func _cleanup_dead_unit(unit) -> void:
 		NetworkManager.player_orders[player].erase(unit.net_id)
 	died_dmg_report(unit)
 	_handle_neutral_death(unit)
-	var occupant = $GameBoardNode.get_unit_at(unit.grid_pos)
-	var can_clear = false
-	if occupant == unit:
-		$GameBoardNode.vacate(unit.grid_pos)
-		can_clear = true
-	elif occupant == null:
-		can_clear = true
-	if can_clear:
-		var special_pid = _special_tile_pid(unit.grid_pos)
-		if special_pid == "":
-			$GameBoardNode/HexTileMap.set_player_tile(unit.grid_pos, "")
+	$GameBoardNode.vacate(unit.grid_pos, unit)
+	var mobile = $GameBoardNode.get_unit_at(unit.grid_pos)
+	if mobile != null and mobile != unit:
+		$GameBoardNode/HexTileMap.set_player_tile(unit.grid_pos, mobile.player_id)
+	else:
+		var structure = $GameBoardNode.get_structure_unit_at(unit.grid_pos)
+		if structure != null and structure != unit:
+			$GameBoardNode/HexTileMap.set_player_tile(unit.grid_pos, structure.player_id)
 		else:
-			$GameBoardNode/HexTileMap.set_player_tile(unit.grid_pos, special_pid)
+			var special_pid = _special_tile_pid(unit.grid_pos)
+			if special_pid == "":
+				$GameBoardNode/HexTileMap.set_player_tile(unit.grid_pos, "")
+			else:
+				$GameBoardNode/HexTileMap.set_player_tile(unit.grid_pos, special_pid)
 	unit_manager.unit_by_net_id.erase(unit.net_id)
 	unit.queue_free()
 
 func dealt_dmg_report(atkr, defr, atkr_in_dmg, defr_in_dmg, retaliate, atk_mode):
-	if atkr.player_id != local_player_id and defr.player_id != local_player_id:
-		return
-	var report_label = Label.new()
-	if defr.player_id == local_player_id:
-		report_label.text = "Your %s #%d took %d %s damage from %s #%d" % [defr.unit_type, defr.net_id, defr_in_dmg, atk_mode, atkr.unit_type, atkr.net_id]
+	_append_damage_log(atkr, defr, atkr_in_dmg, defr_in_dmg, retaliate, atk_mode)
+	var lines = _damage_lines_for_viewer(local_player_id, atkr, defr, atkr_in_dmg, defr_in_dmg, retaliate, atk_mode)
+	for line in lines:
+		var report_label = Label.new()
+		report_label.text = line
 		dmg_report.add_child(report_label)
-		if retaliate:
-			report_label = Label.new()
-			report_label.text = "Your %s #%d retaliated and dealt %d damage" % [defr.unit_type, defr.net_id, atkr_in_dmg]
-			dmg_report.add_child(report_label)
-	else:
-		report_label.text = "Your %s #%d dealt %d %s damage to %s #%d" % [atkr.unit_type, atkr.net_id, defr_in_dmg, atk_mode, defr.unit_type, defr.net_id]
-		dmg_report.add_child(report_label)
-		if retaliate:
-			report_label = Label.new()
-			report_label.text = "Enemy %s #%d retaliated and dealt %d damage" % [defr.unit_type, defr.net_id, atkr_in_dmg]
-			dmg_report.add_child(report_label)
 
 func died_dmg_report(unit):
-	if unit.player_id != local_player_id and unit.last_damaged_by != local_player_id:
-		return
-	var report_label = Label.new()
-	if unit.player_id == local_player_id:
-		report_label.text = "Your %s #%d died at %s" % [unit.unit_type, unit.net_id, unit.grid_pos]
+	_append_death_log(unit)
+	var lines = _death_lines_for_viewer(local_player_id, unit)
+	for line in lines:
+		var report_label = Label.new()
+		report_label.text = line
 		dmg_report.add_child(report_label)
+
+func _damage_lines_for_viewer(viewer_id: String, atkr, defr, atkr_in_dmg, defr_in_dmg, retaliate, atk_mode) -> Array:
+	if viewer_id == "":
+		return []
+	if atkr.player_id != viewer_id and defr.player_id != viewer_id:
+		return []
+	var lines := []
+	if defr.player_id == viewer_id:
+		lines.append("Your %s #%d took %d %s damage from %s #%d" % [defr.unit_type, defr.net_id, defr_in_dmg, atk_mode, atkr.unit_type, atkr.net_id])
+		if retaliate:
+			lines.append("Your %s #%d retaliated and dealt %d damage" % [defr.unit_type, defr.net_id, atkr_in_dmg])
 	else:
-		report_label.text = "Enemy %s #%d died at %s" % [unit.unit_type, unit.net_id, unit.grid_pos]
+		lines.append("Your %s #%d dealt %d %s damage to %s #%d" % [atkr.unit_type, atkr.net_id, defr_in_dmg, atk_mode, defr.unit_type, defr.net_id])
+		if retaliate:
+			lines.append("Enemy %s #%d retaliated and dealt %d damage" % [defr.unit_type, defr.net_id, atkr_in_dmg])
+	return lines
+
+func _death_lines_for_viewer(viewer_id: String, unit) -> Array:
+	if viewer_id == "":
+		return []
+	if unit.player_id != viewer_id and unit.last_damaged_by != viewer_id:
+		return []
+	if unit.player_id == viewer_id:
+		return ["Your %s #%d died at %s" % [unit.unit_type, unit.net_id, unit.grid_pos]]
+	return ["Enemy %s #%d died at %s" % [unit.unit_type, unit.net_id, unit.grid_pos]]
+
+func _append_damage_log(atkr, defr, atkr_in_dmg, defr_in_dmg, retaliate, atk_mode) -> void:
+	for viewer_id in ["player1", "player2"]:
+		var lines = _damage_lines_for_viewer(viewer_id, atkr, defr, atkr_in_dmg, defr_in_dmg, retaliate, atk_mode)
+		for line in lines:
+			damage_log[viewer_id].append(line)
+
+func _append_death_log(unit) -> void:
+	for viewer_id in ["player1", "player2"]:
+		var lines = _death_lines_for_viewer(viewer_id, unit)
+		for line in lines:
+			damage_log[viewer_id].append(line)
+
+func _render_damage_log_for_local() -> void:
+	for child in dmg_report.get_children():
+		child.queue_free()
+	var lines = damage_log.get(local_player_id, [])
+	for line in lines:
+		var report_label = Label.new()
+		report_label.text = line
 		dmg_report.add_child(report_label)
 
 func _process_spawns():
@@ -1222,43 +1820,65 @@ func _process_attacks():
 		var num_attackers = ranged_attacks.get(target_net_id, []).size() + melee_attacks.get(target_net_id, []).size()
 		for unit_net_id in ranged_attacks[target_net_id]:
 			var unit = unit_manager.get_unit_by_net_id(unit_net_id)
+			if unit == null or not is_instance_valid(unit):
+				continue
 			var target = unit_manager.get_unit_by_net_id(target_net_id)
+			if target == null:
+				continue
 			var dmg_result = calculate_damage(unit, target, "ranged", num_attackers)
-			var atkr_in_dmg = dmg_result[0]
 			var defr_in_dmg = dmg_result[1]
-			var result = $GameBoardNode.get_reachable_tiles(target.grid_pos, 1, "move")
-			var melee_in_range = unit.grid_pos in result["tiles"]
-			if target.is_defending and (target.is_ranged or melee_in_range):
-				ranged_dmg[unit_net_id] = ranged_dmg.get(unit_net_id, 0) + atkr_in_dmg
-				_accumulate_damage_by_player(ranged_sources, unit_net_id, target.player_id, atkr_in_dmg)
+			var ret_dmg = dmg_result[0]
+			var retaliator = _get_retaliator_for_target(target)
+			var retaliate = false
+			if retaliator != null and retaliator.is_defending:
+				var result = $GameBoardNode.get_reachable_tiles(retaliator.grid_pos, 1, "move")
+				var melee_in_range = unit.grid_pos in result["tiles"]
+				if retaliator.is_ranged or melee_in_range:
+					retaliate = true
+					if retaliator != target:
+						ret_dmg = calculate_damage(unit, retaliator, "ranged", num_attackers)[0]
+			if retaliate:
+				ranged_dmg[unit_net_id] = ranged_dmg.get(unit_net_id, 0) + ret_dmg
+				_accumulate_damage_by_player(ranged_sources, unit_net_id, retaliator.player_id, ret_dmg)
 			ranged_dmg[target_net_id] = ranged_dmg.get(target_net_id, 0) + defr_in_dmg
 			_accumulate_damage_by_player(ranged_sources, target_net_id, unit.player_id, defr_in_dmg)
-			dealt_dmg_report(unit, target, atkr_in_dmg, defr_in_dmg, target.is_defending and (target.is_ranged or melee_in_range), "ranged")
+			dealt_dmg_report(unit, target, ret_dmg, defr_in_dmg, retaliate, "ranged")
 	
 	# calculate all melee attack damages done
 	target_ids = melee_attacks.keys()
 	target_ids.sort()
 	for target_unit_net_id in target_ids:
 		var target = unit_manager.get_unit_by_net_id(target_unit_net_id)
+		if target == null:
+			continue
 		var num_attackers = ranged_attacks.get(target_unit_net_id, []).size() + melee_attacks.get(target_unit_net_id, []).size()
-		melee_attacks[target.net_id].sort_custom(func(a,b): return a[1] < b[1])
-		for attack in melee_attacks[target.net_id]:
+		var attacks = melee_attacks.get(target_unit_net_id, [])
+		attacks.sort_custom(func(a,b): return a[1] < b[1])
+		for attack in attacks:
 			var attacker = unit_manager.get_unit_by_net_id(attack[0])
+			if attacker == null or not is_instance_valid(attacker):
+				continue
 			var dmg_result = calculate_damage(attacker, target, "melee", num_attackers)
-			var atkr_in_dmg = dmg_result[0]
 			var defr_in_dmg = dmg_result[1]
-			if target.is_defending:
-				melee_dmg[attacker.net_id] = melee_dmg.get(attacker.net_id, 0) + atkr_in_dmg
-				_accumulate_damage_by_player(melee_sources, attacker.net_id, target.player_id, atkr_in_dmg)
+			var ret_dmg = dmg_result[0]
+			var retaliator = _get_retaliator_for_target(target)
+			var retaliate = retaliator != null and retaliator.is_defending
+			if retaliate and retaliator != target:
+				ret_dmg = calculate_damage(attacker, retaliator, "melee", num_attackers)[0]
+			if retaliate:
+				melee_dmg[attacker.net_id] = melee_dmg.get(attacker.net_id, 0) + ret_dmg
+				_accumulate_damage_by_player(melee_sources, attacker.net_id, retaliator.player_id, ret_dmg)
 			melee_dmg[target.net_id] = melee_dmg.get(target.net_id, 0) + defr_in_dmg
 			_accumulate_damage_by_player(melee_sources, target.net_id, attacker.player_id, defr_in_dmg)
-			dealt_dmg_report(attacker, target, atkr_in_dmg, defr_in_dmg, target.is_defending, "melee")
+			dealt_dmg_report(attacker, target, ret_dmg, defr_in_dmg, retaliate, "melee")
 	
 	# deal ranged damage
 	target_ids = ranged_dmg.keys()
 	target_ids.sort()
 	for target_net_id in target_ids:
 		var target = unit_manager.get_unit_by_net_id(target_net_id)
+		if target == null:
+			continue
 		target.curr_health -= ranged_dmg[target_net_id]
 		_assign_last_damaged_by(target, ranged_sources, target_net_id)
 		# dead unit, remove from all orders and remove node from game
@@ -1272,15 +1892,20 @@ func _process_attacks():
 	target_ids.sort()
 	for target_unit_net_id in target_ids:
 		var target = unit_manager.get_unit_by_net_id(target_unit_net_id)
-		target.curr_health -= melee_dmg[target.net_id]
+		if target == null:
+			continue
+		target.curr_health -= melee_dmg.get(target_unit_net_id, 0)
 	for target_unit_net_id in target_ids:
 		var target = unit_manager.get_unit_by_net_id(target_unit_net_id)
+		if target == null:
+			continue
 		_assign_last_damaged_by(target, melee_sources, target.net_id)
 		# dead unit, remove from all orders and remove node from game
 		if target.curr_health <= 0:
 			if target_unit_net_id in melee_attacks.keys():
-				melee_attacks[target.net_id].sort_custom(func(a,b): return a[1] < b[1])
-				for unit_priority_pair in melee_attacks[target.net_id]:
+				var attacks = melee_attacks.get(target_unit_net_id, [])
+				attacks.sort_custom(func(a,b): return a[1] < b[1])
+				for unit_priority_pair in attacks:
 					var unit = unit_manager.get_unit_by_net_id(unit_priority_pair[0])
 					if unit.curr_health > 0:
 						unit.set_grid_position(target.grid_pos)
@@ -1292,6 +1917,173 @@ func _process_attacks():
 	$UI._draw_attacks()
 	$UI._draw_paths()
 	$UI._draw_supports()
+	$GameBoardNode/FogOfWar._update_fog()
+
+func _apply_sabotage_at(tile: Vector2i) -> void:
+	var state = _structure_state(tile)
+	if state.is_empty():
+		return
+	var status = str(state.get("status", ""))
+	if status == STRUCT_STATUS_BUILDING:
+		buildable_structures.erase(tile)
+		return
+	if status == STRUCT_STATUS_INTACT:
+		state["status"] = STRUCT_STATUS_DISABLED
+		buildable_structures[tile] = state
+		return
+	if status == STRUCT_STATUS_DISABLED:
+		buildable_structures.erase(tile)
+
+func _apply_repair_at(player_id: String, unit, tile: Vector2i) -> void:
+	if unit == null:
+		return
+	if tile == unit.grid_pos:
+		var state = _structure_state(tile)
+		if state.is_empty():
+			return
+		if str(state.get("owner", "")) != player_id:
+			return
+		if str(state.get("status", "")) != STRUCT_STATUS_DISABLED:
+			return
+		state["status"] = STRUCT_STATUS_INTACT
+		buildable_structures[tile] = state
+		return
+	var target = $GameBoardNode.get_structure_unit_at(tile)
+	if target == null or not (target.is_base or target.is_tower):
+		return
+	if target.player_id != player_id:
+		return
+	if target.curr_health >= target.max_health:
+		return
+	target.curr_health = min(target.max_health, target.curr_health + REPAIR_AMOUNT)
+	target.set_health_bar()
+
+func _finish_structure_build(tile: Vector2i, state: Dictionary) -> void:
+	var owner = str(state.get("owner", ""))
+	var stype = str(state.get("type", ""))
+	if stype == STRUCT_SPAWN_TOWER:
+		buildable_structures.erase(tile)
+		if owner == "":
+			return
+		if not tower_positions.has(owner):
+			tower_positions[owner] = []
+		if not spawn_tower_positions.has(owner):
+			spawn_tower_positions[owner] = []
+		tower_positions[owner].append(tile)
+		spawn_tower_positions[owner].append(tile)
+		structure_positions.append(tile)
+		unit_manager.spawn_unit("tower", tile, owner, false)
+		return
+	state["status"] = STRUCT_STATUS_INTACT
+	buildable_structures[tile] = state
+
+func _apply_build_at(player_id: String, unit, order: Dictionary) -> void:
+	if unit == null:
+		return
+	var raw_tile = order.get("target_tile", unit.grid_pos)
+	if typeof(raw_tile) != TYPE_VECTOR2I:
+		return
+	var tile: Vector2i = raw_tile
+	if unit.grid_pos != tile:
+		return
+	var struct_type = str(order.get("structure_type", ""))
+	if struct_type == "":
+		return
+	var state = _structure_state(tile)
+	if state.is_empty():
+		var turns = _structure_build_turns(struct_type, tile)
+		var turn_cost = _structure_turn_cost(struct_type)
+		state = {
+			"type": struct_type,
+			"owner": player_id,
+			"status": STRUCT_STATUS_BUILDING,
+			"build_left": turns,
+			"build_total": turns,
+			"turn_cost": turn_cost
+		}
+	elif str(state.get("type", "")) == STRUCT_ROAD and str(state.get("status", "")) == STRUCT_STATUS_INTACT and struct_type == STRUCT_RAIL:
+		var rail_turns = _structure_build_turns(STRUCT_RAIL, tile)
+		state = {
+			"type": STRUCT_RAIL,
+			"owner": player_id,
+			"status": STRUCT_STATUS_BUILDING,
+			"build_left": rail_turns,
+			"build_total": rail_turns,
+			"turn_cost": _structure_turn_cost(STRUCT_RAIL)
+		}
+	else:
+		if str(state.get("type", "")) != struct_type:
+			return
+		if str(state.get("status", "")) != STRUCT_STATUS_BUILDING:
+			return
+	var turn_cost = int(state.get("turn_cost", _structure_turn_cost(struct_type)))
+	if turn_cost > 0:
+		if player_gold[player_id] < turn_cost:
+			return
+		player_gold[player_id] -= turn_cost
+	var remaining = int(state.get("build_left", 0)) - 1
+	state["build_left"] = remaining
+	if remaining <= 0:
+		_finish_structure_build(tile, state)
+	else:
+		buildable_structures[tile] = state
+
+func _process_engineering() -> void:
+	var sabotage_orders := []
+	var repair_orders := []
+	var build_orders := []
+
+	for player in ["player1", "player2"]:
+		var unit_ids = player_orders[player].keys()
+		unit_ids.sort()
+		for unit_net_id in unit_ids:
+			if unit_net_id is not int:
+				continue
+			var order = player_orders[player][unit_net_id]
+			match order.get("type", ""):
+				"sabotage":
+					sabotage_orders.append({"player": player, "unit_net_id": unit_net_id, "order": order})
+				"repair":
+					repair_orders.append({"player": player, "unit_net_id": unit_net_id, "order": order})
+				"build":
+					build_orders.append({"player": player, "unit_net_id": unit_net_id, "order": order})
+
+	for entry in sabotage_orders:
+		var player_id = entry["player"]
+		var unit = unit_manager.get_unit_by_net_id(entry["unit_net_id"])
+		if unit == null or unit.curr_health <= 0:
+			_remove_player_order(player_id, entry["unit_net_id"])
+			continue
+		var raw_tile = entry["order"].get("target_tile", unit.grid_pos)
+		if typeof(raw_tile) != TYPE_VECTOR2I:
+			_remove_player_order(player_id, entry["unit_net_id"])
+			continue
+		var tile: Vector2i = raw_tile
+		if tile == unit.grid_pos:
+			_apply_sabotage_at(tile)
+		_remove_player_order(player_id, entry["unit_net_id"])
+
+	for entry in repair_orders:
+		var player_id = entry["player"]
+		var unit = unit_manager.get_unit_by_net_id(entry["unit_net_id"])
+		if unit == null or unit.curr_health <= 0:
+			_remove_player_order(player_id, entry["unit_net_id"])
+			continue
+		var raw_tile = entry["order"].get("target_tile", unit.grid_pos)
+		if typeof(raw_tile) == TYPE_VECTOR2I:
+			_apply_repair_at(player_id, unit, raw_tile)
+		_remove_player_order(player_id, entry["unit_net_id"])
+
+	for entry in build_orders:
+		var player_id = entry["player"]
+		var unit = unit_manager.get_unit_by_net_id(entry["unit_net_id"])
+		if unit == null or unit.curr_health <= 0:
+			_remove_player_order(player_id, entry["unit_net_id"])
+			continue
+		_apply_build_at(player_id, unit, entry["order"])
+		_remove_player_order(player_id, entry["unit_net_id"])
+
+	refresh_structure_markers()
 	$GameBoardNode/FogOfWar._update_fog()
 
 func _process_neutral_attacks() -> void:
@@ -1707,17 +2499,47 @@ func _mg_resolve_chain_from_sink(mg: MovementGraph, entrants_map: Dictionary, st
 
 
 
+func _handle_trap_trigger(unit, tile: Vector2i) -> bool:
+	if unit == null:
+		return false
+	var state = _structure_state(tile)
+	if state.is_empty():
+		return false
+	if str(state.get("type", "")) != STRUCT_TRAP:
+		return false
+	if str(state.get("status", "")) != STRUCT_STATUS_INTACT:
+		return false
+	var trap_owner = str(state.get("owner", ""))
+	var unit_owner = unit.player_id
+	if trap_owner == unit_owner:
+		return false
+	unit.curr_health -= TRAP_DAMAGE
+	unit.last_damaged_by = trap_owner
+	if unit.curr_health <= 0:
+		_cleanup_dead_unit(unit)
+	else:
+		unit.set_health_bar()
+	state["status"] = STRUCT_STATUS_DISABLED
+	buildable_structures[tile] = state
+	unit.is_moving = false
+	_remove_player_order(unit_owner, unit.net_id)
+	return true
+
 func _process_move():
-	var units: Array = $GameBoardNode.get_all_units_flat()
+	var units: Array = $GameBoardNode.get_all_units_flat(false)
 	var mg = MovementGraph.new()
 	mg.build(units)
+	var start_positions := {}
+	for u in units:
+		if u != null:
+			start_positions[u.net_id] = u.grid_pos
 	
 	# 1. Resolve enemy swaps first
 	for pair in mg.detect_enemy_swaps():
 		_mg_resolve_enemy_swap(pair["a"], pair["b"])
 
 	# Rebuild after swaps
-	units = $GameBoardNode.get_all_units_flat()
+	units = $GameBoardNode.get_all_units_flat(false)
 	mg.build(units)
 
 	# 2. Determine entrants and provisional winners on single‑entry tiles
@@ -1742,7 +2564,7 @@ func _process_move():
 			for t in touched.keys():
 				rotated_tiles[t] = true
 	
-	units = $GameBoardNode.get_all_units_flat()
+	units = $GameBoardNode.get_all_units_flat(false)
 	mg.build(units)
 	entrants_all = mg.entries_all()
 	
@@ -1780,7 +2602,7 @@ func _process_move():
 						winner.is_moving = true
 
 	# Rebuild graph & entrants after these fights (is_moving/HP may have changed)
-	units = $GameBoardNode.get_all_units_flat()
+	units = $GameBoardNode.get_all_units_flat(false)
 	mg.build(units)
 	entrants_all = mg.entries_all()
 
@@ -1797,7 +2619,7 @@ func _process_move():
 	for t in sink_tiles:
 		_mg_resolve_chain_from_sink(mg, entrants_all, t, rotated_tiles)
 
-	units = $GameBoardNode.get_all_units_flat()
+	units = $GameBoardNode.get_all_units_flat(false)
 	mg.build(units)
 	entrants_all = mg.entries_all()
 	
@@ -1820,6 +2642,17 @@ func _process_move():
 					else:
 						committed.erase(u.net_id)
 	
+	var triggered_trap = false
+	for u in units:
+		if u == null or u.curr_health <= 0:
+			continue
+		if start_positions.get(u.net_id, u.grid_pos) == u.grid_pos:
+			continue
+		if _handle_trap_trigger(u, u.grid_pos):
+			triggered_trap = true
+	if triggered_trap:
+		refresh_structure_markers()
+
 	# 8. Refresh the UI and fog each tick
 	$UI._draw_attacks()
 	$UI._draw_paths()
@@ -1849,10 +2682,12 @@ func _do_execution() -> void:
 	$GameBoardNode/OrderReminderMap.clear()
 	for child in dmg_report.get_children():
 		child.queue_free()
+	damage_log = { "player1": [], "player2": [] }
 	neutral_step_index = -1
 	exec_steps = [
 		func(): _process_spawns(),
 		func(): _process_attacks(),
+		func(): _process_engineering(),
 		func(): _process_move()
 	]
 	step_index = 0
@@ -1888,6 +2723,7 @@ func start_phase_locally(phase_name: String) -> void:
 			"UPKEEP":
 				current_phase = Phase.UPKEEP
 				$UI/CancelGameButton.visible = false
+				$UI/DamagePanel.visible = true
 			"ORDERS":
 				current_phase = Phase.ORDERS
 				current_player = local_player_id
@@ -1928,6 +2764,8 @@ func buy_unit(player: String, unit_type: String, grid_pos: Vector2i) -> Dictiona
 		scene = scout_scene
 	elif unit_type.to_lower() == "miner":
 		scene = miner_scene
+	elif unit_type.to_lower() == "builder":
+		scene = unit_manager.builder_scene
 	elif unit_type.to_lower() == "phalanx":
 		scene = phalanx_scene
 	elif unit_type.to_lower() == "cavalry":
@@ -1989,19 +2827,20 @@ func undo_buy_unit(player_id: String, unit_net_id: int) -> Dictionary:
 	result["refund"] = refund
 	player_orders[player_id].erase(unit.net_id)
 	NetworkManager.player_orders[player_id].erase(unit.net_id)
-	var occupant = $GameBoardNode.get_unit_at(unit.grid_pos)
-	var can_clear = false
-	if occupant == unit:
-		$GameBoardNode.vacate(unit.grid_pos)
-		can_clear = true
-	elif occupant == null:
-		can_clear = true
-	if can_clear:
-		var special_pid = _special_tile_pid(unit.grid_pos)
-		if special_pid == "":
-			$GameBoardNode/HexTileMap.set_player_tile(unit.grid_pos, "")
+	$GameBoardNode.vacate(unit.grid_pos, unit)
+	var mobile = $GameBoardNode.get_unit_at(unit.grid_pos)
+	if mobile != null and mobile != unit:
+		$GameBoardNode/HexTileMap.set_player_tile(unit.grid_pos, mobile.player_id)
+	else:
+		var structure = $GameBoardNode.get_structure_unit_at(unit.grid_pos)
+		if structure != null and structure != unit:
+			$GameBoardNode/HexTileMap.set_player_tile(unit.grid_pos, structure.player_id)
 		else:
-			$GameBoardNode/HexTileMap.set_player_tile(unit.grid_pos, special_pid)
+			var special_pid = _special_tile_pid(unit.grid_pos)
+			if special_pid == "":
+				$GameBoardNode/HexTileMap.set_player_tile(unit.grid_pos, "")
+			else:
+				$GameBoardNode/HexTileMap.set_player_tile(unit.grid_pos, special_pid)
 	unit_manager.unit_by_net_id.erase(unit.net_id)
 	unit.queue_free()
 	result["ok"] = true

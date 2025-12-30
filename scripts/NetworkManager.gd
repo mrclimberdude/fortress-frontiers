@@ -103,6 +103,9 @@ func rpc_request_state() -> void:
 		return
 	var sender = multiplayer.get_remote_sender_id()
 	var state = turn_mgr.get_state_snapshot()
+	var viewer = _peer_id_to_player_id(sender)
+	if viewer != "" and turn_mgr.has_method("get_state_snapshot_for"):
+		state = turn_mgr.get_state_snapshot_for(viewer)
 	rpc_id(sender, "rpc_state_snapshot", state)
 	if turn_mgr.current_phase == turn_mgr.Phase.EXECUTION:
 		rpc_id(sender, "rpc_execution_paused", turn_mgr.step_index, turn_mgr.neutral_step_index)
@@ -223,14 +226,22 @@ func broadcast_state(state: Dictionary) -> void:
 		return
 	if not mp.is_server():
 		return
-	rpc("rpc_state_snapshot", state)
+	if client_peer_id > 0:
+		var viewer = _peer_id_to_player_id(client_peer_id)
+		var snapshot = state
+		if viewer != "" and turn_mgr.has_method("get_state_snapshot_for"):
+			snapshot = turn_mgr.get_state_snapshot_for(viewer)
+		rpc_id(client_peer_id, "rpc_state_snapshot", snapshot)
 
 func request_state() -> void:
 	var mp = get_tree().get_multiplayer()
 	if mp == null or mp.multiplayer_peer == null:
 		return
 	if mp.is_server():
-		emit_signal("state_snapshot_received", turn_mgr.get_state_snapshot())
+		var state = turn_mgr.get_state_snapshot()
+		if turn_mgr.has_method("get_state_snapshot_for"):
+			state = turn_mgr.get_state_snapshot_for(turn_mgr.local_player_id)
+		emit_signal("state_snapshot_received", state)
 	else:
 		rpc_id(server_peer_id, "rpc_request_state")
 

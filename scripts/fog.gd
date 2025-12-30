@@ -26,6 +26,8 @@ func _update_fog():
 		if unit.player_id != $"../..".local_player_id:
 			unit.visible = false
 	for structure in $"..".get_all_structures():
+		if structure == null or not is_instance_valid(structure):
+			continue
 		structure.z_index = 6
 	for player in ["player1", "player2"]:
 		# reset all visible cells to explored
@@ -54,16 +56,17 @@ func _update_fog():
 					set_cell(cell, tile_set.get_source_id(0), tint, 1)
 					if cell in $"../..".structure_positions:
 						var structure = $"..".get_structure_at(cell)
-						structure.z_index = 99
+						if structure != null and is_instance_valid(structure):
+							structure.z_index = 99
 						if cell in $"../..".mines["unclaimed"]:
 							tint = Vector2i(1,1)
 						elif cell in $"../..".mines["player1"]:
 							tint = Vector2i(1,3)
 						elif cell in $"../..".mines["player2"]:
 							tint = Vector2i(3,3)
-						elif structure.player_id == "player1":
+						elif structure != null and structure.player_id == "player1":
 							tint = Vector2i(1,3)
-						elif structure.player_id == "player2":
+						elif structure != null and structure.player_id == "player2":
 							tint = Vector2i(3,3)
 						else:
 							tint = Vector2i(2,0)
@@ -74,11 +77,26 @@ func _update_fog():
 					$"../ExploredFog".erase_cell(cell)
 					if cell in $"../..".structure_positions:
 						var structure = $"..".get_structure_at(cell)
-						structure.z_index = 6
-					if $"..".is_occupied(cell):
-						$"..".get_unit_at(cell).visible = true
+						if structure != null and is_instance_valid(structure):
+							structure.z_index = 6
+					var unit = $"..".get_unit_at(cell)
+					if unit != null:
+						var tm = $"../.."
+						if tm != null and tm.has_method("is_unit_hidden_to_local") and tm.is_unit_hidden_to_local(unit):
+							unit.visible = false
+						else:
+							unit.visible = true
+					var structure_unit = $"..".get_structure_unit_at(cell)
+					if structure_unit != null:
+						structure_unit.visible = true
 	if not $"../../UI/DevPanel/VBoxContainer/FogCheckButton".button_pressed:
 		for unit in all_units:
-			unit.visible = true
+			var tm = $"../.."
+			if tm != null and tm.has_method("is_unit_hidden_to_local") and tm.is_unit_hidden_to_local(unit):
+				unit.visible = false
+			else:
+				unit.visible = true
 	if $"../..".has_method("update_neutral_markers"):
 		$"../..".update_neutral_markers()
+	if $"../..".has_method("refresh_structure_markers"):
+		$"../..".refresh_structure_markers()

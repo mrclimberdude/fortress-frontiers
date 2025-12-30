@@ -29,6 +29,7 @@ extends Node2D
 
 @export var is_base:         bool = false
 @export var is_miner:        bool = false
+@export var is_builder:      bool = false
 @export var is_phalanx:      bool = false
 @export var is_tower:        bool = false
 @export var unit_type:       String = ""
@@ -61,7 +62,7 @@ func set_grid_position(pos: Vector2i) -> void:
 	var old_pos = grid_pos
 	# 1) Clear previous tile
 	if board and board.has_method("vacate") and old_pos:
-		board.vacate(old_pos)
+		board.vacate(old_pos, self)
 		if old_pos in turn_mgr.camps["basic"]:
 			map_layer.set_player_tile(old_pos, "camp")
 		elif old_pos in turn_mgr.camps["dragon"]:

@@ -8,6 +8,7 @@ extends Node2D
 @export var soldier_scene: PackedScene = preload("res://scenes/Soldier.tscn")
 @export var scout_scene: PackedScene = preload("res://scenes/Scout.tscn")
 @export var miner_scene: PackedScene = preload("res://scenes/Miner.tscn")
+@export var builder_scene: PackedScene = preload("res://scenes/Builder.tscn")
 @export var phalanx_scene: PackedScene = preload("res://scenes/Tank.tscn")
 @export var cavalry_scene: PackedScene = preload("res://scenes/Cavalry.tscn")
 @export var camp_archer_scene: PackedScene = preload("res://scenes/CampArcher.tscn")
@@ -55,6 +56,8 @@ func spawn_unit(unit_type: String, cell: Vector2i, owner: String, undo: bool, fo
 			scene = scout_scene
 		"miner":
 			scene = miner_scene
+		"builder":
+			scene = builder_scene
 		"phalanx":
 			scene = phalanx_scene
 		"cavalry":
