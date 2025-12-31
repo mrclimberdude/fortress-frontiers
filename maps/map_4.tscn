@@ -2,7 +2,7 @@
 
 [ext_resource type="TileSet" uid="uid://vpqqir5dxo6" path="res://terrain.tres" id="1_q0gj0"]
 
-[node name="Map1" type="Node2D"]
+[node name="Map4" type="Node2D"]
 
 [node name="UnderlyingReference" type="TileMapLayer" parent="."]
 visible = false
