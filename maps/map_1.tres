@@ -1,7 +1,7 @@
 [gd_resource type="Resource" script_class="MapData" load_steps=3 format=3 uid="uid://dc55lgc5pbse6"]
 
 [ext_resource type="Script" path="res://scripts/MapData.gd" id="1_1otxv"]
-[ext_resource type="PackedScene" uid="uid://gfbhkrugfx0k" path="res://maps/map_1.tscn" id="2_5dp4v"]
+[ext_resource type="PackedScene" uid="uid://geca2mf2s8h" path="res://maps/map_1.tscn" id="2_5dp4v"]
 
 [resource]
 script = ExtResource("1_1otxv")

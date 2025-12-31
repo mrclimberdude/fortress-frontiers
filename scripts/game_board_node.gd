@@ -172,7 +172,8 @@ func _terrain_move_cost_for_unit(cell: Vector2i, unit) -> int:
 	var cost = _terrain_move_cost(cell)
 	if unit == null:
 		return cost
-	var terrain = _terrain_type(cell)
+	var td = _get_terrain_tile_data(cell)
+	var terrain = "" if td == null else str(td.get_custom_data("terrain"))
 	if terrain == "forest":
 		var unit_type = str(unit.unit_type).to_lower()
 		if unit_type == "scout":
@@ -219,6 +220,7 @@ func get_reachable_tiles(start: Vector2i, range: float, mode: String) -> Diction
 	var queue: Array = []
 	var spawns = [start]
 	var mover_player: String = ""
+	var mover = null
 	
 	if mode == "dev_place":
 		return {"tiles": hex_map.used_cells, "prev": start}
@@ -234,7 +236,7 @@ func get_reachable_tiles(start: Vector2i, range: float, mode: String) -> Diction
 		for tile in spawn_points:
 			spawns.append(tile)
 	elif mode == "move":
-		var mover = get_unit_at(start)
+		mover = get_unit_at(start)
 		if mover != null:
 			mover_player = mover.player_id
 	
