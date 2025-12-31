@@ -13,7 +13,7 @@
 [ext_resource type="PackedScene" uid="uid://y3gcjhi3ho0o" path="res://scenes/Tank.tscn" id="6_w5uqb"]
 [ext_resource type="PackedScene" uid="uid://bj1f1demforgr" path="res://scenes/Cavalry.tscn" id="7_hl2y5"]
 [ext_resource type="Script" uid="uid://srlpr2fln13a" path="res://scripts/camera.gd" id="7_rs5it"]
-[ext_resource type="Resource" uid="uid://c1o6wwhlvvogu" path="res://maps/map_1.tres" id="8_8auva"]
+[ext_resource type="Resource" uid="uid://c1o6wwhlvvogu" path="res://maps/map_template.tres" id="8_8auva"]
 [ext_resource type="Resource" uid="uid://x6d0njhmctsc" path="res://maps/map_2.tres" id="9_hrnlr"]
 [ext_resource type="Texture2D" uid="uid://cpwqobvniqcwh" path="res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Geometric/HSI_icon_083.png" id="10_o2enx"]
 [ext_resource type="Script" uid="uid://cvqvvdw265adw" path="res://scripts/fog.gd" id="10_sax53"]
