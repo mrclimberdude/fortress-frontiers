@@ -24,5 +24,4 @@ export_presets.cfg
 *.exe
 *.pck
 
-assets/
 addons/
