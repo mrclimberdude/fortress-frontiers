@@ -100,7 +100,7 @@ const DRAGON_RESPAWN_DISPLAY_TURNS: int = 5
 @export var dragon_ranged_bonus: int = 3
 @export var camp_archer_range: int = 2
 @export var dragon_fire_range: int = 3
-@export var dragon_cleave_targets: int = 3
+@export var dragon_cleave_targets: int = 2
 
 const STRUCT_FORTIFICATION: String = "fortification"
 const STRUCT_ROAD: String = "road"
@@ -686,6 +686,9 @@ func _roll_dragon_respawn() -> int:
 	return rng.randi_range(dragon_respawn_min, dragon_respawn_max)
 
 func _reward_report(player_id: String, text: String) -> void:
+	if not damage_log.has(player_id):
+		damage_log[player_id] = []
+	damage_log[player_id].append(text)
 	if player_id != local_player_id:
 		return
 	var report_label = Label.new()
@@ -766,6 +769,8 @@ func _load_map_by_index(map_index: int) -> void:
 	tmap.get_parent().remove_child(tmap)
 	$GameBoardNode.add_child(tmap)
 	terrain_overlay = tmap
+	if $GameBoardNode != null:
+		$GameBoardNode.terrain_overlay = tmap
 	md.populate_from_terrain(terrain_overlay)
 	base_positions = md.base_positions
 	tower_positions = md.tower_positions
@@ -1000,6 +1005,8 @@ func _reset_map_state() -> void:
 	if terrain_overlay != null:
 		terrain_overlay.queue_free()
 		terrain_overlay = null
+		if $GameBoardNode != null:
+			$GameBoardNode.terrain_overlay = null
 	var hex = $GameBoardNode/HexTileMap
 	var src = hex.tile_set.get_source_id(0)
 	for cell in hex.get_used_cells():
@@ -1352,7 +1359,7 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 				if $GameBoardNode.is_enemy_structure_tile(step, unit.player_id):
 					result["reason"] = "invalid_path"
 					return result
-				total_cost += float($GameBoardNode.get_move_cost(step))
+				total_cost += float($GameBoardNode.get_move_cost(step, unit))
 				if total_cost > float(unit.move_range):
 					result["reason"] = "invalid_path"
 					return result
@@ -1849,15 +1856,21 @@ func _process_spawns():
 			var order = orders_source[player][unit_net_id]
 			if order["type"] == "defend":
 				var unit = unit_manager.get_unit_by_net_id(unit_net_id)
+				if unit == null:
+					continue
 				unit.is_defending = true
 			if order["type"] == "heal":
 				var unit = unit_manager.get_unit_by_net_id(unit_net_id)
+				if unit == null:
+					continue
 				unit.is_healing = true
 	
 	for player in ["player1", "player2"]:
 		for unit_net_id in orders_source[player].keys():
 			if orders_source[player][unit_net_id]["type"] == "move":
 				var unit = unit_manager.get_unit_by_net_id(unit_net_id)
+				if unit == null:
+					continue
 				unit.is_moving = true
 				unit.moving_to = orders_source[player][unit_net_id]["path"][1]
 	$UI._draw_all()
@@ -1883,14 +1896,14 @@ func _process_attacks():
 				var unit = unit_manager.get_unit_by_net_id(unit_net_id)
 				var target = unit_manager.get_unit_by_net_id(order["target_unit_net_id"])
 				# check to make sure target unit still exists
-				if is_instance_valid(target):
+				if unit != null and is_instance_valid(target):
 					ranged_attacks[target.net_id] = ranged_attacks.get(target.net_id, [])
 					ranged_attacks[target.net_id].append(unit.net_id)
 				player_orders[player].erase(unit.net_id)
 			elif order["type"] == "melee":
 				var unit = unit_manager.get_unit_by_net_id(unit_net_id)
 				var target = unit_manager.get_unit_by_net_id(order["target_unit_net_id"])
-				if is_instance_valid(target):
+				if unit != null and is_instance_valid(target):
 					melee_attacks[order["target_unit_net_id"]] = melee_attacks.get(order["target_unit_net_id"], [])
 					melee_attacks[order["target_unit_net_id"]].append([unit.net_id, order["priority"]])
 				player_orders[player].erase(unit.net_id)
@@ -2200,18 +2213,45 @@ func _process_neutral_attacks() -> void:
 					_queue_neutral_attack(neutral, candidates[idx], "ranged", neutral_dmg, neutral_sources, retaliation_dmg, retaliation_sources)
 					attacked = true
 		elif neutral.unit_type == DRAGON_TYPE:
-			var fire_candidates = _units_in_range_los(neutral.grid_pos, dragon_fire_range)
-			var fire_pair = _pick_adjacent_pair(fire_candidates, neutral.grid_pos)
-			if fire_pair.size() == 2:
-				_queue_neutral_attack(neutral, fire_pair[0], "ranged", neutral_dmg, neutral_sources, retaliation_dmg, retaliation_sources)
-				_queue_neutral_attack(neutral, fire_pair[1], "ranged", neutral_dmg, neutral_sources, retaliation_dmg, retaliation_sources)
-				attacked = true
 			var cleave_candidates = _units_in_range(neutral.grid_pos, 1)
 			var cleave_targets = _pick_weighted_targets(cleave_candidates, neutral.grid_pos, dragon_cleave_targets)
+			var melee_set := {}
 			for target in cleave_targets:
+				melee_set[target.net_id] = true
 				_queue_neutral_attack(neutral, target, "melee", neutral_dmg, neutral_sources, retaliation_dmg, retaliation_sources)
 			if cleave_targets.size() > 0:
 				attacked = true
+			var fire_candidates = _units_in_range_los(neutral.grid_pos, dragon_fire_range)
+			if fire_candidates.size() > 0:
+				var pair_bonus := 2.5
+				var overlap_penalty := 0.4
+				var options := []
+				var weights := []
+				# Favor adjacent pairs but still allow single-target fire, with overlap penalties.
+				for unit in fire_candidates:
+					var w = _target_weight(unit, neutral.grid_pos)
+					if melee_set.has(unit.net_id):
+						w *= overlap_penalty
+					options.append([unit])
+					weights.append(w)
+				for i in range(fire_candidates.size()):
+					for j in range(i + 1, fire_candidates.size()):
+						var a = fire_candidates[i]
+						var b = fire_candidates[j]
+						if _hex_distance(a.grid_pos, b.grid_pos) != 1:
+							continue
+						var w = _target_weight(a, neutral.grid_pos) * _target_weight(b, neutral.grid_pos) * pair_bonus
+						if melee_set.has(a.net_id):
+							w *= overlap_penalty
+						if melee_set.has(b.net_id):
+							w *= overlap_penalty
+						options.append([a, b])
+						weights.append(w)
+				var idx = _pick_weighted_index(weights)
+				if idx >= 0:
+					for target in options[idx]:
+						_queue_neutral_attack(neutral, target, "ranged", neutral_dmg, neutral_sources, retaliation_dmg, retaliation_sources)
+					attacked = true
 		if not attacked and neutral.curr_health < neutral.max_health:
 			neutral.curr_health = min(neutral.max_health, neutral.curr_health + neutral.regen)
 			neutral.set_health_bar()

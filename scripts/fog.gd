@@ -1,4 +1,4 @@
-extends TileMapLayer
+﻿extends TileMapLayer
 
 @export var columns: int      = 18
 @export var rows:    int      = 15
@@ -21,6 +21,12 @@ func _ready() -> void:
 func _update_fog():
 	var units = $"..".get_all_units()
 	var all_units = $"..".get_all_units_flat()
+	var explored = $"../ExploredFog"
+	var terrain_map = $"../TerrainMap"
+	var hex_map = $"../HexTileMap"
+	if terrain_map != null and explored != null:
+		if explored.tile_set != terrain_map.tile_set:
+			explored.tile_set = terrain_map.tile_set
 	# make all non-local units invisible (including neutrals)
 	for unit in all_units:
 		if unit.player_id != $"../..".local_player_id:
@@ -58,19 +64,28 @@ func _update_fog():
 						var structure = $"..".get_structure_at(cell)
 						if structure != null and is_instance_valid(structure):
 							structure.z_index = 99
-						if cell in $"../..".mines["unclaimed"]:
-							tint = Vector2i(1,1)
-						elif cell in $"../..".mines["player1"]:
-							tint = Vector2i(1,3)
-						elif cell in $"../..".mines["player2"]:
-							tint = Vector2i(3,3)
-						elif structure != null and structure.player_id == "player1":
-							tint = Vector2i(1,3)
-						elif structure != null and structure.player_id == "player2":
-							tint = Vector2i(3,3)
+					if explored != null and terrain_map != null:
+						var src_id = terrain_map.get_cell_source_id(cell)
+						if src_id >= 0:
+							var atlas = terrain_map.get_cell_atlas_coords(cell)
+							var alt = terrain_map.get_cell_alternative_tile(cell)
+							explored.set_cell(cell, src_id, atlas, alt)
 						else:
-							tint = Vector2i(2,0)
-					$"../ExploredFog".set_cell(cell, tile_set.get_source_id(0), tint)
+							var tm = $"../.."
+							var is_camp = false
+							var is_dragon = false
+							if tm != null:
+								is_camp = cell in tm.camps["basic"]
+								is_dragon = cell in tm.camps["dragon"]
+							if is_camp or is_dragon:
+								var camp_key = "dragon" if is_dragon else "camp"
+								var camp_atlas = hex_map.camp_atlas_tiles.get(camp_key, hex_map.ground_tile)
+								var terrain_src = terrain_map.tile_set.get_source_id(0)
+								explored.set_cell(cell, terrain_src, camp_atlas)
+							else:
+								explored.erase_cell(cell)
+					elif explored != null:
+						explored.erase_cell(cell)
 						
 				if visiblity[player][cell] == 2:
 					erase_cell(cell)

@@ -569,6 +569,9 @@ func _on_unit_selected(unit: Node) -> void:
 		action_menu.add_item("Repair", 8)
 
 func _on_action_selected(id: int) -> void:
+	if currently_selected_unit == null or not is_instance_valid(currently_selected_unit):
+		action_menu.hide()
+		return
 	match id:
 		0:
 			var player_id = currently_selected_unit.player_id
@@ -658,6 +661,10 @@ func _on_action_selected(id: int) -> void:
 	action_menu.hide()
 
 func _clear_all_drawings():
+	var preview_node = hex.get_node_or_null("PreviewPathArrows")
+	if preview_node != null:
+		for child in preview_node.get_children():
+			child.queue_free()
 	for child in hex.get_node("PathArrows").get_children():
 		child.queue_free()
 	for child in hex.get_node("AttackArrows").get_children():
@@ -668,6 +675,10 @@ func _clear_all_drawings():
 		child.queue_free()
 	for child in hex.get_node("DefendingSprites").get_children():
 		child.queue_free()
+	var build_node = hex.get_node_or_null("BuildingSprites")
+	if build_node != null:
+		for child in build_node.get_children():
+			child.queue_free()
 	var repair_node = hex.get_node_or_null("RepairSprites")
 	if repair_node != null:
 		for child in repair_node.get_children():
@@ -676,6 +687,23 @@ func _clear_all_drawings():
 	if sabotage_node != null:
 		for child in sabotage_node.get_children():
 			child.queue_free()
+
+func _reset_ui_for_snapshot() -> void:
+	action_menu.hide()
+	build_menu.hide()
+	finish_move_button.visible = false
+	placing_unit = ""
+	currently_selected_unit = null
+	action_mode = ""
+	current_path = []
+	current_reachable = {}
+	enemy_tiles = []
+	support_tiles = []
+	repair_tiles = []
+	remaining_moves = 0.0
+	game_board.clear_highlights()
+	_clear_all_drawings()
+	_hide_build_hover()
 
 func _on_done_pressed():
 	game_board.clear_highlights()
@@ -809,6 +837,8 @@ func _draw_attacks():
 				# calculate direction and size for attack arrow
 				var attacker = unit_mgr.get_unit_by_net_id(order["unit_net_id"])
 				var target = unit_mgr.get_unit_by_net_id(order["target_unit_net_id"])
+				if attacker == null or target == null:
+					continue
 				var dmg = $"..".calculate_damage(attacker, target, order["type"], 1)
 				var p1 = hex.map_to_world(attacker.grid_pos) + hex.tile_size * 0.5
 				var p2 = hex.map_to_world(order["target_tile"]) + hex.tile_size * 0.5
@@ -850,6 +880,8 @@ func _draw_supports():
 				
 				# calculate direction and size for support arrow
 				var supporter = order["unit"]
+				if supporter == null:
+					continue
 				var p1 = hex.map_to_world(supporter.grid_pos) + hex.tile_size * 0.5
 				var p2 = hex.map_to_world(order["target_tile"]) + hex.tile_size * 0.5
 				var arrow = SupportArrowScene.instantiate() as Sprite2D
@@ -881,7 +913,10 @@ func _draw_heals():
 				var root = Node2D.new()
 				heal_node.add_child(root)
 				var heart = HealScene.instantiate() as Sprite2D
-				heart.position = hex.map_to_world(unit_mgr.get_unit_by_net_id(order["unit_net_id"]).grid_pos) + hex.tile_size * 0.65
+				var unit = unit_mgr.get_unit_by_net_id(order["unit_net_id"])
+				if unit == null:
+					continue
+				heart.position = hex.map_to_world(unit.grid_pos) + hex.tile_size * 0.65
 				heart.z_index = 10
 				root.add_child(heart)
 
@@ -901,7 +936,10 @@ func _draw_defends():
 				var root = Node2D.new()
 				defend_node.add_child(root)
 				var defend = DefendScene.instantiate() as Sprite2D
-				defend.position = hex.map_to_world(unit_mgr.get_unit_by_net_id(order["unit_net_id"]).grid_pos) + hex.tile_size * 0.5
+				var unit = unit_mgr.get_unit_by_net_id(order["unit_net_id"])
+				if unit == null:
+					continue
+				defend.position = hex.map_to_world(unit.grid_pos) + hex.tile_size * 0.5
 				defend.z_index = 0
 				root.add_child(defend)
 
@@ -1080,6 +1118,7 @@ func finish_current_path():
 	$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
 	
 func _on_state_applied() -> void:
+	_reset_ui_for_snapshot()
 	if turn_mgr.current_phase == turn_mgr.Phase.ORDERS:
 		current_player = turn_mgr.local_player_id
 		gold_lbl.text = "Current Gold: %d" % [turn_mgr.player_gold.get(current_player, 0)]
@@ -1131,7 +1170,7 @@ func _unhandled_input(ev):
 		current_path += path
 		var cost_used: float = 0.0
 		for step_cell in path:
-			cost_used += game_board.get_move_cost(step_cell)
+			cost_used += game_board.get_move_cost(step_cell, currently_selected_unit)
 		remaining_moves -= cost_used
 		
 		_draw_partial_path()

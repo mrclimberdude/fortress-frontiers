@@ -141,6 +141,12 @@ func _get_terrain_overlay() -> TileMapLayer:
 		terrain_overlay = null
 	if terrain_overlay == null:
 		terrain_overlay = get_node_or_null("TerrainMap")
+		if terrain_overlay == null:
+			var tm = get_parent()
+			if tm != null:
+				var overlay = tm.get("terrain_overlay")
+				if overlay != null:
+					terrain_overlay = overlay
 	return terrain_overlay
 
 func _get_terrain_tile_data(cell: Vector2i) -> TileData:
@@ -162,14 +168,25 @@ func _terrain_move_cost(cell: Vector2i) -> int:
 	var cost = int(td.get_custom_data("move_cost"))
 	return 1 if cost <= 0 else cost
 
+func _terrain_move_cost_for_unit(cell: Vector2i, unit) -> int:
+	var cost = _terrain_move_cost(cell)
+	if unit == null:
+		return cost
+	var terrain = _terrain_type(cell)
+	if terrain == "forest":
+		var unit_type = str(unit.unit_type).to_lower()
+		if unit_type == "scout":
+			return 1
+	return cost
+
 func _terrain_blocks_sight(cell: Vector2i) -> bool:
 	var td = _get_terrain_tile_data(cell)
 	if td == null:
 		return false
 	return bool(td.get_custom_data("blocks_sight"))
 
-func get_move_cost(cell: Vector2i) -> float:
-	var cost = float(_terrain_move_cost(cell))
+func get_move_cost(cell: Vector2i, unit = null) -> float:
+	var cost = float(_terrain_move_cost_for_unit(cell, unit))
 	var tm = $".."
 	if tm != null and tm.has_method("get_structure_move_cost"):
 		cost = float(tm.get_structure_move_cost(cell, cost))
@@ -278,7 +295,7 @@ func get_reachable_tiles(start: Vector2i, range: float, mode: String) -> Diction
 					continue
 				if is_enemy_structure_tile(neighbor, mover_player):
 					continue
-				var step_cost: float = get_move_cost(neighbor)
+				var step_cost: float = get_move_cost(neighbor, mover)
 				var new_cost: float = float(visited[current]) + step_cost
 				if new_cost > range_limit:
 					continue
