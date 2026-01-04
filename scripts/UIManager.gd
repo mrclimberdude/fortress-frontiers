@@ -70,6 +70,7 @@ const MENU_ID_LOAD_AUTOSAVE: int = 3
 const MENU_ID_UNIT_STATS: int = 10
 const MENU_ID_BUILDING_STATS: int = 11
 const MENU_ID_DEV_MODE: int = 12
+const MENU_ID_QUIT: int = 13
 const MENU_ID_SLOT_BASE: int = 100
 
 const BUILD_OPTIONS = [
@@ -247,6 +248,8 @@ func _init_menu() -> void:
 	menu_popup.add_separator()
 	for i in range(SAVE_SLOT_COUNT_UI):
 		menu_popup.add_radio_check_item("Save Slot %d" % (i + 1), MENU_ID_SLOT_BASE + i)
+	menu_popup.add_separator()
+	menu_popup.add_item("Quit to Lobby", MENU_ID_QUIT)
 	_sync_menu_checks()
 	menu_popup.connect("id_pressed", Callable(self, "_on_menu_id_pressed"))
 	damage_panel_full_size = damage_panel.size
@@ -302,6 +305,9 @@ func _on_menu_id_pressed(id: int) -> void:
 			dev_mode_toggle.button_pressed = next
 		_on_dev_mode_toggled(next)
 		_set_menu_checked(MENU_ID_DEV_MODE, next)
+		return
+	if id == MENU_ID_QUIT:
+		_on_cancel_game_pressed()
 		return
 	if id >= MENU_ID_SLOT_BASE and id < MENU_ID_SLOT_BASE + SAVE_SLOT_COUNT_UI:
 		save_slot_index = id - MENU_ID_SLOT_BASE
@@ -670,6 +676,12 @@ func _on_cancel_game_pressed():
 	$IPLineEdit.visible = true
 	$PortLineEdit.visible = true
 	$CancelGameButton.visible = false
+	$Panel.visible = false
+	cancel_done_button.visible = false
+	turn_mgr.reset_to_lobby()
+	_reset_ui_for_snapshot()
+	_on_stats_toggled(false)
+	_on_building_stats_toggled(false)
 	NetworkManager.close_connection()
 
 func _on_finish_move_button_pressed():

@@ -1316,10 +1316,37 @@ func end_game(player_id):
 	$UI.visible = false
 	print("the game has ended")
 
+func reset_to_lobby() -> void:
+	_reset_map_state()
+	current_map_index = -1
+	turn_number = 0
+	current_phase = Phase.UPKEEP
+	current_player = "player1"
+	exec_steps = []
+	step_index = 0
+	neutral_step_index = -1
+	player_gold = { "player1": 25, "player2": 25 }
+	player_income = { "player1": 0, "player2": 0 }
+	player_melee_bonus = { "player1": 0, "player2": 0 }
+	player_ranged_bonus = { "player1": 0, "player2": 0 }
+	damage_log = { "player1": [], "player2": [] }
+	player_orders = { "player1": {}, "player2": {} }
+	committed_orders = { "player1": {}, "player2": {} }
+	local_player_id = ""
+	if NetworkManager != null:
+		NetworkManager.selected_map_index = -1
+		NetworkManager.match_seed = -1
+		NetworkManager.player_orders = player_orders
+		NetworkManager._orders_submitted = { "player1": false, "player2": false }
+		NetworkManager._step_ready_counts = {}
+	$UI/DamagePanel.visible = false
+	$GameOver.visible = false
+
 # --------------------------------------------------------
 # Main loop: Upkeep → Orders → Execution → increment → loop
 # --------------------------------------------------------
 func _game_loop() -> void:
+	_ensure_map_loaded()
 	turn_number += 1
 	print("\n===== TURN %d =====" % turn_number)
 	rng.seed = turn_number
@@ -1333,6 +1360,23 @@ func _game_loop() -> void:
 	player_orders = NetworkManager.player_orders
 	NetworkManager.broadcast_phase("EXECUTION")
 	_do_execution()
+
+func _ensure_map_loaded() -> void:
+	if current_map_index >= 0 and terrain_overlay != null:
+		return
+	if map_data.size() == 0:
+		push_error("TurnManager: map_data is empty.")
+		return
+	var map_rng := RandomNumberGenerator.new()
+	map_rng.randomize()
+	if NetworkManager.selected_map_index < 0:
+		NetworkManager.selected_map_index = map_rng.randi_range(0, map_data.size() - 1)
+	if NetworkManager.match_seed < 0:
+		NetworkManager.match_seed = map_rng.randi_range(1, 2147483646)
+	var map_index = NetworkManager.selected_map_index
+	_load_map_by_index(map_index)
+	_spawn_neutral_units()
+	$GameBoardNode/FogOfWar._update_fog()
 
 # --------------------------------------------------------
 # Phase 1: Upkeep — award gold
