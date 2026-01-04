@@ -32,6 +32,8 @@ var save_slot_index: int = 0
 var damage_panel_minimized: bool = false
 var damage_panel_full_size: Vector2 = Vector2.ZERO
 var damage_panel_full_position: Vector2 = Vector2.ZERO
+var auto_pass_enabled: bool = false
+var last_damage_log_count: int = 0
 
 @onready var turn_mgr = get_node(turn_manager_path) as Node
 @onready var unit_mgr = get_node(unit_manager_path) as Node
@@ -42,8 +44,9 @@ var damage_panel_full_position: Vector2 = Vector2.ZERO
 @onready var action_menu: PopupMenu      = $Panel/ActionMenu as PopupMenu
 @onready var build_menu: PopupMenu = PopupMenu.new()
 @onready var exec_panel: PanelContainer  = $ExecutionPanel
-@onready var phase_label   : Label       = exec_panel.get_node("PhaseLabel")
-@onready var next_button   : Button      = exec_panel.get_node("NextButton")
+@onready var phase_label   : Label       = exec_panel.get_node("ExecutionBox/PhaseLabel")
+@onready var next_button   : Button      = exec_panel.get_node("ExecutionBox/ControlsRow/NextButton")
+@onready var auto_pass_check = $ExecutionPanel/ExecutionBox/ControlsRow/AutoPassCheckButton as CheckButton
 @onready var cancel_done_button = $CancelDoneButton as Button
 @onready var dev_mode_toggle = get_node(dev_mode_toggle_path) as CheckButton
 @onready var dev_panel = $DevPanel
@@ -138,6 +141,9 @@ func _ready():
 					Callable(self, "_on_execution_complete"))
 	next_button.connect("pressed",
 					Callable(self, "_on_next_pressed"))
+	if auto_pass_check != null:
+		auto_pass_check.connect("toggled",
+					Callable(self, "_on_auto_pass_toggled"))
 	
 	# order button connections
 	$Panel/VBoxContainer/ArcherButton.connect("pressed",
@@ -537,6 +543,45 @@ func _update_damage_panel() -> void:
 		damage_panel.position = damage_panel_full_position
 		damage_toggle_button.text = "-"
 
+func _on_auto_pass_toggled(pressed: bool) -> void:
+	auto_pass_enabled = pressed
+	last_damage_log_count = _damage_log_count()
+
+func _damage_log_count() -> int:
+	if turn_mgr == null:
+		return 0
+	var local_id = turn_mgr.local_player_id
+	if local_id == "":
+		return 0
+	var lines = turn_mgr.damage_log.get(local_id, [])
+	return lines.size()
+
+func _update_auto_pass_for_damage() -> void:
+	if not auto_pass_enabled:
+		last_damage_log_count = _damage_log_count()
+		return
+	var current = _damage_log_count()
+	if current > last_damage_log_count:
+		auto_pass_enabled = false
+		if auto_pass_check != null:
+			if auto_pass_check.has_method("set_pressed_no_signal"):
+				auto_pass_check.set_pressed_no_signal(false)
+			else:
+				auto_pass_check.button_pressed = false
+	last_damage_log_count = current
+
+func _auto_pass_continue() -> void:
+	if not auto_pass_enabled:
+		return
+	if not exec_panel.visible:
+		return
+	_auto_pass_step()
+
+func _auto_pass_step() -> void:
+	await get_tree().create_timer(1.0).timeout
+	if auto_pass_enabled and exec_panel.visible:
+		_on_next_pressed()
+
 func _on_save_game_pressed() -> void:
 	if not turn_mgr.is_host():
 		gold_lbl.text = "[Save failed: host only]"
@@ -915,11 +960,15 @@ func _on_execution_paused(phase_idx):
 	var phase_names = ["Unit Spawns", "Attacks", "Engineering", "Movement"]
 	if phase_idx == turn_mgr.neutral_step_index:
 		phase_label.text = "Processed: Neutral Attacks\n(Click here to continue)"
+		_update_auto_pass_for_damage()
+		_auto_pass_continue()
 		return
 	if phase_idx >= phase_names.size():
 		for i in range(phase_idx - phase_names.size()+1):
 			phase_names.append("Movement")
 	phase_label.text = "Processed: %s\n(Click here to continue)" % phase_names[phase_idx]
+	_update_auto_pass_for_damage()
+	_auto_pass_continue()
 
 func _on_next_pressed():
 	exec_panel.visible = false
@@ -931,6 +980,7 @@ func _on_next_pressed():
 
 func _on_execution_complete():
 	exec_panel.visible = false
+	_update_auto_pass_for_damage()
 
 # Backtrack and draw arrow sprites along the path to `dest`
 func _draw_paths() -> void:
@@ -1308,9 +1358,14 @@ func _on_state_applied() -> void:
 		income_lbl.text = "Income: %d per turn" % turn_mgr.player_income.get(current_player, 0)
 		$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
 	_draw_all()
+	_update_auto_pass_for_damage()
 
 
 func _unhandled_input(ev):
+	if ev is InputEventKey and ev.pressed and not ev.echo:
+		if (ev.keycode == KEY_SPACE or ev.physical_keycode == KEY_SPACE) and exec_panel.visible:
+			_on_next_pressed()
+			return
 	if not (ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT):
 		return
 	if not allow_clicks:

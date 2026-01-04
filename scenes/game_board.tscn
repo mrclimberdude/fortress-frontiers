@@ -360,17 +360,35 @@ anchor_left = 0.5
 anchor_top = 1.0
 anchor_right = 0.5
 anchor_bottom = 1.0
-offset_left = -20.0
-offset_top = -40.0
-offset_right = 20.0
+offset_left = -140.0
+offset_top = -70.0
+offset_right = 140.0
 grow_horizontal = 2
 grow_vertical = 0
 
-[node name="PhaseLabel" type="Label" parent="UI/ExecutionPanel"]
+[node name="ExecutionBox" type="VBoxContainer" parent="UI/ExecutionPanel"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="PhaseLabel" type="Label" parent="UI/ExecutionPanel/ExecutionBox"]
 layout_mode = 2
 
-[node name="NextButton" type="Button" parent="UI/ExecutionPanel"]
+[node name="ControlsRow" type="HBoxContainer" parent="UI/ExecutionPanel/ExecutionBox"]
+custom_minimum_size = Vector2(0, 24)
 layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="NextButton" type="Button" parent="UI/ExecutionPanel/ExecutionBox/ControlsRow"]
+custom_minimum_size = Vector2(90, 0)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Continue"
+
+[node name="AutoPassCheckButton" type="CheckButton" parent="UI/ExecutionPanel/ExecutionBox/ControlsRow"]
+layout_mode = 2
+size_flags_horizontal = 0
+text = "Auto-pass"
 
 [node name="CancelDoneButton" type="Button" parent="UI"]
 visible = false
