@@ -30,6 +30,16 @@ var terrain_overlay: TileMapLayer
 var rng := RandomNumberGenerator.new()
 var current_map_index: int = -1
 
+const SAVE_VERSION: int = 1
+const SAVE_DEFAULT_PATH: String = "user://save_game.json"
+const SAVE_AUTOSAVE_PATH: String = "user://autosave.json"
+const SAVE_SLOT_COUNT: int = 3
+const SAVE_MARKER_VEC2I: String = "__gd_vec2i"
+const SAVE_MARKER_VEC2: String = "__gd_vec2"
+const SAVE_KEY_PREFIX_STR: String = "s:"
+const SAVE_KEY_PREFIX_INT: String = "i:"
+const SAVE_KEY_PREFIX_VEC2I: String = "v2i:"
+
 func _is_host() -> bool:
 	var mp = get_tree().get_multiplayer()
 	return mp == null or mp.multiplayer_peer == null or mp.is_server()
@@ -820,6 +830,71 @@ func _serialize_unit(unit) -> Dictionary:
 		"last_damaged_by": unit.last_damaged_by
 	}
 
+func _encode_key(key) -> String:
+	var t = typeof(key)
+	if t == TYPE_STRING:
+		return SAVE_KEY_PREFIX_STR + key
+	if t == TYPE_INT:
+		return SAVE_KEY_PREFIX_INT + str(key)
+	if t == TYPE_VECTOR2I:
+		return SAVE_KEY_PREFIX_VEC2I + str(key.x) + "," + str(key.y)
+	return SAVE_KEY_PREFIX_STR + str(key)
+
+func _decode_key(key: String):
+	if key.begins_with(SAVE_KEY_PREFIX_STR):
+		return key.substr(SAVE_KEY_PREFIX_STR.length())
+	if key.begins_with(SAVE_KEY_PREFIX_INT):
+		return int(key.substr(SAVE_KEY_PREFIX_INT.length()))
+	if key.begins_with(SAVE_KEY_PREFIX_VEC2I):
+		var coords = key.substr(SAVE_KEY_PREFIX_VEC2I.length()).split(",")
+		if coords.size() >= 2:
+			return Vector2i(int(coords[0]), int(coords[1]))
+		return Vector2i.ZERO
+	return key
+
+func _encode_value(value):
+	var t = typeof(value)
+	if t == TYPE_VECTOR2I:
+		return { SAVE_MARKER_VEC2I: [value.x, value.y] }
+	if t == TYPE_VECTOR2:
+		return { SAVE_MARKER_VEC2: [value.x, value.y] }
+	if t == TYPE_DICTIONARY:
+		var out := {}
+		for k in value.keys():
+			out[_encode_key(k)] = _encode_value(value[k])
+		return out
+	if t == TYPE_ARRAY:
+		var arr := []
+		for v in value:
+			arr.append(_encode_value(v))
+		return arr
+	return value
+
+func _decode_value(value):
+	var t = typeof(value)
+	if t == TYPE_DICTIONARY:
+		if value.size() == 1 and value.has(SAVE_MARKER_VEC2I):
+			var vec = value[SAVE_MARKER_VEC2I]
+			if vec is Array and vec.size() >= 2:
+				return Vector2i(int(vec[0]), int(vec[1]))
+		if value.size() == 1 and value.has(SAVE_MARKER_VEC2):
+			var v = value[SAVE_MARKER_VEC2]
+			if v is Array and v.size() >= 2:
+				return Vector2(float(v[0]), float(v[1]))
+		var out := {}
+		for k in value.keys():
+			var decoded_key = k
+			if k is String:
+				decoded_key = _decode_key(k)
+			out[decoded_key] = _decode_value(value[k])
+		return out
+	if t == TYPE_ARRAY:
+		var arr := []
+		for v in value:
+			arr.append(_decode_value(v))
+		return arr
+	return value
+
 func _collect_state() -> Dictionary:
 	var units := []
 	for unit in $GameBoardNode.get_all_units_flat():
@@ -876,6 +951,81 @@ func _collect_state_for(viewer_id: String) -> Dictionary:
 
 func get_state_snapshot_for(viewer_id: String) -> Dictionary:
 	return _collect_state_for(viewer_id)
+
+func _save_path_for_slot(slot: int) -> String:
+	if slot < 0:
+		return SAVE_AUTOSAVE_PATH
+	if slot >= SAVE_SLOT_COUNT:
+		slot = SAVE_SLOT_COUNT - 1
+	return "user://save_slot_%d.json" % (slot + 1)
+
+func save_game(path: String = SAVE_DEFAULT_PATH, allow_non_orders: bool = false) -> bool:
+	if not _is_host():
+		push_error("Save failed: host only.")
+		return false
+	if current_phase != Phase.ORDERS and not allow_non_orders:
+		push_error("Save failed: only supported during the orders phase.")
+		return false
+	var payload = {
+		"save_version": SAVE_VERSION,
+		"state": _encode_value(_collect_state())
+	}
+	var file = FileAccess.open(path, FileAccess.WRITE)
+	if file == null:
+		push_error("Save failed: could not open file %s" % path)
+		return false
+	file.store_string(JSON.stringify(payload))
+	file.close()
+	return true
+
+func save_game_slot(slot: int, allow_non_orders: bool = false) -> bool:
+	return save_game(_save_path_for_slot(slot), allow_non_orders)
+
+func load_game(path: String = SAVE_DEFAULT_PATH) -> bool:
+	if not _is_host():
+		push_error("Load failed: host only.")
+		return false
+	if not FileAccess.file_exists(path):
+		push_error("Load failed: file not found %s" % path)
+		return false
+	var file = FileAccess.open(path, FileAccess.READ)
+	if file == null:
+		push_error("Load failed: could not open file %s" % path)
+		return false
+	var content = file.get_as_text()
+	file.close()
+	var parsed = JSON.parse_string(content)
+	if typeof(parsed) != TYPE_DICTIONARY:
+		push_error("Load failed: invalid save format.")
+		return false
+	var payload = parsed as Dictionary
+	var version = int(payload.get("save_version", 0))
+	if version != SAVE_VERSION:
+		push_error("Load failed: unsupported save version.")
+		return false
+	var state = _decode_value(payload.get("state", {}))
+	if typeof(state) != TYPE_DICTIONARY or state.is_empty():
+		push_error("Load failed: missing state data.")
+		return false
+	var phase = int(state.get("current_phase", int(Phase.ORDERS)))
+	if phase != int(Phase.ORDERS):
+		push_error("Load failed: only orders-phase saves are supported.")
+		return false
+	var map_index = int(state.get("map_index", 0))
+	var match_seed = int(state.get("match_seed", -1))
+	NetworkManager.selected_map_index = map_index
+	if match_seed > 0:
+		NetworkManager.match_seed = match_seed
+	_reset_map_state()
+	_load_map_by_index(map_index)
+	apply_state(state, true)
+	NetworkManager._orders_submitted = { "player1": false, "player2": false }
+	NetworkManager._step_ready_counts = {}
+	_broadcast_state()
+	return true
+
+func load_game_slot(slot: int) -> bool:
+	return load_game(_save_path_for_slot(slot))
 
 func _broadcast_state() -> void:
 	if not _is_host():
@@ -949,8 +1099,8 @@ func _on_execution_complete_received() -> void:
 		return
 	emit_signal("execution_complete")
 
-func apply_state(state: Dictionary) -> void:
-	if _is_host():
+func apply_state(state: Dictionary, force_host: bool = false) -> void:
+	if _is_host() and not force_host:
 		return
 	if state.is_empty():
 		return
@@ -1173,6 +1323,7 @@ func _game_loop() -> void:
 	turn_number += 1
 	print("\n===== TURN %d =====" % turn_number)
 	rng.seed = turn_number
+	save_game_slot(-1, true)
 	NetworkManager._orders_submitted = { "player1": false, "player2": false }
 	player_orders = NetworkManager.player_orders
 	NetworkManager.broadcast_phase("UPKEEP")

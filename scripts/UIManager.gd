@@ -27,6 +27,10 @@ var _build_hover_label: Label = null
 var _build_hover_cell: Vector2i = Vector2i(-99999, -99999)
 
 var _current_exec_step_idx: int = 0
+var menu_popup: PopupMenu = null
+var save_slot_index: int = 0
+var damage_panel_minimized: bool = false
+var damage_panel_full_size: Vector2 = Vector2.ZERO
 
 @onready var turn_mgr = get_node(turn_manager_path) as Node
 @onready var unit_mgr = get_node(unit_manager_path) as Node
@@ -44,6 +48,10 @@ var _current_exec_step_idx: int = 0
 @onready var dev_panel = $DevPanel
 @onready var respawn_timers_toggle = $DevPanel/VBoxContainer/RespawnTimersCheckButton as CheckButton
 @onready var resync_button = $DevPanel/VBoxContainer/ResyncButton as Button
+@onready var menu_button = $MenuButton as MenuButton
+@onready var damage_panel = $DamagePanel as Panel
+@onready var damage_scroll = $DamagePanel/ScrollContainer as ScrollContainer
+@onready var damage_toggle_button = $DamagePanel/ToggleDamageButton as Button
 @onready var finish_move_button = $Panel/FinishMoveButton
 
 const ArrowScene = preload("res://scenes/Arrow.tscn")
@@ -54,6 +62,15 @@ const DefendScene = preload("res://scenes/Defending.tscn")
 const BuildIcon = preload("res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Objects/HSI_icon_162.png")
 const RepairIcon = preload("res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Objects/HSI_icon_141.png")
 const SabotageIcon = preload("res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Objects/HSI_icon_180.png")
+const SAVE_SLOT_COUNT_UI: int = 3
+
+const MENU_ID_SAVE: int = 1
+const MENU_ID_LOAD: int = 2
+const MENU_ID_LOAD_AUTOSAVE: int = 3
+const MENU_ID_UNIT_STATS: int = 10
+const MENU_ID_BUILDING_STATS: int = 11
+const MENU_ID_DEV_MODE: int = 12
+const MENU_ID_SLOT_BASE: int = 100
 
 const BUILD_OPTIONS = [
 	{"id": 0, "label": "Fortification", "type": "fortification"},
@@ -96,6 +113,9 @@ func _ready():
 					 Callable(self, "_on_respawn_timers_toggled"))
 	$DevPanel/VBoxContainer/ResyncButton.connect("pressed",
 					 Callable(self, "_on_resync_pressed"))
+	if damage_toggle_button != null:
+		damage_toggle_button.connect("pressed",
+					 Callable(self, "_on_damage_toggle_pressed"))
 	NetworkManager.connect("buy_result",
 					Callable(self, "_on_buy_result"))
 	NetworkManager.connect("undo_result",
@@ -140,6 +160,10 @@ func _ready():
 					Callable(self, "_on_stats_toggled"))
 	$BuildingStatsCheckButton.connect("toggled",
 					Callable(self, "_on_building_stats_toggled"))
+	$StatsPanel/CloseButton.connect("pressed",
+					Callable(self, "_on_unit_stats_close_pressed"))
+	$BuildingStatsPanel/CloseButton.connect("pressed",
+					Callable(self, "_on_building_stats_close_pressed"))
 	$Panel/FinishMoveButton.connect("pressed",
 					Callable(self, "_on_finish_move_button_pressed"))
 	
@@ -206,6 +230,82 @@ func _ready():
 	for entry in BUILD_OPTIONS:
 		build_menu.add_item(entry["label"], entry["id"])
 	_init_build_hover()
+	_init_menu()
+
+func _init_menu() -> void:
+	if menu_button == null:
+		return
+	menu_popup = menu_button.get_popup()
+	menu_popup.clear()
+	menu_popup.add_item("Save", MENU_ID_SAVE)
+	menu_popup.add_item("Load", MENU_ID_LOAD)
+	menu_popup.add_item("Load Autosave", MENU_ID_LOAD_AUTOSAVE)
+	menu_popup.add_separator()
+	menu_popup.add_check_item("Unit Stats", MENU_ID_UNIT_STATS)
+	menu_popup.add_check_item("Building Stats", MENU_ID_BUILDING_STATS)
+	menu_popup.add_check_item("Dev Mode", MENU_ID_DEV_MODE)
+	menu_popup.add_separator()
+	for i in range(SAVE_SLOT_COUNT_UI):
+		menu_popup.add_radio_check_item("Save Slot %d" % (i + 1), MENU_ID_SLOT_BASE + i)
+	_sync_menu_checks()
+	menu_popup.connect("id_pressed", Callable(self, "_on_menu_id_pressed"))
+	damage_panel_full_size = damage_panel.size
+	_update_damage_panel()
+
+func _sync_menu_checks() -> void:
+	if menu_popup == null:
+		return
+	_set_menu_checked(MENU_ID_UNIT_STATS, $StatsPanel.visible)
+	_set_menu_checked(MENU_ID_BUILDING_STATS, $BuildingStatsPanel.visible)
+	_set_menu_checked(MENU_ID_DEV_MODE, dev_mode_toggle.button_pressed)
+	for i in range(SAVE_SLOT_COUNT_UI):
+		_set_menu_checked(MENU_ID_SLOT_BASE + i, i == save_slot_index)
+
+func _set_menu_checked(id: int, checked: bool) -> void:
+	if menu_popup == null:
+		return
+	var idx = menu_popup.get_item_index(id)
+	if idx >= 0:
+		menu_popup.set_item_checked(idx, checked)
+
+func _on_menu_id_pressed(id: int) -> void:
+	if id == MENU_ID_SAVE:
+		_on_save_game_pressed()
+		return
+	if id == MENU_ID_LOAD:
+		_on_load_game_pressed()
+		return
+	if id == MENU_ID_LOAD_AUTOSAVE:
+		_on_load_autosave_pressed()
+		return
+	if id == MENU_ID_UNIT_STATS:
+		var next = not $StatsPanel.visible
+		if $UnitStatsCheckButton.has_method("set_pressed_no_signal"):
+			$UnitStatsCheckButton.set_pressed_no_signal(next)
+		else:
+			$UnitStatsCheckButton.button_pressed = next
+		_on_stats_toggled(next)
+		return
+	if id == MENU_ID_BUILDING_STATS:
+		var next = not $BuildingStatsPanel.visible
+		if $BuildingStatsCheckButton.has_method("set_pressed_no_signal"):
+			$BuildingStatsCheckButton.set_pressed_no_signal(next)
+		else:
+			$BuildingStatsCheckButton.button_pressed = next
+		_on_building_stats_toggled(next)
+		return
+	if id == MENU_ID_DEV_MODE:
+		var next = not dev_mode_toggle.button_pressed
+		if dev_mode_toggle.has_method("set_pressed_no_signal"):
+			dev_mode_toggle.set_pressed_no_signal(next)
+		else:
+			dev_mode_toggle.button_pressed = next
+		_on_dev_mode_toggled(next)
+		_set_menu_checked(MENU_ID_DEV_MODE, next)
+		return
+	if id >= MENU_ID_SLOT_BASE and id < MENU_ID_SLOT_BASE + SAVE_SLOT_COUNT_UI:
+		save_slot_index = id - MENU_ID_SLOT_BASE
+		_sync_menu_checks()
 
 func _add_build_stats_row(container: VBoxContainer, columns: Array, widths: Array, font: FontFile, wrap_last: bool, add_separator: bool = true) -> void:
 	var row = HBoxContainer.new()
@@ -376,6 +476,7 @@ func _on_dev_mode_toggled(pressed:bool):
 		dev_panel.visible = false
 		respawn_timers_toggle.button_pressed = false
 		_on_respawn_timers_toggled(false)
+	_set_menu_checked(MENU_ID_DEV_MODE, pressed)
 
 func _on_fog_toggled(pressed:bool):
 	print("Fog of War -> ", pressed)
@@ -396,6 +497,51 @@ func _on_respawn_timers_toggled(pressed: bool) -> void:
 
 func _on_resync_pressed() -> void:
 	NetworkManager.request_state()
+
+func _on_damage_toggle_pressed() -> void:
+	damage_panel_minimized = not damage_panel_minimized
+	_update_damage_panel()
+
+func _update_damage_panel() -> void:
+	if damage_scroll == null or damage_panel == null:
+		return
+	if damage_panel_minimized:
+		damage_scroll.visible = false
+		damage_panel.custom_minimum_size = Vector2(damage_panel_full_size.x, 26.0)
+		damage_panel.size = Vector2(damage_panel_full_size.x, 26.0)
+		damage_toggle_button.text = "+"
+	else:
+		damage_scroll.visible = true
+		damage_panel.custom_minimum_size = Vector2.ZERO
+		damage_panel.size = damage_panel_full_size
+		damage_toggle_button.text = "-"
+
+func _on_save_game_pressed() -> void:
+	if not turn_mgr.is_host():
+		gold_lbl.text = "[Save failed: host only]"
+		return
+	if turn_mgr.save_game_slot(save_slot_index):
+		gold_lbl.text = "Game saved (slot %d)" % (save_slot_index + 1)
+	else:
+		gold_lbl.text = "[Save failed]"
+
+func _on_load_game_pressed() -> void:
+	if not turn_mgr.is_host():
+		gold_lbl.text = "[Load failed: host only]"
+		return
+	if turn_mgr.load_game_slot(save_slot_index):
+		gold_lbl.text = "Game loaded (slot %d)" % (save_slot_index + 1)
+	else:
+		gold_lbl.text = "[Load failed]"
+
+func _on_load_autosave_pressed() -> void:
+	if not turn_mgr.is_host():
+		gold_lbl.text = "[Load failed: host only]"
+		return
+	if turn_mgr.load_game_slot(-1):
+		gold_lbl.text = "Autosave loaded"
+	else:
+		gold_lbl.text = "[Load failed]"
 
 func _buy_error_message(reason: String, cost: int) -> String:
 	match reason:
@@ -505,8 +651,6 @@ func _on_host_pressed():
 	$IPLineEdit.visible = false
 	$PortLineEdit.visible = false
 	$CancelGameButton.visible = true
-	if not dev_mode_toggle.button_pressed:
-		dev_mode_toggle.visible = false
 
 func _on_join_pressed():
 	var ip = $"IPLineEdit".text.strip_edges()
@@ -519,8 +663,6 @@ func _on_join_pressed():
 	$IPLineEdit.visible = false
 	$PortLineEdit.visible = false
 	$CancelGameButton.visible = true
-	if not dev_mode_toggle.button_pressed:
-		dev_mode_toggle.visible = false
 
 func _on_cancel_game_pressed():
 	$HostButton.visible = true
@@ -528,7 +670,6 @@ func _on_cancel_game_pressed():
 	$IPLineEdit.visible = true
 	$PortLineEdit.visible = true
 	$CancelGameButton.visible = false
-	dev_mode_toggle.visible = true
 	NetworkManager.close_connection()
 
 func _on_finish_move_button_pressed():
@@ -539,12 +680,24 @@ func _on_stats_toggled(toggled):
 		$StatsPanel.visible = true
 	else:
 		$StatsPanel.visible = false
+	_set_menu_checked(MENU_ID_UNIT_STATS, toggled)
 
 func _on_building_stats_toggled(toggled):
 	if toggled:
 		$BuildingStatsPanel.visible = true
 	else:
 		$BuildingStatsPanel.visible = false
+	_set_menu_checked(MENU_ID_BUILDING_STATS, toggled)
+
+func _on_unit_stats_close_pressed() -> void:
+	$StatsPanel.visible = false
+	$UnitStatsCheckButton.button_pressed = false
+	_set_menu_checked(MENU_ID_UNIT_STATS, false)
+
+func _on_building_stats_close_pressed() -> void:
+	$BuildingStatsPanel.visible = false
+	$BuildingStatsCheckButton.button_pressed = false
+	_set_menu_checked(MENU_ID_BUILDING_STATS, false)
 
 func _on_unit_selected(unit: Node) -> void:
 	game_board.clear_highlights()

@@ -160,6 +160,7 @@ unit_manager_path = NodePath("../GameBoardNode/Units")
 dev_mode_toggle_path = NodePath("DevModeCheckButton")
 
 [node name="DevModeCheckButton" type="CheckButton" parent="UI"]
+visible = false
 offset_left = 814.0
 offset_top = 1.0
 offset_right = 945.0
@@ -172,10 +173,10 @@ anchor_left = 0.227
 anchor_top = 0.544
 anchor_right = 0.84
 anchor_bottom = 0.659
-offset_left = -259.504
-offset_top = 167.488
-offset_right = -823.68
-offset_bottom = 153.968
+offset_left = 166.496
+offset_top = 66.488
+offset_right = -397.68
+offset_bottom = 52.968
 text = "Host Game
 "
 
@@ -185,24 +186,24 @@ anchor_left = 0.242
 anchor_top = 0.782
 anchor_right = 0.824
 anchor_bottom = 0.907
-offset_left = -275.784
-offset_top = 78.264
-offset_right = -805.248
-offset_bottom = 56.264
+offset_left = 345.216
+offset_top = -89.736
+offset_right = -184.248
+offset_bottom = -111.736
 text = "Join Game"
 
 [node name="IPLineEdit" type="LineEdit" parent="UI"]
-offset_left = 147.0
-offset_top = 596.0
-offset_right = 354.0
-offset_bottom = 635.0
+offset_left = 518.0
+offset_top = 363.0
+offset_right = 725.0
+offset_bottom = 402.0
 placeholder_text = "Enter Host IP"
 
 [node name="PortLineEdit" type="LineEdit" parent="UI"]
-offset_left = 149.0
-offset_top = 531.0
-offset_right = 322.0
-offset_bottom = 571.0
+offset_left = 517.0
+offset_top = 308.0
+offset_right = 690.0
+offset_bottom = 348.0
 placeholder_text = "Enter Host Port"
 
 [node name="CancelGameButton" type="Button" parent="UI"]
@@ -277,6 +278,7 @@ offset_bottom = 8.0
 text = "Finalize move"
 
 [node name="UnitStatsCheckButton" type="CheckButton" parent="UI"]
+visible = false
 offset_left = 215.0
 offset_top = 1.0
 offset_right = 346.0
@@ -284,11 +286,22 @@ offset_bottom = 32.0
 text = "Unit Stats"
 
 [node name="BuildingStatsCheckButton" type="CheckButton" parent="UI"]
+visible = false
 offset_left = 352.0
 offset_top = 1.0
 offset_right = 520.0
 offset_bottom = 32.0
 text = "Building Stats"
+
+[node name="MenuButton" type="MenuButton" parent="UI"]
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -150.0
+offset_top = 1.0
+offset_right = -10.0
+offset_bottom = 32.0
+text = "Menu"
 
 [node name="StatsPanel" type="Panel" parent="UI"]
 visible = false
@@ -304,6 +317,17 @@ offset_top = 1.0
 offset_right = 591.0
 offset_bottom = 287.0
 
+[node name="CloseButton" type="Button" parent="UI/StatsPanel"]
+z_index = 1
+layout_mode = 0
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -26.0
+offset_top = 4.0
+offset_right = -4.0
+offset_bottom = 24.0
+text = "X"
+
 [node name="BuildingStatsPanel" type="Panel" parent="UI"]
 visible = false
 offset_left = 354.0
@@ -317,6 +341,17 @@ offset_left = -2.0
 offset_top = 1.0
 offset_right = 683.0
 offset_bottom = 250.0
+
+[node name="CloseButton" type="Button" parent="UI/BuildingStatsPanel"]
+z_index = 1
+layout_mode = 0
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -26.0
+offset_top = 4.0
+offset_right = -4.0
+offset_bottom = 24.0
+text = "X"
 
 [node name="ExecutionPanel" type="PanelContainer" parent="UI"]
 visible = false
@@ -345,10 +380,10 @@ text = "Cancel Order Submission"
 
 [node name="DevPanel" type="Panel" parent="UI"]
 visible = false
-offset_left = 944.0
-offset_top = 3.0
-offset_right = 1148.0
-offset_bottom = 140.0
+offset_left = 6.0
+offset_top = 508.0
+offset_right = 210.0
+offset_bottom = 645.0
 
 [node name="VBoxContainer" type="VBoxContainer" parent="UI/DevPanel"]
 layout_mode = 0
@@ -385,6 +420,14 @@ offset_left = 5.0
 offset_right = 233.0
 offset_bottom = 26.0
 text = "Damage Report"
+
+[node name="ToggleDamageButton" type="Button" parent="UI/DamagePanel"]
+layout_mode = 0
+offset_left = 246.0
+offset_top = 2.0
+offset_right = 318.0
+offset_bottom = 24.0
+text = "-"
 
 [node name="ScrollContainer" type="ScrollContainer" parent="UI/DamagePanel"]
 layout_mode = 0
