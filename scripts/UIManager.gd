@@ -31,6 +31,7 @@ var menu_popup: PopupMenu = null
 var save_slot_index: int = 0
 var damage_panel_minimized: bool = false
 var damage_panel_full_size: Vector2 = Vector2.ZERO
+var damage_panel_full_position: Vector2 = Vector2.ZERO
 
 @onready var turn_mgr = get_node(turn_manager_path) as Node
 @onready var unit_mgr = get_node(unit_manager_path) as Node
@@ -253,6 +254,7 @@ func _init_menu() -> void:
 	_sync_menu_checks()
 	menu_popup.connect("id_pressed", Callable(self, "_on_menu_id_pressed"))
 	damage_panel_full_size = damage_panel.size
+	damage_panel_full_position = damage_panel.position
 	_update_damage_panel()
 
 func _sync_menu_checks() -> void:
@@ -270,6 +272,13 @@ func _set_menu_checked(id: int, checked: bool) -> void:
 	var idx = menu_popup.get_item_index(id)
 	if idx >= 0:
 		menu_popup.set_item_checked(idx, checked)
+
+func _should_draw_unit(unit: Node) -> bool:
+	if unit == null or not is_instance_valid(unit):
+		return false
+	if unit.player_id == turn_mgr.local_player_id:
+		return true
+	return unit.visible
 
 func _on_menu_id_pressed(id: int) -> void:
 	if id == MENU_ID_SAVE:
@@ -511,15 +520,21 @@ func _on_damage_toggle_pressed() -> void:
 func _update_damage_panel() -> void:
 	if damage_scroll == null or damage_panel == null:
 		return
+	var header_height = 26.0
 	if damage_panel_minimized:
 		damage_scroll.visible = false
-		damage_panel.custom_minimum_size = Vector2(damage_panel_full_size.x, 26.0)
-		damage_panel.size = Vector2(damage_panel_full_size.x, 26.0)
+		damage_panel.custom_minimum_size = Vector2(damage_panel_full_size.x, header_height)
+		damage_panel.size = Vector2(damage_panel_full_size.x, header_height)
+		damage_panel.position = Vector2(
+			damage_panel_full_position.x,
+			damage_panel_full_position.y + damage_panel_full_size.y - header_height
+		)
 		damage_toggle_button.text = "+"
 	else:
 		damage_scroll.visible = true
 		damage_panel.custom_minimum_size = Vector2.ZERO
 		damage_panel.size = damage_panel_full_size
+		damage_panel.position = damage_panel_full_position
 		damage_toggle_button.text = "-"
 
 func _on_save_game_pressed() -> void:
@@ -931,6 +946,9 @@ func _draw_paths() -> void:
 		var all_orders = turn_mgr.get_all_orders_for_phase(player)
 		for order in all_orders:
 			if order["type"] == "move":
+				var mover = unit_mgr.get_unit_by_net_id(order["unit_net_id"])
+				if not _should_draw_unit(mover):
+					continue
 				var root = Node2D.new()
 				path_arrows_node.add_child(root)
 				var path = order["path"]
@@ -1002,7 +1020,7 @@ func _draw_attacks():
 				# calculate direction and size for attack arrow
 				var attacker = unit_mgr.get_unit_by_net_id(order["unit_net_id"])
 				var target = unit_mgr.get_unit_by_net_id(order["target_unit_net_id"])
-				if attacker == null or target == null:
+				if not _should_draw_unit(attacker) or target == null:
 					continue
 				var dmg = $"..".calculate_damage(attacker, target, order["type"], 1)
 				var p1 = hex.map_to_world(attacker.grid_pos) + hex.tile_size * 0.5
@@ -1045,7 +1063,7 @@ func _draw_supports():
 				
 				# calculate direction and size for support arrow
 				var supporter = order["unit"]
-				if supporter == null:
+				if not _should_draw_unit(supporter):
 					continue
 				var p1 = hex.map_to_world(supporter.grid_pos) + hex.tile_size * 0.5
 				var p2 = hex.map_to_world(order["target_tile"]) + hex.tile_size * 0.5
@@ -1079,7 +1097,7 @@ func _draw_heals():
 				heal_node.add_child(root)
 				var heart = HealScene.instantiate() as Sprite2D
 				var unit = unit_mgr.get_unit_by_net_id(order["unit_net_id"])
-				if unit == null:
+				if not _should_draw_unit(unit):
 					continue
 				heart.position = hex.map_to_world(unit.grid_pos) + hex.tile_size * 0.65
 				heart.z_index = 10
@@ -1102,7 +1120,7 @@ func _draw_defends():
 				defend_node.add_child(root)
 				var defend = DefendScene.instantiate() as Sprite2D
 				var unit = unit_mgr.get_unit_by_net_id(order["unit_net_id"])
-				if unit == null:
+				if not _should_draw_unit(unit):
 					continue
 				defend.position = hex.map_to_world(unit.grid_pos) + hex.tile_size * 0.5
 				defend.z_index = 0
@@ -1146,7 +1164,7 @@ func _draw_builds():
 		for order in all_orders:
 			if order.get("type", "") == "build":
 				var unit = unit_mgr.get_unit_by_net_id(order["unit_net_id"])
-				if unit == null:
+				if not _should_draw_unit(unit):
 					continue
 				var root = Node2D.new()
 				build_node.add_child(root)
@@ -1174,7 +1192,7 @@ func _draw_repairs():
 		for order in all_orders:
 			if order.get("type", "") == "repair":
 				var unit = unit_mgr.get_unit_by_net_id(order["unit_net_id"])
-				if unit == null:
+				if not _should_draw_unit(unit):
 					continue
 				var root = Node2D.new()
 				repair_node.add_child(root)
@@ -1202,7 +1220,7 @@ func _draw_sabotages():
 		for order in all_orders:
 			if order.get("type", "") == "sabotage":
 				var unit = unit_mgr.get_unit_by_net_id(order["unit_net_id"])
-				if unit == null:
+				if not _should_draw_unit(unit):
 					continue
 				var root = Node2D.new()
 				sabotage_node.add_child(root)

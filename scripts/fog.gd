@@ -9,6 +9,32 @@
 
 const FOG_Z_INDEX: int = 100
 
+func _set_base_tile_for_fog(cell: Vector2i, pid: String) -> void:
+	var hex_map = $"../HexTileMap"
+	var tm = $"../.."
+	if hex_map == null or tm == null:
+		return
+	var src = hex_map.tile_set.get_source_id(0)
+	var ground = hex_map.ground_tile
+	var tint = ground
+	var is_camp = cell in tm.camps["basic"]
+	var is_dragon = cell in tm.camps["dragon"]
+	if is_camp or is_dragon:
+		if pid in ["", "neutral", "camp", "dragon"]:
+			var camp_key = "dragon" if is_dragon else "camp"
+			tint = hex_map.camp_atlas_tiles.get(camp_key, ground)
+		else:
+			tint = hex_map.player_atlas_tiles.get(pid, ground)
+	elif cell in tm.structure_positions:
+		tint = hex_map.structure_atlas_tiles.get(pid, ground)
+		for player in ["player1", "player2", "unclaimed"]:
+			if cell in tm.mines[player]:
+				tint = hex_map.structure_atlas_tiles.get(player, ground)
+				break
+	else:
+		tint = hex_map.player_atlas_tiles.get(pid, ground)
+	hex_map.set_cell(cell, src, tint)
+
 func _ready() -> void:
 	var cells = $"../HexTileMap".used_cells
 	z_index = FOG_Z_INDEX
@@ -64,6 +90,19 @@ func _update_fog():
 						var structure = $"..".get_structure_at(cell)
 						if structure != null and is_instance_valid(structure):
 							structure.z_index = 99
+					var unit = $"..".get_unit_at(cell)
+					if unit != null and unit.player_id != $"../..".local_player_id:
+						var pid = ""
+						var structure_unit = $"..".get_structure_unit_at(cell)
+						if structure_unit != null:
+							pid = structure_unit.player_id
+						elif cell in $"../..".mines["player1"]:
+							pid = "player1"
+						elif cell in $"../..".mines["player2"]:
+							pid = "player2"
+						elif cell in $"../..".mines["unclaimed"]:
+							pid = "unclaimed"
+						_set_base_tile_for_fog(cell, pid)
 					if explored != null and terrain_map != null:
 						var src_id = terrain_map.get_cell_source_id(cell)
 						if src_id >= 0:
