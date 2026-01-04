@@ -1,4 +1,4 @@
-[gd_scene load_steps=27 format=4 uid="uid://dnx0cxl4a46lg"]
+[gd_scene load_steps=28 format=4 uid="uid://dnx0cxl4a46lg"]
 
 [ext_resource type="Script" uid="uid://daaph63aiv3vd" path="res://scripts/TurnManager.gd" id="1_xh13x"]
 [ext_resource type="Texture2D" uid="uid://ciitwnd7hxyra" path="res://assets/spritesheet.png" id="2_17g6i"]
@@ -24,6 +24,7 @@
 [ext_resource type="Texture2D" uid="uid://e5adslfrdmf2" path="res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Geometric/HSI_icon_122.png" id="12_2sbk6"]
 [ext_resource type="Resource" uid="uid://dby32tf7drbn5" path="res://maps/map_5.tres" id="12_faqeg"]
 [ext_resource type="Texture2D" uid="uid://dtk36b2qk71x2" path="res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Objects/HSI_icon_180.png" id="13_54ie0"]
+[ext_resource type="Resource" uid="uid://jnancdhi2toj" path="res://maps/map_6.tres" id="13_840ua"]
 
 [sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_17g6i"]
 texture = ExtResource("2_17g6i")
@@ -70,7 +71,7 @@ scout_scene = ExtResource("4_04ve2")
 miner_scene = ExtResource("5_c1to4")
 phalanx_scene = ExtResource("6_w5uqb")
 cavalry_scene = ExtResource("7_hl2y5")
-map_data = Array[Resource]([ExtResource("8_54ie0"), ExtResource("9_hrnlr"), ExtResource("10_840ua"), ExtResource("11_nupcc"), ExtResource("12_faqeg")])
+map_data = Array[Resource]([ExtResource("8_54ie0"), ExtResource("9_hrnlr"), ExtResource("10_840ua"), ExtResource("11_nupcc"), ExtResource("12_faqeg"), ExtResource("13_840ua")])
 fort_sprite = ExtResource("10_o2enx")
 road_sprite = ExtResource("11_eerdt")
 rail_sprite = ExtResource("12_2sbk6")
