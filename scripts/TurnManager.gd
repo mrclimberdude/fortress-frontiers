@@ -1880,7 +1880,9 @@ func calculate_damage(attacker, defender, atk_mode, num_atkrs):
 		return [0.0, 0.0]
 	if not is_instance_valid(attacker) or not is_instance_valid(defender):
 		return [0.0, 0.0]
-	var atkr_damaged_penalty = 1- ((100 - attacker.curr_health) * 0.005)
+	var atkr_damaged_penalty = 1.0
+	if attacker.player_id != "neutral":
+		atkr_damaged_penalty = 1 - ((100 - attacker.curr_health) * 0.005)
 	var atkr_str
 	if atk_mode == "ranged":
 		atkr_str = attacker.ranged_strength * atkr_damaged_penalty
@@ -1903,10 +1905,14 @@ func calculate_damage(attacker, defender, atk_mode, num_atkrs):
 		atkr_str += player_melee_bonus.get(attacker.player_id, 0)
 	if atk_mode != "ranged":
 		atkr_str += _terrain_bonus(attacker.grid_pos, "melee_attack_bonus")
-	var defr_damaged_penalty = 1- ((100 - defender.curr_health) * 0.005)
-	var defr_str = defender.melee_strength - ((num_atkrs -1) * defender.multi_def_penalty)
+	var defr_damaged_penalty = 1.0
+	if defender.player_id != "neutral":
+		defr_damaged_penalty = 1 - ((100 - defender.curr_health) * 0.005)
+	var defr_str = defender.melee_strength
+	if defender.player_id != "neutral":
+		defr_str -= ((num_atkrs - 1) * defender.multi_def_penalty)
 	if defender.is_defending and defender.is_phalanx:
-		defr_str += PHALANX_BONUS + (num_atkrs -1) * defender.multi_def_penalty
+		defr_str += PHALANX_BONUS + (num_atkrs - 1) * defender.multi_def_penalty
 	defr_str = defr_str * defr_damaged_penalty
 	var defr_fort = _structure_state(defender.grid_pos)
 	if str(defr_fort.get("type", "")) == STRUCT_FORTIFICATION and str(defr_fort.get("status", "")) == STRUCT_STATUS_INTACT:
@@ -1922,7 +1928,10 @@ func calculate_damage(attacker, defender, atk_mode, num_atkrs):
 		defr_str += _terrain_bonus(defender.grid_pos, "melee_defense_bonus")
 	var atkr_in_dmg
 	if defender.is_ranged and atk_mode == "ranged":
-		var defr_ranged_str = (defender.ranged_strength - ((num_atkrs -1) * defender.multi_def_penalty)) * defr_damaged_penalty
+		var defr_ranged_str = defender.ranged_strength
+		if defender.player_id != "neutral":
+			defr_ranged_str -= ((num_atkrs - 1) * defender.multi_def_penalty)
+		defr_ranged_str *= defr_damaged_penalty
 		if str(defr_fort.get("type", "")) == STRUCT_FORTIFICATION and str(defr_fort.get("status", "")) == STRUCT_STATUS_INTACT:
 			defr_ranged_str += fort_ranged_bonus
 		if _unit_on_friendly_tower(defender):

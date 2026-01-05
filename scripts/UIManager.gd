@@ -95,6 +95,8 @@ const MinerScene = preload("res://scenes/Miner.tscn")
 const PhalanxScene = preload("res://scenes/Tank.tscn")
 const CavalryScene = preload("res://scenes/Cavalry.tscn")
 const BuilderScene = preload("res://scenes/Builder.tscn")
+const CampArcherScene = preload("res://scenes/CampArcher.tscn")
+const DragonScene = preload("res://scenes/Dragon.tscn")
 
 const MineScene = preload("res://scenes/GemMine.tscn")
 
@@ -207,6 +209,25 @@ func _ready():
 			i < unit_scenes.size() - 1
 		)
 	temp.free()
+
+	_add_unit_stats_row(unit_container, ["Neutral Units", "", "", "", "", ""], unit_col_widths, base_font, true, true)
+	var neutral_scenes = [CampArcherScene, DragonScene]
+	var neutral_names = ["Camp\nArcher", "Dragon"]
+	var neutral_specials = ["", "Ranged fire; melee cleave"]
+	for i in range(neutral_scenes.size()):
+		temp = neutral_scenes[i].instantiate()
+		var special_text = neutral_specials[i]
+		if special_text == "":
+			special_text = temp.special_skills
+		_add_unit_stats_row(
+			unit_container,
+			[neutral_names[i], str(temp.melee_strength), str(temp.ranged_strength), str(temp.move_range), str(temp.regen), special_text],
+			unit_col_widths,
+			base_font,
+			true,
+			i < neutral_scenes.size() - 1
+		)
+		temp.free()
 
 	var build_container = $BuildingStatsPanel/VBoxContainer
 	var build_col_widths = [140.0, 90.0, 60.0]
@@ -588,6 +609,8 @@ func _has_unordered_units(player_id: String) -> bool:
 		if unit == null or not is_instance_valid(unit):
 			continue
 		if unit.is_base or unit.is_tower:
+			continue
+		if unit.just_purchased:
 			continue
 		if not unit.ordered:
 			return true
