@@ -15,7 +15,7 @@ font_color = Color(0.989583, 0.989583, 0, 1)
 
 [node name="Dragon" instance=ExtResource("1_8v4tw")]
 is_ranged = true
-melee_strength = 30
+melee_strength = 35
 ranged_strength = 35
 move_range = 0
 ranged_range = 3

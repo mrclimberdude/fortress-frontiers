@@ -99,18 +99,18 @@ const DRAGON_REWARD_RANGED: String = "ranged_bonus"
 const CAMP_RESPAWN_DISPLAY_TURNS: int = 3
 const DRAGON_RESPAWN_DISPLAY_TURNS: int = 5
 
-@export var camp_respawn_min: int = 6
-@export var camp_respawn_max: int = 10
-@export var dragon_respawn_min: int = 12
+@export var camp_respawn_min: int = 8
+@export var camp_respawn_max: int = 12
+@export var dragon_respawn_min: int = 14
 @export var dragon_respawn_max: int = 20
 @export var camp_gold_min: int = 150
-@export var camp_gold_max: int = 300
+@export var camp_gold_max: int = 250
 @export var dragon_gold_bonus: int = 1000
 @export var dragon_melee_bonus: int = 3
 @export var dragon_ranged_bonus: int = 3
 @export var camp_archer_range: int = 2
 @export var dragon_fire_range: int = 3
-@export var dragon_cleave_targets: int = 2
+@export var dragon_cleave_targets: int = 3
 
 const STRUCT_FORTIFICATION: String = "fortification"
 const STRUCT_ROAD: String = "road"
