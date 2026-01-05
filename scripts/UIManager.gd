@@ -890,7 +890,7 @@ func _on_action_selected(id: int) -> void:
 			action_mode = "move"
 			current_path = [currently_selected_unit.grid_pos]
 			remaining_moves = float(currently_selected_unit.move_range)
-			var result = game_board.get_reachable_tiles(currently_selected_unit.grid_pos, currently_selected_unit.move_range, action_mode)
+			var result = game_board.get_reachable_tiles(currently_selected_unit.grid_pos, currently_selected_unit.move_range, action_mode, currently_selected_unit)
 			var tiles = result["tiles"].slice(1)
 			game_board.show_highlights(tiles)
 			current_reachable = result
@@ -1548,7 +1548,7 @@ func _unhandled_input(ev):
 			finish_current_path()
 			return
 		
-		var result = game_board.get_reachable_tiles(cell, remaining_moves, action_mode)
+		var result = game_board.get_reachable_tiles(cell, remaining_moves, action_mode, currently_selected_unit)
 		var tiles = result["tiles"]
 		if tiles.has(cell):
 			tiles.erase(cell)

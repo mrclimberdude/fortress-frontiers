@@ -213,7 +213,7 @@ func get_offset_neighbors(tile: Vector2i) -> Array:
 		neighbors.append(tile + d)
 	return neighbors
 
-func get_reachable_tiles(start: Vector2i, range: float, mode: String) -> Dictionary:
+func get_reachable_tiles(start: Vector2i, range: float, mode: String, mover_override = null) -> Dictionary:
 	var reachable: Array = []
 	var prev: Dictionary = {}
 	var visited: Dictionary = {}
@@ -236,7 +236,10 @@ func get_reachable_tiles(start: Vector2i, range: float, mode: String) -> Diction
 		for tile in spawn_points:
 			spawns.append(tile)
 	elif mode == "move":
-		mover = get_unit_at(start)
+		if mover_override != null:
+			mover = mover_override
+		else:
+			mover = get_unit_at(start)
 		if mover != null:
 			mover_player = mover.player_id
 	
