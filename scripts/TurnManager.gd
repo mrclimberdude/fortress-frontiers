@@ -1008,6 +1008,9 @@ func _collect_state_for(viewer_id: String) -> Dictionary:
 			continue
 		filtered.append(data)
 	state["units"] = filtered
+	var viewer_orders := {}
+	viewer_orders[viewer_id] = player_orders.get(viewer_id, {}).duplicate(true)
+	state["player_orders"] = viewer_orders
 	return state
 
 func get_state_snapshot_for(viewer_id: String) -> Dictionary:
@@ -1207,6 +1210,11 @@ func apply_state(state: Dictionary, force_host: bool = false) -> void:
 	neutral_step_index = int(state.get("neutral_step_index", neutral_step_index))
 	_apply_units(state.get("units", []))
 	player_orders = { "player1": {}, "player2": {} }
+	if state.has("player_orders"):
+		var incoming_orders = state["player_orders"]
+		if incoming_orders is Dictionary:
+			for pid in incoming_orders.keys():
+				player_orders[pid] = incoming_orders[pid]
 	NetworkManager.player_orders = player_orders
 	committed_orders = state.get("committed_orders", { "player1": {}, "player2": {} })
 	$GameBoardNode/FogOfWar._update_fog()
