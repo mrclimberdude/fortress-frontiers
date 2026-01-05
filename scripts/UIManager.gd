@@ -54,6 +54,7 @@ var done_button_default_modulate: Color = Color(1, 1, 1)
 @onready var dev_panel = $DevPanel
 @onready var respawn_timers_toggle = $DevPanel/VBoxContainer/RespawnTimersCheckButton as CheckButton
 @onready var resync_button = $DevPanel/VBoxContainer/ResyncButton as Button
+@onready var skip_movement_button = $DevPanel/VBoxContainer/SkipMovementButton as Button
 @onready var menu_button = $MenuButton as MenuButton
 @onready var damage_panel = $DamagePanel as Panel
 @onready var damage_scroll = $DamagePanel/ScrollContainer as ScrollContainer
@@ -123,6 +124,8 @@ func _ready():
 					 Callable(self, "_on_respawn_timers_toggled"))
 	$DevPanel/VBoxContainer/ResyncButton.connect("pressed",
 					 Callable(self, "_on_resync_pressed"))
+	$DevPanel/VBoxContainer/SkipMovementButton.connect("pressed",
+					 Callable(self, "_on_skip_movement_pressed"))
 	if damage_toggle_button != null:
 		damage_toggle_button.connect("pressed",
 					 Callable(self, "_on_damage_toggle_pressed"))
@@ -546,6 +549,15 @@ func _on_respawn_timers_toggled(pressed: bool) -> void:
 
 func _on_resync_pressed() -> void:
 	NetworkManager.request_state()
+
+func _on_skip_movement_pressed() -> void:
+	if not turn_mgr.is_host():
+		gold_lbl.text = "[Skip failed: host only]"
+		return
+	if turn_mgr.current_phase != turn_mgr.Phase.EXECUTION:
+		gold_lbl.text = "[Skip failed: execution only]"
+		return
+	turn_mgr.force_skip_movement_phase()
 
 func _on_damage_toggle_pressed() -> void:
 	damage_panel_minimized = not damage_panel_minimized

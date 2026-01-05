@@ -431,6 +431,10 @@ text = "Show respawn timers"
 layout_mode = 2
 text = "Resync state"
 
+[node name="SkipMovementButton" type="Button" parent="UI/DevPanel/VBoxContainer"]
+layout_mode = 2
+text = "Skip movement phase"
+
 [node name="DamagePanel" type="Panel" parent="UI"]
 visible = false
 offset_left = 833.0

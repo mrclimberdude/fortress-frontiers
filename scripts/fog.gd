@@ -36,8 +36,18 @@ func _set_base_tile_for_fog(cell: Vector2i, pid: String) -> void:
 	hex_map.set_cell(cell, src, tint)
 
 func _ready() -> void:
-	var cells = $"../HexTileMap".used_cells
 	z_index = FOG_Z_INDEX
+	reset_fog()
+
+func reset_fog() -> void:
+	var hex_map = $"../HexTileMap"
+	if hex_map == null:
+		return
+	var cells = hex_map.used_cells
+	clear()
+	var explored = $"../ExploredFog"
+	if explored != null:
+		explored.clear()
 	for player in ["player1", "player2"]:
 		visiblity[player] = {}
 		for cell in cells:

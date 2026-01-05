@@ -1230,6 +1230,9 @@ func _reset_map_state() -> void:
 		terrain_overlay = null
 		if $GameBoardNode != null:
 			$GameBoardNode.terrain_overlay = null
+	var fog = $GameBoardNode.get_node_or_null("FogOfWar")
+	if fog != null and fog.has_method("reset_fog"):
+		fog.reset_fog()
 	var hex = $GameBoardNode/HexTileMap
 	var src = hex.tile_set.get_source_id(0)
 	for cell in hex.get_used_cells():
@@ -1539,6 +1542,38 @@ func reset_orders_for_player(player_id: String) -> void:
 		unit.is_defending = false
 		unit.is_healing = false
 		unit.is_moving = false
+
+func force_skip_movement_phase() -> void:
+	if not _is_host():
+		return
+	var players = ["player1", "player2"]
+	for player in players:
+		var orders = NetworkManager.player_orders.get(player, {})
+		var to_remove := []
+		for unit_id in orders.keys():
+			var ord = orders[unit_id]
+			if ord.get("type", "") == "move":
+				to_remove.append(unit_id)
+		for unit_id in to_remove:
+			orders.erase(unit_id)
+		NetworkManager.player_orders[player] = orders
+		player_orders[player] = orders
+		var committed = committed_orders.get(player, {})
+		var committed_remove := []
+		for unit_id in committed.keys():
+			var ord = committed[unit_id]
+			if ord.get("type", "") == "move":
+				committed_remove.append(unit_id)
+		for unit_id in committed_remove:
+			committed.erase(unit_id)
+		committed_orders[player] = committed
+	for unit in $GameBoardNode.get_all_units_flat(false):
+		if unit != null and unit.is_moving:
+			unit.is_moving = false
+			unit.moving_to = unit.grid_pos
+	_broadcast_state()
+	if has_node("UI"):
+		$UI._draw_paths()
 
 func _remove_player_order(player_id: String, unit_net_id: int) -> void:
 	player_orders[player_id].erase(unit_net_id)
@@ -2931,6 +2966,13 @@ func _mg_resolve_chain_from_sink(mg: MovementGraph, entrants_map: Dictionary, st
 			# The unit that entered t came from winner_from; that tile is the next sink
 			var w = $GameBoardNode.get_unit_at(winner_from)
 			if w != null and w.curr_health > 0:
+				var occ_now = $GameBoardNode.get_unit_at(t)
+				if occ_now != null and occ_now != w:
+					if not occ_now.is_moving:
+						w.is_moving = false
+						if NetworkManager.player_orders.has(w.player_id):
+							NetworkManager.player_orders[w.player_id].erase(w.net_id)
+					continue
 				w.set_grid_position(t)
 			#pending.append(winner_from)
 
