@@ -252,8 +252,14 @@ func get_reachable_tiles(start: Vector2i, range: float, mode: String) -> Diction
 
 			# Expand neighbors if under move range
 			if dist < range:
-				if mode in ["visibility", "ranged"] and current != spawn and _terrain_blocks_sight(current):
-					continue
+				if mode in ["visibility", "ranged", "visibility_over_trees"] and current != spawn and _terrain_blocks_sight(current):
+					if mode == "visibility_over_trees":
+						var td = _get_terrain_tile_data(current)
+						var terrain = "" if td == null else str(td.get_custom_data("terrain"))
+						if terrain != "forest":
+							continue
+					else:
+						continue
 				for neighbor in get_offset_neighbors(current):
 					# Bounds check
 					if not hex_map.is_cell_valid(neighbor):

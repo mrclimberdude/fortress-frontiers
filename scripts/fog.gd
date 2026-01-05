@@ -73,7 +73,10 @@ func _update_fog():
 			if unit.just_purchased and not unit.is_base and not unit.is_tower:
 				in_sight = $"..".get_reachable_tiles(unit.grid_pos, 0, "visibility")
 			else:
-				in_sight = $"..".get_reachable_tiles(unit.grid_pos, unit.sight_range, "visibility")
+				if unit.is_looking_out:
+					in_sight = $"..".get_reachable_tiles(unit.grid_pos, unit.sight_range + 1, "visibility_over_trees")
+				else:
+					in_sight = $"..".get_reachable_tiles(unit.grid_pos, unit.sight_range, "visibility")
 			for cell in in_sight["tiles"]:
 				visiblity[player][cell] = 2
 		if tm_root != null and tm_root.has_method("update_structure_memory_for"):

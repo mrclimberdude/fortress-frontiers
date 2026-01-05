@@ -882,6 +882,7 @@ func _serialize_unit(unit) -> Dictionary:
 		"is_defending": unit.is_defending,
 		"is_healing": unit.is_healing,
 		"is_moving": unit.is_moving,
+		"is_looking_out": unit.is_looking_out,
 		"moving_to": unit.moving_to,
 		"just_purchased": unit.just_purchased,
 		"first_turn_move": unit.first_turn_move,
@@ -1128,6 +1129,7 @@ func _apply_units(units_data: Array) -> void:
 		unit.is_defending = bool(data.get("is_defending", false))
 		unit.is_healing = bool(data.get("is_healing", false))
 		unit.is_moving = bool(data.get("is_moving", false))
+		unit.is_looking_out = bool(data.get("is_looking_out", false))
 		unit.moving_to = data.get("moving_to", unit.grid_pos)
 		unit.just_purchased = bool(data.get("just_purchased", false))
 		unit.first_turn_move = bool(data.get("first_turn_move", false))
@@ -1675,6 +1677,11 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 			pass
 		"defend":
 			pass
+		"lookout":
+			var unit_type = str(unit.unit_type).to_lower()
+			if unit_type != "scout":
+				result["reason"] = "invalid_action"
+				return result
 		"build":
 			if not unit.is_builder:
 				result["reason"] = "not_builder"
@@ -3122,6 +3129,17 @@ func _process_move():
 func _do_execution() -> void:
 	current_phase = Phase.EXECUTION
 	print("Executing orders...")
+	for unit in $GameBoardNode.get_all_units_flat():
+		if unit != null:
+			unit.is_looking_out = false
+	for player in ["player1", "player2"]:
+		var orders = committed_orders.get(player, {})
+		for order in orders.values():
+			if order.get("type", "") != "lookout":
+				continue
+			var unit = unit_manager.get_unit_by_net_id(int(order.get("unit_net_id", -1)))
+			if unit != null and unit.player_id == player:
+				unit.is_looking_out = true
 	$UI/CancelDoneButton.visible = false
 	$GameBoardNode/OrderReminderMap.clear()
 	for child in dmg_report.get_children():

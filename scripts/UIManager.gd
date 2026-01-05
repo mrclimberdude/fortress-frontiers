@@ -68,6 +68,7 @@ const DefendScene = preload("res://scenes/Defending.tscn")
 const BuildIcon = preload("res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Objects/HSI_icon_162.png")
 const RepairIcon = preload("res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Objects/HSI_icon_141.png")
 const SabotageIcon = preload("res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Objects/HSI_icon_180.png")
+const LookoutIcon = preload("res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Objects/HSI_icon_134.png")
 const SAVE_SLOT_COUNT_UI: int = 3
 
 const MENU_ID_SAVE: int = 1
@@ -839,6 +840,8 @@ func _on_unit_selected(unit: Node) -> void:
 		action_menu.add_item("Melee Attack", 3)
 	action_menu.add_item("Heal", 4)
 	action_menu.add_item("Defend", 5)
+	if str(unit.unit_type).to_lower() == "scout":
+		action_menu.add_item("Lookout", 9)
 	action_menu.add_item("Sabotage", 6)
 	if unit.is_builder:
 		action_menu.add_item("Build", 7)
@@ -910,6 +913,13 @@ func _on_action_selected(id: int) -> void:
 				"type": "defend",
 			})
 			action_mode = ""
+		9:
+			print("Lookout selected for %s" % currently_selected_unit.name)
+			NetworkManager.request_order(current_player, {
+				"unit_net_id": currently_selected_unit.net_id,
+				"type": "lookout",
+			})
+			action_mode = ""
 		6:
 			print("Sabotage selected for %s" % currently_selected_unit.name)
 			NetworkManager.request_order(current_player, {
@@ -952,6 +962,10 @@ func _clear_all_drawings():
 		child.queue_free()
 	for child in hex.get_node("DefendingSprites").get_children():
 		child.queue_free()
+	var lookout_node = hex.get_node_or_null("LookoutSprites")
+	if lookout_node != null:
+		for child in lookout_node.get_children():
+			child.queue_free()
 	var build_node = hex.get_node_or_null("BuildingSprites")
 	if build_node != null:
 		for child in build_node.get_children():
@@ -1228,6 +1242,42 @@ func _draw_defends():
 				defend.z_index = 0
 				root.add_child(defend)
 
+func _get_lookout_sprites_root() -> Node2D:
+	var root = hex.get_node_or_null("LookoutSprites")
+	if root == null:
+		root = Node2D.new()
+		root.name = "LookoutSprites"
+		hex.add_child(root)
+	return root
+
+func _draw_lookouts():
+	var lookout_node = _get_lookout_sprites_root()
+	for child in lookout_node.get_children():
+		child.queue_free()
+	var players = []
+	if turn_mgr.current_phase == turn_mgr.Phase.ORDERS:
+		players.append(current_player)
+	else:
+		players = ["player1", "player2"]
+	for player in players:
+		var all_orders = turn_mgr.get_all_orders_for_phase(player)
+		for order in all_orders:
+			if order.get("type", "") == "lookout":
+				var unit = unit_mgr.get_unit_by_net_id(order["unit_net_id"])
+				if not _should_draw_unit(unit):
+					continue
+				var root = Node2D.new()
+				lookout_node.add_child(root)
+				var lookout_icon = Sprite2D.new()
+				lookout_icon.texture = LookoutIcon
+				var tex_size = LookoutIcon.get_size()
+				if tex_size.x > 0:
+					var scale = (hex.tile_size.x * 0.3) / tex_size.x
+					lookout_icon.scale = Vector2(scale, scale)
+				lookout_icon.position = hex.map_to_world(unit.grid_pos) + (hex.tile_size * Vector2(0.5, 0.7))
+				lookout_icon.z_index = 10
+				root.add_child(lookout_icon)
+
 func _get_building_sprites_root() -> Node2D:
 	var root = hex.get_node_or_null("BuildingSprites")
 	if root == null:
@@ -1342,6 +1392,7 @@ func _draw_all():
 	_draw_paths()
 	_draw_supports()
 	_draw_defends()
+	_draw_lookouts()
 	_draw_builds()
 	_draw_repairs()
 	_draw_sabotages()
