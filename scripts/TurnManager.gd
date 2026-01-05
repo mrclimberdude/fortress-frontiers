@@ -222,6 +222,10 @@ func _structure_counts_as_rail(state: Dictionary) -> bool:
 		return status == STRUCT_STATUS_INTACT
 	return false
 
+func _tile_is_road_or_rail(tile: Vector2i) -> bool:
+	var state = _structure_state(tile)
+	return _structure_counts_as_road(state) or _structure_counts_as_rail(state)
+
 func _tile_counts_as_road(tile: Vector2i, player_id: String) -> bool:
 	if _structure_counts_as_road(_structure_state(tile)):
 		return true
@@ -2711,6 +2715,30 @@ func _mg_tile_fifo_commit(t: Vector2i, entrants: Array, stationary_defender: Nod
 	# unreachable
 	return null
 
+func _can_hop_over_builder(mover, blocker_tile: Vector2i, landing_tile: Vector2i) -> bool:
+	if mover == null:
+		return false
+	if not _tile_is_road_or_rail(mover.grid_pos):
+		return false
+	if not _tile_is_road_or_rail(blocker_tile):
+		return false
+	if not _tile_is_road_or_rail(landing_tile):
+		return false
+	var blocker = $GameBoardNode.get_unit_at(blocker_tile)
+	if blocker == null:
+		return false
+	if not blocker.is_builder:
+		return false
+	if blocker.player_id != mover.player_id:
+		return false
+	if blocker.is_moving:
+		return false
+	if $GameBoardNode.get_unit_at(landing_tile) != null:
+		return false
+	if $GameBoardNode.is_enemy_structure_tile(landing_tile, mover.player_id):
+		return false
+	return true
+
 
 # Helper: split entrant items by specific side id
 func _filter_side_queue(items: Array, side_id) -> Array:
@@ -2912,6 +2940,28 @@ func _handle_trap_trigger(unit, tile: Vector2i) -> bool:
 
 func _process_move():
 	var units: Array = $GameBoardNode.get_all_units_flat(false)
+	var hop_units := {}
+	for u in units:
+		if u == null or not u.is_moving:
+			continue
+		var orders = NetworkManager.player_orders.get(u.player_id, {})
+		if not orders.has(u.net_id):
+			continue
+		var ord = orders[u.net_id]
+		if ord.get("type", "") != "move":
+			continue
+		var path = ord.get("path", [])
+		if not (path is Array) or path.size() < 2:
+			continue
+		if path[0] != u.grid_pos:
+			continue
+		var next_tile: Vector2i = path[1]
+		var hop_tile: Vector2i = path[2] if path.size() > 2 else Vector2i(-9999, -9999)
+		if path.size() > 2 and _can_hop_over_builder(u, next_tile, hop_tile):
+			u.moving_to = hop_tile
+			hop_units[u.net_id] = true
+		else:
+			u.moving_to = next_tile
 	var mg = MovementGraph.new()
 	mg.build(units)
 	var start_positions := {}
@@ -3013,8 +3063,17 @@ func _process_move():
 		var orders = NetworkManager.player_orders.get(u.player_id, {})
 		if orders.has(u.net_id):
 			var ord = orders[u.net_id]
-			if ord.has("path") and ord["path"].size() > 1 and u.grid_pos == ord["path"][1]:
-				ord["path"].pop_front()
+			if ord.has("path") and ord["path"].size() > 1:
+				var path = ord["path"]
+				if hop_units.has(u.net_id) and path.size() > 2 and u.grid_pos == path[2]:
+					path.pop_front()
+					path.pop_front()
+					ord["path"] = path
+				elif u.grid_pos == path[1]:
+					path.pop_front()
+					ord["path"] = path
+				else:
+					continue
 				if ord["path"].size() <= 1:
 					u.is_moving = false
 					orders.erase(u.net_id)

@@ -50,12 +50,13 @@ func _update_fog():
 	var explored = $"../ExploredFog"
 	var terrain_map = $"../TerrainMap"
 	var hex_map = $"../HexTileMap"
+	var tm_root = $"../.."
 	if terrain_map != null and explored != null:
 		if explored.tile_set != terrain_map.tile_set:
 			explored.tile_set = terrain_map.tile_set
 	# make all non-local units invisible (including neutrals)
 	for unit in all_units:
-		if unit.player_id != $"../..".local_player_id:
+		if unit.player_id != tm_root.local_player_id:
 			unit.visible = false
 	for structure in $"..".get_all_structures():
 		if structure == null or not is_instance_valid(structure):
@@ -75,10 +76,9 @@ func _update_fog():
 				in_sight = $"..".get_reachable_tiles(unit.grid_pos, unit.sight_range, "visibility")
 			for cell in in_sight["tiles"]:
 				visiblity[player][cell] = 2
-		var tm = $"../.."
-		if tm != null and tm.has_method("update_structure_memory_for"):
-			tm.update_structure_memory_for(player, visiblity[player])
-		if player == $"../..".local_player_id:
+		if tm_root != null and tm_root.has_method("update_structure_memory_for"):
+			tm_root.update_structure_memory_for(player, visiblity[player])
+		if player == tm_root.local_player_id:
 			for cell in visiblity[player]:
 				var tint
 				# unexplored tiles set to black
@@ -113,12 +113,11 @@ func _update_fog():
 							var alt = terrain_map.get_cell_alternative_tile(cell)
 							explored.set_cell(cell, src_id, atlas, alt)
 						else:
-							var tm = $"../.."
 							var is_camp = false
 							var is_dragon = false
-							if tm != null:
-								is_camp = cell in tm.camps["basic"]
-								is_dragon = cell in tm.camps["dragon"]
+							if tm_root != null:
+								is_camp = cell in tm_root.camps["basic"]
+								is_dragon = cell in tm_root.camps["dragon"]
 							if is_camp or is_dragon:
 								var camp_key = "dragon" if is_dragon else "camp"
 								var camp_atlas = hex_map.camp_atlas_tiles.get(camp_key, hex_map.ground_tile)
@@ -138,8 +137,7 @@ func _update_fog():
 							structure.z_index = 6
 					var unit = $"..".get_unit_at(cell)
 					if unit != null:
-						var tm = $"../.."
-						if tm != null and tm.has_method("is_unit_hidden_to_local") and tm.is_unit_hidden_to_local(unit):
+						if tm_root != null and tm_root.has_method("is_unit_hidden_to_local") and tm_root.is_unit_hidden_to_local(unit):
 							unit.visible = false
 						else:
 							unit.visible = true
@@ -148,12 +146,11 @@ func _update_fog():
 						structure_unit.visible = true
 	if not $"../../UI/DevPanel/VBoxContainer/FogCheckButton".button_pressed:
 		for unit in all_units:
-			var tm = $"../.."
-			if tm != null and tm.has_method("is_unit_hidden_to_local") and tm.is_unit_hidden_to_local(unit):
+			if tm_root != null and tm_root.has_method("is_unit_hidden_to_local") and tm_root.is_unit_hidden_to_local(unit):
 				unit.visible = false
 			else:
 				unit.visible = true
-	if $"../..".has_method("update_neutral_markers"):
-		$"../..".update_neutral_markers()
-	if $"../..".has_method("refresh_structure_markers"):
-		$"../..".refresh_structure_markers()
+	if tm_root != null and tm_root.has_method("update_neutral_markers"):
+		tm_root.update_neutral_markers()
+	if tm_root != null and tm_root.has_method("refresh_structure_markers"):
+		tm_root.refresh_structure_markers()
