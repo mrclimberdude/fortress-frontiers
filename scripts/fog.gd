@@ -75,6 +75,9 @@ func _update_fog():
 				in_sight = $"..".get_reachable_tiles(unit.grid_pos, unit.sight_range, "visibility")
 			for cell in in_sight["tiles"]:
 				visiblity[player][cell] = 2
+		var tm = $"../.."
+		if tm != null and tm.has_method("update_structure_memory_for"):
+			tm.update_structure_memory_for(player, visiblity[player])
 		if player == $"../..".local_player_id:
 			for cell in visiblity[player]:
 				var tint

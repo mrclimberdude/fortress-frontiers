@@ -165,6 +165,7 @@ var buildable_structures := {}
 var spawn_tower_positions := { "player1": [], "player2": [] }
 var income_tower_positions := { "player1": [], "player2": [] }
 var structure_markers := {}
+var structure_memory := { "player1": {}, "player2": {} }
 var _structure_marker_points: PackedVector2Array = PackedVector2Array()
 
 func _get_terrain_tile_data(cell: Vector2i) -> TileData:
@@ -311,14 +312,17 @@ func get_effective_ranged_range(unit) -> int:
 		range += TOWER_RANGE_BONUS
 	return range
 
-func _structure_is_visible_to_local(state: Dictionary) -> bool:
+func _structure_is_visible_to_viewer(state: Dictionary, viewer_id: String) -> bool:
 	if state.is_empty():
 		return false
 	var stype = str(state.get("type", ""))
 	var status = str(state.get("status", ""))
 	if stype == STRUCT_TRAP and status == STRUCT_STATUS_INTACT:
-		return str(state.get("owner", "")) == local_player_id
+		return str(state.get("owner", "")) == viewer_id
 	return true
+
+func _structure_is_visible_to_local(state: Dictionary) -> bool:
+	return _structure_is_visible_to_viewer(state, local_player_id)
 
 func _structure_marker_color(state: Dictionary) -> Color:
 	var stype = str(state.get("type", ""))
@@ -448,6 +452,29 @@ func _get_structure_marker_root() -> Node2D:
 		$GameBoardNode/HexTileMap.add_child(root)
 	return root
 
+func _get_structure_memory(player_id: String) -> Dictionary:
+	if player_id == "":
+		return {}
+	if not structure_memory.has(player_id):
+		structure_memory[player_id] = {}
+	return structure_memory[player_id]
+
+func update_structure_memory_for(player_id: String, vis: Dictionary) -> void:
+	if player_id == "":
+		return
+	var memory = _get_structure_memory(player_id)
+	for cell in vis.keys():
+		if int(vis.get(cell, 0)) != 2:
+			continue
+		var state = buildable_structures.get(cell, {})
+		if state.is_empty():
+			memory.erase(cell)
+			continue
+		if _structure_is_visible_to_viewer(state, player_id):
+			memory[cell] = state.duplicate(true)
+		else:
+			memory.erase(cell)
+
 func refresh_structure_markers() -> void:
 	var root = _get_structure_marker_root()
 	for child in root.get_children():
@@ -459,12 +486,31 @@ func refresh_structure_markers() -> void:
 	var vis = {}
 	if fog != null and fog.visiblity.has(local_player_id):
 		vis = fog.visiblity[local_player_id]
+	var memory = _get_structure_memory(local_player_id)
+	if vis.size() > 0:
+		update_structure_memory_for(local_player_id, vis)
+	var draw_states := {}
 	for cell in buildable_structures.keys():
 		var state = buildable_structures[cell]
-		if not _structure_is_visible_to_local(state):
+		var vis_state = 2
+		if vis.size() > 0:
+			vis_state = int(vis.get(cell, 0))
+			if vis_state == 0:
+				continue
+		if vis_state == 2:
+			if _structure_is_visible_to_local(state):
+				draw_states[cell] = state
+		else:
+			if memory.has(cell):
+				draw_states[cell] = memory[cell]
+	for cell in memory.keys():
+		if draw_states.has(cell):
 			continue
-		if vis.size() > 0 and int(vis.get(cell, 0)) == 0:
+		if vis.size() > 0 and int(vis.get(cell, 0)) != 1:
 			continue
+		draw_states[cell] = memory[cell]
+	for cell in draw_states.keys():
+		var state = draw_states[cell]
 		var marker_root = Node2D.new()
 		marker_root.position = tile_map.map_to_world(cell) + tile_size * 0.5
 		marker_root.z_index = 6
@@ -492,6 +538,15 @@ func refresh_structure_markers() -> void:
 				marker.color = _structure_marker_color(state)
 				marker_root.add_child(marker)
 		structure_markers[cell] = marker_root
+
+func refresh_mine_tiles() -> void:
+	var hex = $GameBoardNode/HexTileMap
+	if hex == null:
+		return
+	for owner in ["unclaimed", "player1", "player2"]:
+		var tiles = mines.get(owner, [])
+		for pos in tiles:
+			hex.set_player_tile(pos, owner)
 
 func _connected_road_tiles(player_id: String) -> Dictionary:
 	var connected := {}
@@ -920,6 +975,7 @@ func _collect_state() -> Dictionary:
 		"mines": mines,
 		"structure_positions": structure_positions,
 		"buildable_structures": buildable_structures,
+		"structure_memory": structure_memory,
 		"spawn_tower_positions": spawn_tower_positions,
 		"income_tower_positions": income_tower_positions,
 		"base_positions": base_positions,
@@ -1119,6 +1175,8 @@ func apply_state(state: Dictionary, force_host: bool = false) -> void:
 		structure_positions = state["structure_positions"]
 	if state.has("buildable_structures"):
 		buildable_structures = state["buildable_structures"]
+	if state.has("structure_memory"):
+		structure_memory = state["structure_memory"]
 	if state.has("spawn_tower_positions"):
 		spawn_tower_positions = state["spawn_tower_positions"]
 	if state.has("income_tower_positions"):
@@ -1148,6 +1206,7 @@ func apply_state(state: Dictionary, force_host: bool = false) -> void:
 	$GameBoardNode/FogOfWar._update_fog()
 	update_neutral_markers()
 	refresh_structure_markers()
+	refresh_mine_tiles()
 	_render_damage_log_for_local()
 	emit_signal("state_applied")
 
@@ -1176,6 +1235,7 @@ func _reset_map_state() -> void:
 	spawn_tower_positions = { "player1": [], "player2": [] }
 	income_tower_positions = { "player1": [], "player2": [] }
 	structure_markers.clear()
+	structure_memory = { "player1": {}, "player2": {} }
 	camps = {"basic": [], "dragon": []}
 	mines = {"unclaimed": [], "player1": [], "player2": []}
 	camp_units.clear()

@@ -293,7 +293,6 @@ func _handle_order_request(player_id: String, order: Dictionary) -> Dictionary:
 func _handle_cancel_request(player_id: String) -> void:
 	print("[NetworkManager] Player ", player_id, " cancelled their orders.")
 	_orders_submitted[player_id] = false
-	turn_mgr.reset_orders_for_player(player_id)
 	broadcast_state(turn_mgr.get_state_snapshot())
 
 func broadcast_execution_paused(step_idx: int, neutral_step_idx: int) -> void:

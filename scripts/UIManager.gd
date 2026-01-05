@@ -34,6 +34,7 @@ var damage_panel_full_size: Vector2 = Vector2.ZERO
 var damage_panel_full_position: Vector2 = Vector2.ZERO
 var auto_pass_enabled: bool = false
 var last_damage_log_count: int = 0
+var done_button_default_modulate: Color = Color(1, 1, 1)
 
 @onready var turn_mgr = get_node(turn_manager_path) as Node
 @onready var unit_mgr = get_node(unit_manager_path) as Node
@@ -47,6 +48,7 @@ var last_damage_log_count: int = 0
 @onready var phase_label   : Label       = exec_panel.get_node("ExecutionBox/PhaseLabel")
 @onready var next_button   : Button      = exec_panel.get_node("ExecutionBox/ControlsRow/NextButton")
 @onready var auto_pass_check = $ExecutionPanel/ExecutionBox/ControlsRow/AutoPassCheckButton as CheckButton
+@onready var done_button = $Panel/VBoxContainer/DoneButton as Button
 @onready var cancel_done_button = $CancelDoneButton as Button
 @onready var dev_mode_toggle = get_node(dev_mode_toggle_path) as CheckButton
 @onready var dev_panel = $DevPanel
@@ -164,6 +166,8 @@ func _ready():
 					 Callable(self, "_on_done_pressed"))
 	$CancelDoneButton.connect("pressed",
 					 Callable(self, "_on_cancel_pressed"))
+	if done_button != null:
+		done_button_default_modulate = done_button.self_modulate
 	$UnitStatsCheckButton.connect("toggled",
 					Callable(self, "_on_stats_toggled"))
 	$BuildingStatsCheckButton.connect("toggled",
@@ -436,12 +440,14 @@ func _on_orders_phase_begin(player: String) -> void:
 	$Panel.visible = true
 	allow_clicks = true
 	move_priority = 0
+	_update_done_button_state()
 
 func _on_orders_phase_end() -> void:
 	game_board.clear_highlights()
 	$"../GameBoardNode/OrderReminderMap".clear()
 	$Panel.visible = false
 	cancel_done_button.visible = false
+	_update_done_button_state()
 
 func _on_archer_pressed():
 	placing_unit = "archer"
@@ -570,6 +576,36 @@ func _update_auto_pass_for_damage() -> void:
 				auto_pass_check.button_pressed = false
 	last_damage_log_count = current
 
+func _has_unordered_units(player_id: String) -> bool:
+	if player_id == "":
+		return false
+	if game_board == null:
+		return false
+	var all_units = game_board.get_all_units()
+	var units = all_units.get(player_id, [])
+	for unit in units:
+		if unit == null or not is_instance_valid(unit):
+			continue
+		if unit.is_base or unit.is_tower:
+			continue
+		if not unit.ordered:
+			return true
+	return false
+
+func _update_done_button_state() -> void:
+	if done_button == null:
+		return
+	if turn_mgr == null:
+		done_button.self_modulate = done_button_default_modulate
+		return
+	if not $Panel.visible or turn_mgr.current_phase != turn_mgr.Phase.ORDERS:
+		done_button.self_modulate = done_button_default_modulate
+		return
+	if _has_unordered_units(current_player):
+		done_button.self_modulate = Color(1.0, 0.6, 0.6)
+	else:
+		done_button.self_modulate = done_button_default_modulate
+
 func _auto_pass_continue() -> void:
 	if not auto_pass_enabled:
 		return
@@ -610,55 +646,68 @@ func _on_load_autosave_pressed() -> void:
 		gold_lbl.text = "[Load failed]"
 
 func _buy_error_message(reason: String, cost: int) -> String:
+	var msg := ""
 	match reason:
 		"not_enough_gold":
 			if cost > 0:
-				return "[Not enough gold] Need %d" % cost
-			return "[Not enough gold]"
+				msg = "[Not enough gold] Need %d" % cost
+			else:
+				msg = "[Not enough gold]"
 		"unknown_unit":
-			return "[Unknown unit]"
+			msg = "[Unknown unit]"
 		_:
-			return "[Purchase failed]"
+			msg = "[Purchase failed]"
+	return _format_error_with_gold(msg)
 
 func _undo_error_message(reason: String) -> String:
+	var msg := ""
 	match reason:
 		"not_owner":
-			return "[Undo failed: not owner]"
+			msg = "[Undo failed: not owner]"
 		"not_just_purchased":
-			return "[Undo failed: not a fresh buy]"
+			msg = "[Undo failed: not a fresh buy]"
 		"not_found":
-			return "[Undo failed: unit missing]"
+			msg = "[Undo failed: unit missing]"
 		_:
-			return "[Undo failed]"
+			msg = "[Undo failed]"
+	return _format_error_with_gold(msg)
 
 func _order_error_message(reason: String) -> String:
+	var msg := ""
 	match reason:
 		"wrong_phase":
-			return "[Orders closed]"
+			msg = "[Orders closed]"
 		"not_owner":
-			return "[Order failed: not owner]"
+			msg = "[Order failed: not owner]"
 		"not_builder":
-			return "[Order failed: builder only]"
+			msg = "[Order failed: builder only]"
 		"unit_missing":
-			return "[Order failed: unit missing]"
+			msg = "[Order failed: unit missing]"
 		"invalid_unit":
-			return "[Order failed: invalid unit]"
+			msg = "[Order failed: invalid unit]"
 		"invalid_path":
-			return "[Order failed: invalid path]"
+			msg = "[Order failed: invalid path]"
 		"invalid_target":
-			return "[Order failed: invalid target]"
+			msg = "[Order failed: invalid target]"
 		"invalid_structure":
-			return "[Order failed: invalid structure]"
+			msg = "[Order failed: invalid structure]"
 		"invalid_tile":
-			return "[Order failed: invalid tile]"
+			msg = "[Order failed: invalid tile]"
 		"out_of_range":
-			return "[Order failed: out of range]"
+			msg = "[Order failed: out of range]"
 		"not_ready":
-			return "[Order failed: unit not ready]"
+			msg = "[Order failed: unit not ready]"
 		"not_enough_gold":
-			return "[Order failed: not enough gold]"
+			msg = "[Order failed: not enough gold]"
 		_:
-			return "[Order failed]"
+			msg = "[Order failed]"
+	return _format_error_with_gold(msg)
+
+func _format_error_with_gold(message: String) -> String:
+	if turn_mgr == null or current_player == "":
+		return message
+	var gold = turn_mgr.player_gold.get(current_player, 0)
+	return "%s\nGold: %d" % [message, gold]
 
 func _on_buy_result(player_id: String, unit_type: String, grid_pos: Vector2i, ok: bool, reason: String, cost: int) -> void:
 	if player_id != turn_mgr.local_player_id:
@@ -704,6 +753,7 @@ func _on_order_result(player_id: String, unit_net_id: int, order: Dictionary, ok
 			unit.ordered = true
 		_draw_all()
 		$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
+		_update_done_button_state()
 	else:
 		gold_lbl.text = _order_error_message(reason)
 	
@@ -742,6 +792,7 @@ func _on_cancel_game_pressed():
 	_reset_ui_for_snapshot()
 	_on_stats_toggled(false)
 	_on_building_stats_toggled(false)
+	_update_done_button_state()
 	NetworkManager.close_connection()
 
 func _on_finish_move_button_pressed():
@@ -808,6 +859,7 @@ func _on_action_selected(id: int) -> void:
 				NetworkManager.request_undo_buy(player_id, unit_id)
 			currently_selected_unit = null
 			$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
+			_update_done_button_state()
 		1:
 			action_mode = "move"
 			current_path = [currently_selected_unit.grid_pos]
@@ -942,7 +994,7 @@ func _on_done_pressed():
 
 func _on_cancel_pressed():
 	NetworkManager.cancel_orders(current_player)
-	gold_lbl.text = "Orders cancelled - waiting on host"
+	gold_lbl.text = "Orders unsubmitted - edit and resubmit"
 	_draw_all()
 	currently_selected_unit = null
 	action_mode = ""
@@ -1349,6 +1401,7 @@ func finish_current_path():
 	remaining_moves = 0
 	game_board.clear_highlights()
 	$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
+	_update_done_button_state()
 	
 func _on_state_applied() -> void:
 	_reset_ui_for_snapshot()
@@ -1357,6 +1410,7 @@ func _on_state_applied() -> void:
 		gold_lbl.text = "Current Gold: %d" % [turn_mgr.player_gold.get(current_player, 0)]
 		income_lbl.text = "Income: %d per turn" % turn_mgr.player_income.get(current_player, 0)
 		$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
+		_update_done_button_state()
 	_draw_all()
 	_update_auto_pass_for_damage()
 
@@ -1382,6 +1436,7 @@ func _unhandled_input(ev):
 					gold_lbl.text = "%s Gold: %d" % [current_player, turn_mgr.player_gold[current_player]]
 					placing_unit = ""
 					$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
+					_update_done_button_state()
 				else:
 					gold_lbl.text = "[Not enough gold]\nGold: %d" % turn_mgr.player_gold[current_player]
 			else:
@@ -1389,6 +1444,7 @@ func _unhandled_input(ev):
 				placing_unit = ""
 				gold_lbl.text = "Purchase requested"
 				$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
+				_update_done_button_state()
 		else:
 			gold_lbl.text = "[Can't place there]\nGold: %d" % turn_mgr.player_gold[current_player]
 		return
