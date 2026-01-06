@@ -1017,6 +1017,9 @@ func _collect_state_for(viewer_id: String) -> Dictionary:
 	var viewer_orders := {}
 	viewer_orders[viewer_id] = player_orders.get(viewer_id, {}).duplicate(true)
 	state["player_orders"] = viewer_orders
+	var fog = $GameBoardNode.get_node_or_null("FogOfWar")
+	if fog != null and fog.visiblity.has(viewer_id):
+		state["fog_visibility"] = { viewer_id: fog.visiblity[viewer_id].duplicate(true) }
 	return state
 
 func get_state_snapshot_for(viewer_id: String) -> Dictionary:
@@ -1239,7 +1242,11 @@ func apply_state(state: Dictionary, force_host: bool = false) -> void:
 		var fog = $GameBoardNode.get_node_or_null("FogOfWar")
 		var fog_data = state["fog_visibility"]
 		if fog != null and fog_data is Dictionary:
-			fog.visiblity = fog_data.duplicate(true)
+			if fog.visiblity == null or fog.visiblity.is_empty():
+				fog.reset_fog()
+			for pid in fog_data.keys():
+				if fog_data[pid] is Dictionary:
+					fog.visiblity[pid] = fog_data[pid].duplicate(true)
 	$GameBoardNode/FogOfWar._update_fog()
 	update_neutral_markers()
 	refresh_structure_markers()
@@ -1862,7 +1869,12 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 						result["reason"] = "invalid_tile"
 						return result
 				else:
-					if not _is_open_terrain(target_tile) or $GameBoardNode._terrain_is_impassable(target_tile):
+					var terrain = _terrain_type(target_tile)
+					if struct_type == STRUCT_TRAP:
+						if terrain in ["mountain", "lake"] or $GameBoardNode._terrain_is_impassable(target_tile):
+							result["reason"] = "invalid_tile"
+							return result
+					elif not _is_open_terrain(target_tile) or $GameBoardNode._terrain_is_impassable(target_tile):
 						result["reason"] = "invalid_tile"
 						return result
 			else:
