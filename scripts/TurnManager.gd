@@ -1151,6 +1151,12 @@ func _apply_units(units_data: Array) -> void:
 		unit.ordered = bool(data.get("ordered", false))
 		unit.last_damaged_by = data.get("last_damaged_by", "")
 		unit.set_health_bar()
+		if str(unit.unit_type) == DRAGON_TYPE:
+			var reward = dragon_rewards.get(unit.grid_pos, "")
+			if reward == "" and dragon_spawn_counts.has(unit.grid_pos):
+				var count = int(dragon_spawn_counts.get(unit.grid_pos, 1)) - 1
+				reward = _dragon_reward_for_pos(unit.grid_pos, max(count, 0))
+			_apply_dragon_reward_color(unit, reward)
 		var net_id = int(unit.net_id)
 		if unit.player_id == "player1":
 			max_odd = max(max_odd, net_id)
