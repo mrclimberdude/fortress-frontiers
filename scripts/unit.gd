@@ -21,6 +21,8 @@ extends Node2D
 @export var ordered:         bool = false
 @export var is_defending:    bool = false
 @export var is_healing:      bool = false
+@export var auto_heal:       bool = false
+@export var auto_defend:     bool = false
 @export var is_moving:       bool = false
 @export var is_looking_out:  bool = false
 @export var moving_to:       Vector2i

@@ -745,8 +745,12 @@ func _queue_neutral_attack(attacker, target, atk_mode: String, dmg_map: Dictiona
 func _camp_gold_reward(pos: Vector2i) -> int:
 	var count = camp_respawn_counts.get(pos, 0)
 	var seed = int(pos.x * 73856093) ^ int(pos.y * 19349663) ^ int(count * 83492791)
-	var span = max(1, camp_gold_max - camp_gold_min + 1)
-	return camp_gold_min + (abs(seed) % span)
+	var min_val = int(ceil(float(camp_gold_min) / 5.0)) * 5
+	var max_val = int(floor(float(camp_gold_max) / 5.0)) * 5
+	if max_val < min_val:
+		return camp_gold_min
+	var steps = int(((max_val - min_val) / 5) + 1)
+	return min_val + (abs(seed) % steps) * 5
 
 func _roll_camp_respawn() -> int:
 	return rng.randi_range(camp_respawn_min, camp_respawn_max)
@@ -881,6 +885,8 @@ func _serialize_unit(unit) -> Dictionary:
 		"max_health": unit.max_health,
 		"is_defending": unit.is_defending,
 		"is_healing": unit.is_healing,
+		"auto_heal": unit.auto_heal,
+		"auto_defend": unit.auto_defend,
 		"is_moving": unit.is_moving,
 		"is_looking_out": unit.is_looking_out,
 		"moving_to": unit.moving_to,
@@ -1030,9 +1036,13 @@ func save_game(path: String = SAVE_DEFAULT_PATH, allow_non_orders: bool = false)
 	if current_phase != Phase.ORDERS and not allow_non_orders:
 		push_error("Save failed: only supported during the orders phase.")
 		return false
+	var state = _collect_state()
+	var fog = $GameBoardNode.get_node_or_null("FogOfWar")
+	if fog != null:
+		state["fog_visibility"] = fog.visiblity.duplicate(true)
 	var payload = {
 		"save_version": SAVE_VERSION,
-		"state": _encode_value(_collect_state())
+		"state": _encode_value(state)
 	}
 	var file = FileAccess.open(path, FileAccess.WRITE)
 	if file == null:
@@ -1131,6 +1141,8 @@ func _apply_units(units_data: Array) -> void:
 		unit.max_health = int(data.get("max_health", unit.max_health))
 		unit.is_defending = bool(data.get("is_defending", false))
 		unit.is_healing = bool(data.get("is_healing", false))
+		unit.auto_heal = bool(data.get("auto_heal", false))
+		unit.auto_defend = bool(data.get("auto_defend", false))
 		unit.is_moving = bool(data.get("is_moving", false))
 		unit.is_looking_out = bool(data.get("is_looking_out", false))
 		unit.moving_to = data.get("moving_to", unit.grid_pos)
@@ -1217,6 +1229,11 @@ func apply_state(state: Dictionary, force_host: bool = false) -> void:
 				player_orders[pid] = incoming_orders[pid]
 	NetworkManager.player_orders = player_orders
 	committed_orders = state.get("committed_orders", { "player1": {}, "player2": {} })
+	if state.has("fog_visibility"):
+		var fog = $GameBoardNode.get_node_or_null("FogOfWar")
+		var fog_data = state["fog_visibility"]
+		if fog != null and fog_data is Dictionary:
+			fog.visiblity = fog_data.duplicate(true)
 	$GameBoardNode/FogOfWar._update_fog()
 	update_neutral_markers()
 	refresh_structure_markers()
@@ -1491,6 +1508,8 @@ func _do_upkeep() -> void:
 	var all_units = $GameBoardNode.get_all_units()
 	for p in ["player1", "player2"]:
 		player_orders[p].clear()
+		if NetworkManager.player_orders.has(p):
+			NetworkManager.player_orders[p].clear()
 		for unit in all_units[p]:
 			unit.is_defending = false
 			unit.just_purchased = false
@@ -1500,14 +1519,65 @@ func _do_upkeep() -> void:
 				unit.curr_health += unit.regen
 				unit.set_health_bar()
 				unit.is_healing = false
+			if unit.auto_heal and unit.curr_health >= unit.max_health:
+				unit.auto_heal = false
 	for unit in all_units.get("neutral", []):
 		unit.is_defending = false
 		unit.is_moving = false
+	_apply_auto_heal_orders(all_units)
+	_apply_auto_defend_orders(all_units)
 	_tick_neutral_respawns()
 	$GameBoardNode/FogOfWar._update_fog()
 	$UI/DamagePanel.visible = true
 	$GameBoardNode/OrderReminderMap.highlight_unordered_units(local_player_id)
 	_broadcast_state()
+
+func _apply_auto_heal_orders(all_units: Dictionary) -> void:
+	for player in ["player1", "player2"]:
+		if not all_units.has(player):
+			continue
+		var orders = player_orders.get(player, {})
+		if not NetworkManager.player_orders.has(player):
+			NetworkManager.player_orders[player] = orders
+		for unit in all_units[player]:
+			if unit == null or unit.is_base or unit.is_tower:
+				continue
+			if unit.curr_health <= 0:
+				unit.auto_heal = false
+				continue
+			if not unit.auto_heal:
+				continue
+			if unit.curr_health >= unit.max_health:
+				unit.auto_heal = false
+				continue
+			var order = {"unit_net_id": unit.net_id, "type": "heal", "auto_heal": true}
+			orders[unit.net_id] = order
+			NetworkManager.player_orders[player][unit.net_id] = order
+			_apply_order_flags(unit, order)
+		player_orders[player] = orders
+
+func _apply_auto_defend_orders(all_units: Dictionary) -> void:
+	for player in ["player1", "player2"]:
+		if not all_units.has(player):
+			continue
+		var orders = player_orders.get(player, {})
+		if not NetworkManager.player_orders.has(player):
+			NetworkManager.player_orders[player] = orders
+		for unit in all_units[player]:
+			if unit == null or unit.is_base or unit.is_tower:
+				continue
+			if unit.curr_health <= 0:
+				unit.auto_defend = false
+				continue
+			if not unit.auto_defend:
+				continue
+			if orders.has(unit.net_id):
+				continue
+			var order = {"unit_net_id": unit.net_id, "type": "defend", "auto_defend": true}
+			orders[unit.net_id] = order
+			NetworkManager.player_orders[player][unit.net_id] = order
+			_apply_order_flags(unit, order)
+		player_orders[player] = orders
 # --------------------------------------------------------
 # Phase 2: Orders — async per-player input
 # --------------------------------------------------------
@@ -1586,6 +1656,10 @@ func _clear_unit_order_flags(unit) -> void:
 
 func _apply_order_flags(unit, order: Dictionary) -> void:
 	_clear_unit_order_flags(unit)
+	if bool(order.get("auto_heal", false)):
+		unit.auto_heal = true
+	if bool(order.get("auto_defend", false)):
+		unit.auto_defend = true
 	match order.get("type", ""):
 		"move":
 			unit.is_moving = true
@@ -1636,6 +1710,10 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 	if unit.just_purchased and order_type == "move" and not unit.first_turn_move:
 		result["reason"] = "not_ready"
 		return result
+	if order_type != "heal_until_full" and order_type != "heal":
+		unit.auto_heal = false
+	if order_type != "defend_always" and order_type != "defend":
+		unit.auto_defend = false
 
 	var sanitized := {"unit_net_id": unit_net_id, "type": order_type}
 	match order_type:
@@ -1718,8 +1796,16 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 			sanitized["priority"] = int(order.get("priority", 0))
 		"heal":
 			pass
+		"heal_until_full":
+			unit.auto_heal = true
+			sanitized["type"] = "heal"
+			sanitized["auto_heal"] = true
 		"defend":
 			pass
+		"defend_always":
+			unit.auto_defend = true
+			sanitized["type"] = "defend"
+			sanitized["auto_defend"] = true
 		"lookout":
 			var unit_type = str(unit.unit_type).to_lower()
 			if unit_type != "scout":

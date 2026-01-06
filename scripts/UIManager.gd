@@ -776,6 +776,10 @@ func _on_order_result(player_id: String, unit_net_id: int, order: Dictionary, ok
 			unit.is_defending = false
 			unit.is_healing = false
 			unit.is_moving = false
+			if order.get("type", "") != "heal":
+				unit.auto_heal = false
+			if order.get("type", "") != "defend":
+				unit.auto_defend = false
 			match order.get("type", ""):
 				"move":
 					unit.is_moving = true
@@ -784,8 +788,12 @@ func _on_order_result(player_id: String, unit_net_id: int, order: Dictionary, ok
 						unit.moving_to = path[1]
 				"heal":
 					unit.is_healing = true
+					if bool(order.get("auto_heal", false)):
+						unit.auto_heal = true
 				"defend":
 					unit.is_defending = true
+					if bool(order.get("auto_defend", false)):
+						unit.auto_defend = true
 			unit.ordered = true
 		_draw_all()
 		$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
@@ -874,7 +882,9 @@ func _on_unit_selected(unit: Node) -> void:
 	if unit.can_melee:
 		action_menu.add_item("Melee Attack", 3)
 	action_menu.add_item("Heal", 4)
+	action_menu.add_item("Heal Until Full", 10)
 	action_menu.add_item("Defend", 5)
+	action_menu.add_item("Always Defend", 11)
 	if str(unit.unit_type).to_lower() == "scout":
 		action_menu.add_item("Lookout", 9)
 	action_menu.add_item("Sabotage", 6)
@@ -941,11 +951,26 @@ func _on_action_selected(id: int) -> void:
 			})
 			action_mode = ""
 		
+		10:
+			print("Heal-until-full selected for %s" % currently_selected_unit.name)
+			NetworkManager.request_order(current_player, {
+				"unit_net_id": currently_selected_unit.net_id,
+				"type": "heal_until_full",
+			})
+			action_mode = ""
+
 		5:
 			print("Defend selected for %s" % currently_selected_unit.name)
 			NetworkManager.request_order(current_player, {
 				"unit_net_id": currently_selected_unit.net_id,
 				"type": "defend",
+			})
+			action_mode = ""
+		11:
+			print("Always-defend selected for %s" % currently_selected_unit.name)
+			NetworkManager.request_order(current_player, {
+				"unit_net_id": currently_selected_unit.net_id,
+				"type": "defend_always",
 			})
 			action_mode = ""
 		9:
