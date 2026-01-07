@@ -63,6 +63,7 @@ const TOWER_INCOME   : int = 5
 const SPECIAL_INCOME : int = 10
 const MINER_BONUS    : int = 15
 const PHALANX_BONUS     : int = 20
+const PHALANX_ADJ_BONUS : int = 2
 
 @export var structure_positions = []
 
@@ -2016,6 +2017,19 @@ func get_all_orders_for_phase(player_id: String) -> Array:
 	push_error("Unknown player in get_orders_for_phase: %s" % player_id)
 	return []
 
+func _has_adjacent_defending_phalanx(unit) -> bool:
+	if unit == null or not is_instance_valid(unit):
+		return false
+	for neighbor in $GameBoardNode.get_offset_neighbors(unit.grid_pos):
+		var other = $GameBoardNode.get_unit_at(neighbor)
+		if other == null:
+			continue
+		if other.player_id != unit.player_id:
+			continue
+		if other.is_phalanx and other.is_defending:
+			return true
+	return false
+
 # Called by UIManager when a player hits 'Done'
 func submit_player_order(player: String) -> void:
 	NetworkManager.submit_orders(player, [])
@@ -2046,6 +2060,8 @@ func calculate_damage(attacker, defender, atk_mode, num_atkrs):
 			atkr_str += TOWER_RANGED_BONUS
 		else:
 			atkr_str += TOWER_MELEE_BONUS
+	if _has_adjacent_defending_phalanx(attacker):
+		atkr_str += PHALANX_ADJ_BONUS
 	if atk_mode == "ranged":
 		atkr_str += player_ranged_bonus.get(attacker.player_id, 0)
 	else:
@@ -2069,6 +2085,8 @@ func calculate_damage(attacker, defender, atk_mode, num_atkrs):
 			defr_str += fort_melee_bonus
 	if _unit_on_friendly_tower(defender):
 		defr_str += TOWER_MELEE_BONUS
+	if _has_adjacent_defending_phalanx(defender):
+		defr_str += PHALANX_ADJ_BONUS
 	if atk_mode == "ranged":
 		defr_str += _terrain_bonus(defender.grid_pos, "ranged_defense_bonus")
 	else:
@@ -2083,6 +2101,8 @@ func calculate_damage(attacker, defender, atk_mode, num_atkrs):
 			defr_ranged_str += fort_ranged_bonus
 		if _unit_on_friendly_tower(defender):
 			defr_ranged_str += TOWER_RANGED_BONUS
+		if _has_adjacent_defending_phalanx(defender):
+			defr_ranged_str += PHALANX_ADJ_BONUS
 		defr_ranged_str += _terrain_bonus(defender.grid_pos, "ranged_defense_bonus")
 		atkr_in_dmg = 30 * (1.041**(defr_ranged_str - attacker.melee_strength * atkr_damaged_penalty))
 	else:
