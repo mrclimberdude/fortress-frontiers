@@ -2042,7 +2042,7 @@ func calculate_damage(attacker, defender, atk_mode, num_atkrs):
 	if not is_instance_valid(attacker) or not is_instance_valid(defender):
 		return [0.0, 0.0]
 	var atkr_damaged_penalty = 1.0
-	if attacker.player_id != "neutral":
+	if attacker.player_id != "neutral" and not attacker.is_base and not attacker.is_tower:
 		atkr_damaged_penalty = 1 - ((100 - attacker.curr_health) * 0.005)
 	var atkr_str
 	if atk_mode == "ranged":
@@ -2069,7 +2069,7 @@ func calculate_damage(attacker, defender, atk_mode, num_atkrs):
 	if atk_mode != "ranged":
 		atkr_str += _terrain_bonus(attacker.grid_pos, "melee_attack_bonus")
 	var defr_damaged_penalty = 1.0
-	if defender.player_id != "neutral":
+	if defender.player_id != "neutral" and not defender.is_base and not defender.is_tower:
 		defr_damaged_penalty = 1 - ((100 - defender.curr_health) * 0.005)
 	var defr_str = defender.melee_strength
 	if defender.player_id != "neutral":
