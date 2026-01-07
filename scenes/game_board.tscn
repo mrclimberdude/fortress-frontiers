@@ -1,4 +1,4 @@
-[gd_scene load_steps=36 format=4 uid="uid://dnx0cxl4a46lg"]
+[gd_scene load_steps=37 format=4 uid="uid://dnx0cxl4a46lg"]
 
 [ext_resource type="Script" uid="uid://daaph63aiv3vd" path="res://scripts/TurnManager.gd" id="1_xh13x"]
 [ext_resource type="Texture2D" uid="uid://ciitwnd7hxyra" path="res://assets/spritesheet.png" id="2_17g6i"]
@@ -33,6 +33,7 @@
 [ext_resource type="Resource" uid="uid://beaii07ncs82k" path="res://maps/map_12.tres" id="19_t7svm"]
 [ext_resource type="Resource" uid="uid://bifj26c57n8mi" path="res://maps/map_13.tres" id="20_wvnob"]
 [ext_resource type="Resource" uid="uid://cdo6vdf1kde13" path="res://maps/map_14.tres" id="21_wvnob"]
+[ext_resource type="Resource" uid="uid://e85ygnu5xomy" path="res://maps/map_15.tres" id="22_0eiui"]
 
 [sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_17g6i"]
 texture = ExtResource("2_17g6i")
@@ -79,7 +80,7 @@ scout_scene = ExtResource("4_04ve2")
 miner_scene = ExtResource("5_c1to4")
 phalanx_scene = ExtResource("6_w5uqb")
 cavalry_scene = ExtResource("7_hl2y5")
-map_data = Array[Resource]([ExtResource("8_54ie0"), ExtResource("9_hrnlr"), ExtResource("10_840ua"), ExtResource("11_nupcc"), ExtResource("12_faqeg"), ExtResource("13_840ua"), ExtResource("14_nupcc"), ExtResource("15_faqeg"), ExtResource("16_nev5x"), ExtResource("17_y3qg2"), ExtResource("18_o083x"), ExtResource("19_t7svm"), ExtResource("20_wvnob"), ExtResource("21_wvnob")])
+map_data = Array[Resource]([ExtResource("8_54ie0"), ExtResource("9_hrnlr"), ExtResource("10_840ua"), ExtResource("11_nupcc"), ExtResource("12_faqeg"), ExtResource("13_840ua"), ExtResource("14_nupcc"), ExtResource("15_faqeg"), ExtResource("16_nev5x"), ExtResource("17_y3qg2"), ExtResource("18_o083x"), ExtResource("19_t7svm"), ExtResource("20_wvnob"), ExtResource("21_wvnob"), ExtResource("22_0eiui")])
 fort_sprite = ExtResource("10_o2enx")
 road_sprite = ExtResource("11_eerdt")
 rail_sprite = ExtResource("12_2sbk6")
