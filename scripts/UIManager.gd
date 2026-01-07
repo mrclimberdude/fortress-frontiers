@@ -1579,8 +1579,6 @@ func _unhandled_input(ev):
 		remaining_moves -= cost_used
 		
 		_draw_partial_path()
-		finish_move_button.set_position(ev.position)
-		finish_move_button.visible = true
 		if remaining_moves <= 0.001:
 			finish_current_path()
 			return
@@ -1589,8 +1587,13 @@ func _unhandled_input(ev):
 		var tiles = result["tiles"]
 		if tiles.has(cell):
 			tiles.erase(cell)
+		if tiles.size() == 0:
+			finish_current_path()
+			return
 		game_board.show_highlights(tiles)
 		current_reachable = result
+		finish_move_button.set_position(ev.position)
+		finish_move_button.visible = true
 		return
 
 	if action_mode == "ranged" or action_mode == "melee" and currently_selected_unit:
