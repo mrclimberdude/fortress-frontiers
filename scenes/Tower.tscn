@@ -22,10 +22,10 @@ is_tower = true
 texture = ExtResource("2_kl3vk")
 
 [node name="HealthBar" type="ProgressBar" parent="." index="1"]
-offset_left = 43.0
-offset_top = -54.0
-offset_right = 82.0
-offset_bottom = 41.0
+offset_left = -80.0
+offset_top = 25.0
+offset_right = 76.0
+offset_bottom = 48.0
 theme_override_colors/font_color = Color(0, 0, 0, 1)
 theme_override_styles/background = SubResource("StyleBoxFlat_tqf8n")
 theme_override_styles/fill = SubResource("StyleBoxFlat_qtvpb")

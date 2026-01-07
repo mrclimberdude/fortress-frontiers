@@ -2442,11 +2442,14 @@ func _process_attacks():
 			if target_unit_net_id in melee_attacks.keys():
 				var attacks = melee_attacks.get(target_unit_net_id, [])
 				attacks.sort_custom(func(a,b): return a[1] < b[1])
-				for unit_priority_pair in attacks:
-					var unit = unit_manager.get_unit_by_net_id(unit_priority_pair[0])
-					if unit.curr_health > 0:
-						unit.set_grid_position(target.grid_pos)
-						break
+				var occupant = $GameBoardNode.get_unit_at(target.grid_pos)
+				var allow_move = occupant == null or occupant == target
+				if allow_move:
+					for unit_priority_pair in attacks:
+						var unit = unit_manager.get_unit_by_net_id(unit_priority_pair[0])
+						if unit.curr_health > 0:
+							unit.set_grid_position(target.grid_pos)
+							break
 				pass
 			_cleanup_dead_unit(target)
 		else:
