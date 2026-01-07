@@ -11,6 +11,7 @@ var server_peer_id: int
 var client_peer_id: int
 var mp
 var selected_map_index: int = -1
+var map_selection_mode: String = "random_normal"
 var match_seed: int = -1
 
 

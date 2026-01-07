@@ -30,6 +30,40 @@ var terrain_overlay: TileMapLayer
 var rng := RandomNumberGenerator.new()
 var current_map_index: int = -1
 
+func _map_category_for(md: MapData) -> String:
+	if md == null:
+		return "normal"
+	var cat = str(md.map_category).strip_edges().to_lower()
+	if cat != "":
+		return cat
+	var name = str(md.map_name).strip_edges().to_lower()
+	if name.begins_with("map_"):
+		var suffix = name.substr(4, name.length() - 4)
+		if suffix.is_valid_int():
+			return "normal"
+	return "themed"
+
+func _pick_random_map_index(mode: String) -> int:
+	if map_data.size() == 0:
+		return -1
+	var normalized = str(mode).strip_edges().to_lower()
+	if normalized == "":
+		normalized = "random_normal"
+	var candidates := []
+	for i in range(map_data.size()):
+		var md = map_data[i] as MapData
+		if md == null:
+			continue
+		var cat = _map_category_for(md)
+		if normalized == "random_themed" and cat != "themed":
+			continue
+		if normalized == "random_normal" and cat != "normal":
+			continue
+		candidates.append(i)
+	if candidates.size() == 0:
+		return rng.randi_range(0, map_data.size() - 1)
+	return candidates[rng.randi_range(0, candidates.size() - 1)]
+
 const SAVE_VERSION: int = 1
 const SAVE_DEFAULT_PATH: String = "user://save_game.json"
 const SAVE_AUTOSAVE_PATH: String = "user://autosave.json"
@@ -811,7 +845,7 @@ func _ready():
 	var map_index = -1
 	if is_server:
 		if NetworkManager.selected_map_index < 0:
-			NetworkManager.selected_map_index = rng.randi_range(0, map_data.size() - 1)
+			NetworkManager.selected_map_index = _pick_random_map_index(NetworkManager.map_selection_mode)
 		if NetworkManager.match_seed < 0:
 			NetworkManager.match_seed = rng.randi_range(1, 2147483646)
 		map_index = NetworkManager.selected_map_index
@@ -1478,7 +1512,7 @@ func _ensure_map_loaded() -> void:
 	var map_rng := RandomNumberGenerator.new()
 	map_rng.randomize()
 	if NetworkManager.selected_map_index < 0:
-		NetworkManager.selected_map_index = map_rng.randi_range(0, map_data.size() - 1)
+		NetworkManager.selected_map_index = _pick_random_map_index(NetworkManager.map_selection_mode)
 	if NetworkManager.match_seed < 0:
 		NetworkManager.match_seed = map_rng.randi_range(1, 2147483646)
 	var map_index = NetworkManager.selected_map_index

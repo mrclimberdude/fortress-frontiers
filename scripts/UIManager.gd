@@ -35,6 +35,7 @@ var damage_panel_full_position: Vector2 = Vector2.ZERO
 var auto_pass_enabled: bool = false
 var last_damage_log_count: int = 0
 var done_button_default_modulate: Color = Color(1, 1, 1)
+var _map_select_updating: bool = false
 
 @onready var turn_mgr = get_node(turn_manager_path) as Node
 @onready var unit_mgr = get_node(unit_manager_path) as Node
@@ -60,6 +61,8 @@ var done_button_default_modulate: Color = Color(1, 1, 1)
 @onready var damage_scroll = $DamagePanel/ScrollContainer as ScrollContainer
 @onready var damage_toggle_button = $DamagePanel/ToggleDamageButton as Button
 @onready var finish_move_button = $Panel/FinishMoveButton
+@onready var map_select = $MapSelect as OptionButton
+@onready var map_label = $MapLabel as Label
 
 const ArrowScene = preload("res://scenes/Arrow.tscn")
 const AttackArrowScene = preload("res://scenes/AttackArrow.tscn")
@@ -80,6 +83,10 @@ const MENU_ID_BUILDING_STATS: int = 11
 const MENU_ID_DEV_MODE: int = 12
 const MENU_ID_QUIT: int = 13
 const MENU_ID_SLOT_BASE: int = 100
+const MAP_SELECT_RANDOM_ANY: int = 1000
+const MAP_SELECT_RANDOM_NORMAL: int = 1001
+const MAP_SELECT_RANDOM_THEMED: int = 1002
+const MAP_SELECT_MAP_BASE: int = 2000
 
 const BUILD_OPTIONS = [
 	{"id": 0, "label": "Fortification", "type": "fortification"},
@@ -112,6 +119,7 @@ func _ready():
 					Callable(self, "_on_join_pressed"))
 	$CancelGameButton.connect("pressed",
 					Callable(self, "_on_cancel_game_pressed"))
+	_init_map_select()
 	
 	# dev mode connections
 	dev_mode_toggle.connect("toggled",
@@ -291,6 +299,97 @@ func _init_menu() -> void:
 	damage_panel_full_size = damage_panel.size
 	damage_panel_full_position = damage_panel.position
 	_update_damage_panel()
+
+func _init_map_select() -> void:
+	if map_select == null or turn_mgr == null:
+		return
+	map_select.clear()
+	map_select.add_item("Random (Any)", MAP_SELECT_RANDOM_ANY)
+	map_select.add_item("Random Normal", MAP_SELECT_RANDOM_NORMAL)
+	map_select.add_item("Random Themed", MAP_SELECT_RANDOM_THEMED)
+	var popup = map_select.get_popup()
+	if popup != null:
+		popup.add_separator()
+	var themed := []
+	var normal := []
+	for i in range(turn_mgr.map_data.size()):
+		var md = turn_mgr.map_data[i] as MapData
+		if md == null:
+			continue
+		var name = str(md.map_name)
+		var category = turn_mgr._map_category_for(md)
+		if category == "themed":
+			themed.append({"name": name, "id": MAP_SELECT_MAP_BASE + i})
+		else:
+			normal.append({"name": name, "id": MAP_SELECT_MAP_BASE + i})
+	themed.sort_custom(func(a, b): return str(a["name"]).to_lower() < str(b["name"]).to_lower())
+	normal.sort_custom(func(a, b): return str(a["name"]).to_lower() < str(b["name"]).to_lower())
+	for entry in themed:
+		map_select.add_item(entry["name"], entry["id"])
+	for entry in normal:
+		map_select.add_item(entry["name"], entry["id"])
+	if not map_select.is_connected("item_selected", Callable(self, "_on_map_select_item_selected")):
+		map_select.connect("item_selected", Callable(self, "_on_map_select_item_selected"))
+	_sync_map_select_from_state()
+
+func _sync_map_select_from_state() -> void:
+	if map_select == null:
+		return
+	if NetworkManager.map_selection_mode == "":
+		NetworkManager.map_selection_mode = "random_normal"
+	var id = MAP_SELECT_RANDOM_NORMAL
+	if NetworkManager.selected_map_index >= 0:
+		id = MAP_SELECT_MAP_BASE + NetworkManager.selected_map_index
+	else:
+		match NetworkManager.map_selection_mode:
+			"random_any":
+				id = MAP_SELECT_RANDOM_ANY
+			"random_themed":
+				id = MAP_SELECT_RANDOM_THEMED
+			"random_normal":
+				id = MAP_SELECT_RANDOM_NORMAL
+			_:
+				id = MAP_SELECT_RANDOM_NORMAL
+	_set_map_select_id(id)
+	_apply_map_selection(id)
+
+func _set_map_select_id(id: int) -> void:
+	if map_select == null:
+		return
+	var popup = map_select.get_popup()
+	if popup == null:
+		return
+	var idx = popup.get_item_index(id)
+	if idx < 0:
+		return
+	_map_select_updating = true
+	map_select.select(idx)
+	_map_select_updating = false
+
+func _on_map_select_item_selected(index: int) -> void:
+	if _map_select_updating:
+		return
+	var id = map_select.get_item_id(index)
+	_apply_map_selection(id)
+
+func _apply_map_selection(id: int) -> void:
+	if id == MAP_SELECT_RANDOM_ANY:
+		NetworkManager.selected_map_index = -1
+		NetworkManager.map_selection_mode = "random_any"
+		return
+	if id == MAP_SELECT_RANDOM_NORMAL:
+		NetworkManager.selected_map_index = -1
+		NetworkManager.map_selection_mode = "random_normal"
+		return
+	if id == MAP_SELECT_RANDOM_THEMED:
+		NetworkManager.selected_map_index = -1
+		NetworkManager.map_selection_mode = "random_themed"
+		return
+	if id >= MAP_SELECT_MAP_BASE:
+		var idx = id - MAP_SELECT_MAP_BASE
+		if idx >= 0 and idx < turn_mgr.map_data.size():
+			NetworkManager.selected_map_index = idx
+			NetworkManager.map_selection_mode = "fixed"
 
 func _sync_menu_checks() -> void:
 	if menu_popup == null:
@@ -803,6 +902,11 @@ func _on_order_result(player_id: String, unit_net_id: int, order: Dictionary, ok
 	
 
 func _on_host_pressed():
+	if map_select != null:
+		_apply_map_selection(map_select.get_selected_id())
+	if turn_mgr != null and turn_mgr.has_method("_reset_map_state"):
+		turn_mgr.current_map_index = -1
+		turn_mgr._reset_map_state()
 	var port = $"PortLineEdit".text.strip_edges()
 	NetworkManager.host_game(int(port))
 	turn_mgr.local_player_id = "player1"
@@ -810,6 +914,10 @@ func _on_host_pressed():
 	$JoinButton.visible = false
 	$IPLineEdit.visible = false
 	$PortLineEdit.visible = false
+	if map_select != null:
+		map_select.visible = false
+	if map_label != null:
+		map_label.visible = false
 	$CancelGameButton.visible = true
 
 func _on_join_pressed():
@@ -822,6 +930,10 @@ func _on_join_pressed():
 	$JoinButton.visible = false
 	$IPLineEdit.visible = false
 	$PortLineEdit.visible = false
+	if map_select != null:
+		map_select.visible = false
+	if map_label != null:
+		map_label.visible = false
 	$CancelGameButton.visible = true
 
 func _on_cancel_game_pressed():
@@ -829,6 +941,10 @@ func _on_cancel_game_pressed():
 	$JoinButton.visible = true
 	$IPLineEdit.visible = true
 	$PortLineEdit.visible = true
+	if map_select != null:
+		map_select.visible = true
+	if map_label != null:
+		map_label.visible = true
 	$CancelGameButton.visible = false
 	$Panel.visible = false
 	cancel_done_button.visible = false

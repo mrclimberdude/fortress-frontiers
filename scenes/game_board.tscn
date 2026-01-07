@@ -177,6 +177,19 @@ offset_right = 945.0
 offset_bottom = 50.0
 text = "Dev Mode"
 
+[node name="MapLabel" type="Label" parent="UI"]
+offset_left = 518.0
+offset_top = 250.0
+offset_right = 690.0
+offset_bottom = 270.0
+text = "Map"
+
+[node name="MapSelect" type="OptionButton" parent="UI"]
+offset_left = 517.0
+offset_top = 270.0
+offset_right = 725.0
+offset_bottom = 300.0
+
 [node name="HostButton" type="Button" parent="UI"]
 anchors_preset = -1
 anchor_left = 0.227

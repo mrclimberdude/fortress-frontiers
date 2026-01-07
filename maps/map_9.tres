@@ -1,11 +1,12 @@
 [gd_resource type="Resource" script_class="MapData" load_steps=3 format=3 uid="uid://4s0jemucwhrh"]
 
-[ext_resource type="Script" path="res://scripts/MapData.gd" id="1_6f2al"]
+[ext_resource type="Script" uid="uid://cn4p2nw8xl7rs" path="res://scripts/MapData.gd" id="1_6f2al"]
 [ext_resource type="PackedScene" uid="uid://bbdmf3mn7yqwf" path="res://maps/map_9.tscn" id="2_6f2al"]
 
 [resource]
 script = ExtResource("1_6f2al")
-map_name = "map_1"
+map_name = "map_9"
+map_category = ""
 terrain_scene = ExtResource("2_6f2al")
 base_positions = {
 "player1": Vector2i(-1, 15),

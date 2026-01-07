@@ -1,12 +1,13 @@
 [gd_resource type="Resource" script_class="MapData" load_steps=3 format=3 uid="uid://bo6ykrlgtajb5"]
 
-[ext_resource type="Script" path="res://scripts/MapData.gd" id="1_4g70n"]
-[ext_resource type="PackedScene" uid="uid://geca2mf2s8h" path="res://maps/map_1.tscn" id="2_7xvny"]
+[ext_resource type="Script" uid="uid://cn4p2nw8xl7rs" path="res://scripts/MapData.gd" id="1_ya0nx"]
+[ext_resource type="PackedScene" uid="uid://dxrxtxj8wvgth" path="res://maps/The Wheel.tscn" id="2_pjn8d"]
 
 [resource]
-script = ExtResource("1_4g70n")
-map_name = "map_7"
-terrain_scene = ExtResource("2_7xvny")
+script = ExtResource("1_ya0nx")
+map_name = "The Wheel"
+map_category = ""
+terrain_scene = ExtResource("2_pjn8d")
 base_positions = {
 "player1": Vector2i(-1, 15),
 "player2": Vector2i(35, 15)
