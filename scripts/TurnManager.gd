@@ -3584,4 +3584,13 @@ func undo_buy_unit(player_id: String, unit_net_id: int) -> Dictionary:
 # Stub: determine if a player controls a given tile
 # --------------------------------------------------------
 func _controls_tile(player: String, pos: Vector2i) -> bool:
-	return true  # replace with actual ownership logic
+	if player == "":
+		return false
+	var unit = $GameBoardNode.get_unit_at(pos)
+	if unit != null and unit.player_id != player:
+		return false
+	if base_positions.get(player, Vector2i(999999, 999999)) == pos:
+		return true
+	if pos in mines.get(player, []):
+		return true
+	return false
