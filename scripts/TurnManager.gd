@@ -98,6 +98,8 @@ const SPECIAL_INCOME : int = 10
 const MINER_BONUS    : int = 15
 const PHALANX_BONUS     : int = 20
 const PHALANX_ADJ_BONUS : int = 2
+var state_seq: int = 0
+var last_state_seq_applied: int = -1
 
 @export var structure_positions = []
 
@@ -1042,6 +1044,7 @@ func _collect_state() -> Dictionary:
 			continue
 		units.append(_serialize_unit(unit))
 	return {
+		"state_seq": state_seq,
 		"map_index": current_map_index,
 		"match_seed": NetworkManager.match_seed,
 		"turn_number": turn_number,
@@ -1071,7 +1074,9 @@ func _collect_state() -> Dictionary:
 		"damage_log": damage_log
 	}
 
-func get_state_snapshot() -> Dictionary:
+func get_state_snapshot(bump_seq: bool = false) -> Dictionary:
+	if bump_seq:
+		state_seq += 1
 	return _collect_state()
 
 func _collect_state_for(viewer_id: String) -> Dictionary:
@@ -1096,7 +1101,9 @@ func _collect_state_for(viewer_id: String) -> Dictionary:
 		state["fog_visibility"] = { viewer_id: fog.visiblity[viewer_id].duplicate(true) }
 	return state
 
-func get_state_snapshot_for(viewer_id: String) -> Dictionary:
+func get_state_snapshot_for(viewer_id: String, bump_seq: bool = false) -> Dictionary:
+	if bump_seq:
+		state_seq += 1
 	return _collect_state_for(viewer_id)
 
 func _save_path_for_slot(slot: int) -> String:
@@ -1188,7 +1195,8 @@ func _refresh_fog_after_load() -> void:
 func _broadcast_state() -> void:
 	if not _is_host():
 		return
-	NetworkManager.broadcast_state(_collect_state())
+	var state = get_state_snapshot(true)
+	NetworkManager.broadcast_state(state)
 
 func _clear_units_only() -> void:
 	var hex = $GameBoardNode/HexTileMap
@@ -1273,6 +1281,12 @@ func apply_state(state: Dictionary, force_host: bool = false) -> void:
 		return
 	if state.is_empty():
 		return
+	var incoming_seq = int(state.get("state_seq", -1))
+	if incoming_seq >= 0:
+		if incoming_seq <= last_state_seq_applied:
+			return
+		last_state_seq_applied = incoming_seq
+		state_seq = max(state_seq, incoming_seq)
 	var map_index = int(state.get("map_index", current_map_index))
 	var match_seed = int(state.get("match_seed", NetworkManager.match_seed))
 	if match_seed > 0:

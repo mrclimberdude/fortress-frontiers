@@ -103,10 +103,10 @@ func rpc_request_state() -> void:
 	if not mp.is_server():
 		return
 	var sender = multiplayer.get_remote_sender_id()
-	var state = turn_mgr.get_state_snapshot()
+	var state = turn_mgr.get_state_snapshot(true)
 	var viewer = _peer_id_to_player_id(sender)
 	if viewer != "" and turn_mgr.has_method("get_state_snapshot_for"):
-		state = turn_mgr.get_state_snapshot_for(viewer)
+		state = turn_mgr.get_state_snapshot_for(viewer, true)
 	rpc_id(sender, "rpc_state_snapshot", state)
 	if turn_mgr.current_phase == turn_mgr.Phase.EXECUTION:
 		rpc_id(sender, "rpc_execution_paused", turn_mgr.step_index, turn_mgr.neutral_step_index)
@@ -279,13 +279,13 @@ func request_order(player_id: String, order: Dictionary) -> bool:
 func _handle_buy_request(player_id: String, unit_type: String, grid_pos: Vector2i) -> Dictionary:
 	var result = turn_mgr.buy_unit(player_id, unit_type, grid_pos)
 	if result.get("ok", false):
-		broadcast_state(turn_mgr.get_state_snapshot())
+		broadcast_state(turn_mgr.get_state_snapshot(true))
 	return result
 
 func _handle_undo_buy_request(player_id: String, unit_net_id: int) -> Dictionary:
 	var result = turn_mgr.undo_buy_unit(player_id, unit_net_id)
 	if result.get("ok", false):
-		broadcast_state(turn_mgr.get_state_snapshot())
+		broadcast_state(turn_mgr.get_state_snapshot(true))
 	return result
 
 func _handle_order_request(player_id: String, order: Dictionary) -> Dictionary:
@@ -294,7 +294,7 @@ func _handle_order_request(player_id: String, order: Dictionary) -> Dictionary:
 func _handle_cancel_request(player_id: String) -> void:
 	print("[NetworkManager] Player ", player_id, " cancelled their orders.")
 	_orders_submitted[player_id] = false
-	broadcast_state(turn_mgr.get_state_snapshot())
+	broadcast_state(turn_mgr.get_state_snapshot(true))
 
 func broadcast_execution_paused(step_idx: int, neutral_step_idx: int) -> void:
 	var mp = get_tree().get_multiplayer()
@@ -349,7 +349,7 @@ func _buffer_orders(player_id:String, orders:Array) -> void:
 	if _orders_submitted["player1"] and _orders_submitted["player2"]:
 		print("[NM] Both orders in, broadcasting & emitting orders_ready")
 		turn_mgr.committed_orders = turn_mgr.player_orders.duplicate(true)
-		broadcast_state(turn_mgr.get_state_snapshot())
+		broadcast_state(turn_mgr.get_state_snapshot(true))
 		rpc("rpc_orders_ready", turn_mgr.player_orders)
 		emit_signal("orders_ready", turn_mgr.player_orders)
 
