@@ -955,6 +955,8 @@ func _serialize_unit(unit) -> Dictionary:
 		"is_healing": unit.is_healing,
 		"auto_heal": unit.auto_heal,
 		"auto_defend": unit.auto_defend,
+		"auto_build": unit.auto_build,
+		"auto_build_type": unit.auto_build_type,
 		"is_moving": unit.is_moving,
 		"is_looking_out": unit.is_looking_out,
 		"moving_to": unit.moving_to,
@@ -1214,6 +1216,8 @@ func _apply_units(units_data: Array) -> void:
 		unit.is_healing = bool(data.get("is_healing", false))
 		unit.auto_heal = bool(data.get("auto_heal", false))
 		unit.auto_defend = bool(data.get("auto_defend", false))
+		unit.auto_build = bool(data.get("auto_build", false))
+		unit.auto_build_type = str(data.get("auto_build_type", ""))
 		unit.is_moving = bool(data.get("is_moving", false))
 		unit.is_looking_out = bool(data.get("is_looking_out", false))
 		unit.moving_to = data.get("moving_to", unit.grid_pos)
@@ -1607,6 +1611,7 @@ func _do_upkeep() -> void:
 		unit.is_moving = false
 	_apply_auto_heal_orders(all_units)
 	_apply_auto_defend_orders(all_units)
+	_apply_auto_build_orders(all_units)
 	_tick_neutral_respawns()
 	$GameBoardNode/FogOfWar._update_fog()
 	$UI/DamagePanel.visible = true
@@ -1655,6 +1660,55 @@ func _apply_auto_defend_orders(all_units: Dictionary) -> void:
 			if orders.has(unit.net_id):
 				continue
 			var order = {"unit_net_id": unit.net_id, "type": "defend", "auto_defend": true}
+			orders[unit.net_id] = order
+			NetworkManager.player_orders[player][unit.net_id] = order
+			_apply_order_flags(unit, order)
+		player_orders[player] = orders
+
+func _apply_auto_build_orders(all_units: Dictionary) -> void:
+	for player in ["player1", "player2"]:
+		if not all_units.has(player):
+			continue
+		var orders = player_orders.get(player, {})
+		if not NetworkManager.player_orders.has(player):
+			NetworkManager.player_orders[player] = orders
+		for unit in all_units[player]:
+			if unit == null or not unit.is_builder:
+				if unit != null:
+					unit.auto_build = false
+					unit.auto_build_type = ""
+				continue
+			if unit.curr_health <= 0:
+				unit.auto_build = false
+				unit.auto_build_type = ""
+				continue
+			if not unit.auto_build:
+				continue
+			if orders.has(unit.net_id):
+				continue
+			var state = _structure_state(unit.grid_pos)
+			if state.is_empty():
+				unit.auto_build = false
+				unit.auto_build_type = ""
+				continue
+			if str(state.get("owner", "")) != player:
+				unit.auto_build = false
+				unit.auto_build_type = ""
+				continue
+			if str(state.get("status", "")) != STRUCT_STATUS_BUILDING:
+				unit.auto_build = false
+				unit.auto_build_type = ""
+				continue
+			if unit.auto_build_type != "" and str(state.get("type", "")) != unit.auto_build_type:
+				unit.auto_build = false
+				unit.auto_build_type = ""
+				continue
+			var order = {
+				"unit_net_id": unit.net_id,
+				"type": "build",
+				"structure_type": str(state.get("type", "")),
+				"target_tile": unit.grid_pos
+			}
 			orders[unit.net_id] = order
 			NetworkManager.player_orders[player][unit.net_id] = order
 			_apply_order_flags(unit, order)
@@ -1795,6 +1849,9 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 		unit.auto_heal = false
 	if order_type != "defend_always" and order_type != "defend":
 		unit.auto_defend = false
+	if order_type != "build":
+		unit.auto_build = false
+		unit.auto_build_type = ""
 
 	var sanitized := {"unit_net_id": unit_net_id, "type": order_type}
 	match order_type:
@@ -1967,6 +2024,8 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 			if turn_cost > 0 and player_gold[player_id] < turn_cost:
 				result["reason"] = "not_enough_gold"
 				return result
+			unit.auto_build = true
+			unit.auto_build_type = struct_type
 			sanitized["target_tile"] = target_tile
 			sanitized["structure_type"] = struct_type
 		"repair":
@@ -2622,12 +2681,16 @@ func _apply_build_at(player_id: String, unit, order: Dictionary) -> void:
 	var turn_cost = int(state.get("turn_cost", _structure_turn_cost(struct_type)))
 	if turn_cost > 0:
 		if player_gold[player_id] < turn_cost:
+			unit.auto_build = false
+			unit.auto_build_type = ""
 			return
 		player_gold[player_id] -= turn_cost
 	var remaining = int(state.get("build_left", 0)) - 1
 	state["build_left"] = remaining
 	if remaining <= 0:
 		_finish_structure_build(tile, state)
+		unit.auto_build = false
+		unit.auto_build_type = ""
 	else:
 		buildable_structures[tile] = state
 
