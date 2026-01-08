@@ -1,8 +1,16 @@
-[gd_scene load_steps=2 format=3 uid="uid://c62dn8sldq572"]
+[gd_scene load_steps=3 format=3 uid="uid://c62dn8sldq572"]
 
 [ext_resource type="Script" uid="uid://c37jcfcyvn3oh" path="res://scripts/unit.gd" id="1_c58w5"]
+[ext_resource type="Texture2D" uid="uid://ciitwnd7hxyra" path="res://assets/spritesheet.png" id="2_ownerhex"]
 
 [node name="Unit" type="Node2D"]
 script = ExtResource("1_c58w5")
 
 [node name="Sprite2D" type="Sprite2D" parent="."]
+
+[node name="OwnerOverlay" type="Sprite2D" parent="."]
+visible = false
+z_index = -2
+texture = ExtResource("2_ownerhex")
+region_enabled = true
+region_rect = Rect2(21, 6, 170, 192)

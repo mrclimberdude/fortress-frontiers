@@ -654,6 +654,25 @@ func _special_tile_pid(pos: Vector2i) -> String:
 		return "dragon"
 	return ""
 
+func _refresh_tile_after_unit_change(tile: Vector2i) -> void:
+	var hex = $GameBoardNode/HexTileMap
+	if hex == null:
+		return
+	var special_pid = _special_tile_pid(tile)
+	if special_pid != "":
+		hex.set_player_tile(tile, special_pid)
+		return
+	for owner in ["player1", "player2", "unclaimed"]:
+		var tiles = mines.get(owner, [])
+		if tile in tiles:
+			hex.set_player_tile(tile, owner)
+			return
+	var structure_unit = $GameBoardNode.get_structure_unit_at(tile)
+	if structure_unit != null and (structure_unit.is_base or structure_unit.is_tower):
+		hex.set_player_tile(tile, structure_unit.player_id)
+		return
+	hex.set_player_tile(tile, "")
+
 func _get_neutral_marker_root() -> Node2D:
 	var root = $GameBoardNode/HexTileMap.get_node_or_null("NeutralMarkers")
 	if root == null:
@@ -2227,19 +2246,7 @@ func _cleanup_dead_unit(unit) -> void:
 	died_dmg_report(unit)
 	_handle_neutral_death(unit)
 	$GameBoardNode.vacate(unit.grid_pos, unit)
-	var mobile = $GameBoardNode.get_unit_at(unit.grid_pos)
-	if mobile != null and mobile != unit:
-		$GameBoardNode/HexTileMap.set_player_tile(unit.grid_pos, mobile.player_id)
-	else:
-		var structure = $GameBoardNode.get_structure_unit_at(unit.grid_pos)
-		if structure != null and structure != unit:
-			$GameBoardNode/HexTileMap.set_player_tile(unit.grid_pos, structure.player_id)
-		else:
-			var special_pid = _special_tile_pid(unit.grid_pos)
-			if special_pid == "":
-				$GameBoardNode/HexTileMap.set_player_tile(unit.grid_pos, "")
-			else:
-				$GameBoardNode/HexTileMap.set_player_tile(unit.grid_pos, special_pid)
+	_refresh_tile_after_unit_change(unit.grid_pos)
 	unit_manager.unit_by_net_id.erase(unit.net_id)
 	unit.queue_free()
 
@@ -3510,19 +3517,7 @@ func undo_buy_unit(player_id: String, unit_net_id: int) -> Dictionary:
 	player_orders[player_id].erase(unit.net_id)
 	NetworkManager.player_orders[player_id].erase(unit.net_id)
 	$GameBoardNode.vacate(unit.grid_pos, unit)
-	var mobile = $GameBoardNode.get_unit_at(unit.grid_pos)
-	if mobile != null and mobile != unit:
-		$GameBoardNode/HexTileMap.set_player_tile(unit.grid_pos, mobile.player_id)
-	else:
-		var structure = $GameBoardNode.get_structure_unit_at(unit.grid_pos)
-		if structure != null and structure != unit:
-			$GameBoardNode/HexTileMap.set_player_tile(unit.grid_pos, structure.player_id)
-		else:
-			var special_pid = _special_tile_pid(unit.grid_pos)
-			if special_pid == "":
-				$GameBoardNode/HexTileMap.set_player_tile(unit.grid_pos, "")
-			else:
-				$GameBoardNode/HexTileMap.set_player_tile(unit.grid_pos, special_pid)
+	_refresh_tile_after_unit_change(unit.grid_pos)
 	unit_manager.unit_by_net_id.erase(unit.net_id)
 	unit.queue_free()
 	result["ok"] = true

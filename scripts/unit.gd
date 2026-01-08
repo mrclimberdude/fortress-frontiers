@@ -47,6 +47,7 @@ var map_layer: Node
 @onready var turn_mgr = unit_mgr.turn_mgr
 
 var structure_tiles: Array
+var owner_overlay: Sprite2D = null
 
 func _ready():
 	structure_tiles = turn_mgr.structure_positions
@@ -55,10 +56,48 @@ func _ready():
 		set_grid_position(grid_pos)
 	set_health_bar()
 	self.z_index = 7
+	owner_overlay = get_node_or_null("OwnerOverlay")
+	_update_owner_overlay()
+
+func _atlas_region_for(atlas: TileSetAtlasSource, coords: Vector2i) -> Rect2:
+	var margin = atlas.margins
+	var sep = atlas.separation
+	var size = atlas.texture_region_size
+	var x = margin.x + coords.x * (size.x + sep.x)
+	var y = margin.y + coords.y * (size.y + sep.y)
+	return Rect2(x, y, size.x, size.y)
+
+func _update_owner_overlay() -> void:
+	if owner_overlay == null:
+		return
+	if map_layer == null:
+		owner_overlay.visible = false
+		return
+	if player_id not in ["player1", "player2"] or is_base or is_tower:
+		owner_overlay.visible = false
+		return
+	var source_id = map_layer.tile_set.get_source_id(0)
+	var source = map_layer.tile_set.get_source(source_id)
+	if source == null or not (source is TileSetAtlasSource):
+		owner_overlay.visible = false
+		return
+	var atlas = source as TileSetAtlasSource
+	var coords = map_layer.player_atlas_tiles.get(player_id, map_layer.ground_tile)
+	owner_overlay.texture = atlas.texture
+	owner_overlay.region_enabled = true
+	owner_overlay.region_rect = _atlas_region_for(atlas, coords)
+	owner_overlay.z_index = -2
+	var region_size = atlas.texture_region_size
+	if region_size.x > 0 and region_size.y > 0:
+		var scale_x = float(map_layer.tile_size.x) / float(region_size.x)
+		var scale_y = float(map_layer.tile_size.y) / float(region_size.y)
+		owner_overlay.scale = Vector2(scale_x, scale_y)
+	owner_overlay.visible = true
 
 # Set which map layer this unit should use for positioning
 func set_map_layer(layer: TileMapLayer) -> void:
 	map_layer = layer
+	_update_owner_overlay()
 
 func set_grid_position(pos: Vector2i) -> void:
 	var board   = map_layer.get_parent()
@@ -97,9 +136,11 @@ func set_grid_position(pos: Vector2i) -> void:
 				var idx = turn_mgr.mines["player2"].find(pos)
 				turn_mgr.mines["player2"].remove_at(idx)
 				turn_mgr.mines[player_id].append(pos)
-		map_layer.set_player_tile(pos, player_id)
+		if pos in structure_tiles:
+			map_layer.set_player_tile(pos, player_id)
 	else:
 		push_error("Unit.gd: could not find GameBoardNode to occupy()")
+	_update_owner_overlay()
 
 func set_health_bar():
 	$HealthBar.value = curr_health

@@ -150,8 +150,6 @@ func _update_fog():
 							structure.z_index = 6
 					var unit = $"..".get_unit_at(cell)
 					if unit != null:
-						if tm_root == null or not tm_root.has_method("is_unit_hidden_to_local") or not tm_root.is_unit_hidden_to_local(unit):
-							hex_map.set_player_tile(cell, unit.player_id)
 						if tm_root != null and tm_root.has_method("is_unit_hidden_to_local") and tm_root.is_unit_hidden_to_local(unit):
 							unit.visible = false
 						else:
