@@ -896,6 +896,10 @@ func _load_map_by_index(map_index: int) -> void:
 	if map_data.size() == 0:
 		push_error("TurnManager: map_data is empty.")
 		return
+	var existing = $GameBoardNode.get_node_or_null("TerrainMap")
+	if existing != null:
+		existing.get_parent().remove_child(existing)
+		existing.free()
 	var idx = int(clamp(map_index, 0, map_data.size() - 1))
 	current_map_index = idx
 	var md = map_data[idx] as MapData
@@ -1166,13 +1170,20 @@ func load_game(path: String = SAVE_DEFAULT_PATH) -> bool:
 	_reset_map_state()
 	_load_map_by_index(map_index)
 	apply_state(state, true)
+	call_deferred("_refresh_fog_after_load")
 	NetworkManager._orders_submitted = { "player1": false, "player2": false }
 	NetworkManager._step_ready_counts = {}
 	_broadcast_state()
+	call_deferred("_broadcast_state")
 	return true
 
 func load_game_slot(slot: int) -> bool:
 	return load_game(_save_path_for_slot(slot))
+
+func _refresh_fog_after_load() -> void:
+	var fog = $GameBoardNode.get_node_or_null("FogOfWar")
+	if fog != null:
+		fog._update_fog()
 
 func _broadcast_state() -> void:
 	if not _is_host():
@@ -1328,7 +1339,11 @@ func apply_state(state: Dictionary, force_host: bool = false) -> void:
 
 func _reset_map_state() -> void:
 	if terrain_overlay != null:
-		terrain_overlay.queue_free()
+		if is_instance_valid(terrain_overlay):
+			var parent = terrain_overlay.get_parent()
+			if parent != null:
+				parent.remove_child(terrain_overlay)
+			terrain_overlay.free()
 		terrain_overlay = null
 		if $GameBoardNode != null:
 			$GameBoardNode.terrain_overlay = null
