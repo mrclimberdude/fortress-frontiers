@@ -3450,6 +3450,20 @@ func _process_move():
 			triggered_trap = true
 	if triggered_trap:
 		refresh_structure_markers()
+	var reset_respawn = false
+	for u in units:
+		if u == null:
+			continue
+		if start_positions.get(u.net_id, u.grid_pos) == u.grid_pos:
+			continue
+		if u.grid_pos in camps["basic"] and camp_respawns.has(u.grid_pos):
+			camp_respawns[u.grid_pos] = _roll_camp_respawn()
+			reset_respawn = true
+		if u.grid_pos in camps["dragon"] and dragon_respawns.has(u.grid_pos):
+			dragon_respawns[u.grid_pos] = _roll_dragon_respawn()
+			reset_respawn = true
+	if reset_respawn:
+		update_neutral_markers()
 
 	# 8. Refresh the UI and fog each tick
 	$UI._draw_attacks()
