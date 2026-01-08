@@ -726,6 +726,20 @@ func _units_in_range(origin: Vector2i, range: int) -> Array:
 			out.append(unit)
 	return out
 
+func _units_adjacent(origin: Vector2i) -> Array:
+	var out := []
+	var neighbors: Array = $GameBoardNode.get_offset_neighbors(origin)
+	for unit in _get_player_units():
+		if unit == null:
+			continue
+		if unit.grid_pos in neighbors:
+			out.append(unit)
+	return out
+
+func _positions_adjacent(a: Vector2i, b: Vector2i) -> bool:
+	var neighbors: Array = $GameBoardNode.get_offset_neighbors(a)
+	return b in neighbors
+
 func _units_in_range_los(origin: Vector2i, range: int) -> Array:
 	var result = $GameBoardNode.get_reachable_tiles(origin, range, "ranged")
 	var tiles = result.get("tiles", [])
@@ -2699,43 +2713,86 @@ func _process_neutral_attacks() -> void:
 					_queue_neutral_attack(neutral, candidates[idx], "ranged", neutral_dmg, neutral_sources, retaliation_dmg, retaliation_sources)
 					attacked = true
 		elif neutral.unit_type == DRAGON_TYPE:
-			var cleave_candidates = _units_in_range(neutral.grid_pos, 1)
-			var cleave_targets = _pick_weighted_targets(cleave_candidates, neutral.grid_pos, dragon_cleave_targets)
+			var cleave_candidates = _units_adjacent(neutral.grid_pos)
 			var melee_set := {}
-			for target in cleave_targets:
-				melee_set[target.net_id] = true
-				_queue_neutral_attack(neutral, target, "melee", neutral_dmg, neutral_sources, retaliation_dmg, retaliation_sources)
-			if cleave_targets.size() > 0:
-				attacked = true
+			if cleave_candidates.size() > 0:
+				var weights := []
+				for unit in cleave_candidates:
+					weights.append(_target_weight(unit, neutral.grid_pos))
+				var idx = _pick_weighted_index(weights)
+				if idx >= 0:
+					var primary = cleave_candidates[idx]
+					var selected := [primary]
+					melee_set[primary.net_id] = true
+					var remaining := cleave_candidates.duplicate()
+					remaining.erase(primary)
+					var extra_slots = max(0, dragon_cleave_targets - 1)
+					for _i in range(extra_slots):
+						var adj_candidates := []
+						var adj_weights := []
+						for unit in remaining:
+							var adjacent = false
+							for picked in selected:
+								if _positions_adjacent(picked.grid_pos, unit.grid_pos):
+									adjacent = true
+									break
+							if not adjacent:
+								continue
+							adj_candidates.append(unit)
+							adj_weights.append(_target_weight(unit, neutral.grid_pos))
+						if adj_candidates.is_empty():
+							break
+						var pick_idx = _pick_weighted_index(adj_weights)
+						if pick_idx < 0:
+							break
+						var extra = adj_candidates[pick_idx]
+						selected.append(extra)
+						melee_set[extra.net_id] = true
+						remaining.erase(extra)
+					for target in selected:
+						_queue_neutral_attack(neutral, target, "melee", neutral_dmg, neutral_sources, retaliation_dmg, retaliation_sources)
+					attacked = true
 			var fire_candidates = _units_in_range_los(neutral.grid_pos, dragon_fire_range)
 			if fire_candidates.size() > 0:
-				var pair_bonus := 2.5
 				var overlap_penalty := 0.4
-				var options := []
 				var weights := []
-				# Favor adjacent pairs but still allow single-target fire, with overlap penalties.
 				for unit in fire_candidates:
 					var w = _target_weight(unit, neutral.grid_pos)
 					if melee_set.has(unit.net_id):
 						w *= overlap_penalty
-					options.append([unit])
 					weights.append(w)
-				for i in range(fire_candidates.size()):
-					for j in range(i + 1, fire_candidates.size()):
-						var a = fire_candidates[i]
-						var b = fire_candidates[j]
-						if _hex_distance(a.grid_pos, b.grid_pos) != 1:
-							continue
-						var w = _target_weight(a, neutral.grid_pos) * _target_weight(b, neutral.grid_pos) * pair_bonus
-						if melee_set.has(a.net_id):
-							w *= overlap_penalty
-						if melee_set.has(b.net_id):
-							w *= overlap_penalty
-						options.append([a, b])
-						weights.append(w)
 				var idx = _pick_weighted_index(weights)
 				if idx >= 0:
-					for target in options[idx]:
+					var primary = fire_candidates[idx]
+					var selected := [primary]
+					var remaining := fire_candidates.duplicate()
+					remaining.erase(primary)
+					var extra_slots = 1
+					for _i in range(extra_slots):
+						var adj_candidates := []
+						var adj_weights := []
+						for unit in remaining:
+							var adjacent = false
+							for picked in selected:
+								if _positions_adjacent(picked.grid_pos, unit.grid_pos):
+									adjacent = true
+									break
+							if not adjacent:
+								continue
+							var w = _target_weight(unit, neutral.grid_pos)
+							if melee_set.has(unit.net_id):
+								w *= overlap_penalty
+							adj_candidates.append(unit)
+							adj_weights.append(w)
+						if adj_candidates.is_empty():
+							break
+						var pick_idx = _pick_weighted_index(adj_weights)
+						if pick_idx < 0:
+							break
+						var extra = adj_candidates[pick_idx]
+						selected.append(extra)
+						remaining.erase(extra)
+					for target in selected:
 						_queue_neutral_attack(neutral, target, "ranged", neutral_dmg, neutral_sources, retaliation_dmg, retaliation_sources)
 					attacked = true
 		if not attacked and neutral.curr_health < neutral.max_health:
