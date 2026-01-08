@@ -88,6 +88,8 @@ var current_player:String = "player1"
 var exec_steps: Array     = []
 var step_index: int       = 0
 var neutral_step_index: int = -1
+var movement_phase_count: int = 0
+const MAX_MOVEMENT_PHASES: int = 20
 
 # --- Economy State ---
 var player_gold       := { "player1": 25, "player2": 25 }
@@ -3322,6 +3324,13 @@ func _handle_trap_trigger(unit, tile: Vector2i) -> bool:
 	return true
 
 func _process_move():
+	if movement_phase_count >= MAX_MOVEMENT_PHASES:
+		force_skip_movement_phase()
+		if neutral_step_index == -1:
+			neutral_step_index = exec_steps.size()
+			exec_steps.append(func(): _process_neutral_attacks())
+		return
+	movement_phase_count += 1
 	var units: Array = $GameBoardNode.get_all_units_flat(false)
 	var hop_units := {}
 	for u in units:
@@ -3542,6 +3551,7 @@ func _do_execution() -> void:
 		func(): _process_engineering(),
 		func(): _process_move()
 	]
+	movement_phase_count = 0
 	step_index = 0
 	_run_next_step()
 
