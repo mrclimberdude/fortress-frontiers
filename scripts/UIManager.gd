@@ -74,6 +74,7 @@ const RepairIcon = preload("res://assets/HK-Heightend Sensory Input v2/HSI - Ico
 const SabotageIcon = preload("res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Objects/HSI_icon_180.png")
 const LookoutIcon = preload("res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Objects/HSI_icon_134.png")
 const SAVE_SLOT_COUNT_UI: int = 3
+const ORDER_ICON_Z: int = 12
 
 const MENU_ID_SAVE: int = 1
 const MENU_ID_LOAD: int = 2
@@ -1392,7 +1393,7 @@ func _draw_heals():
 				if not _should_draw_unit(unit):
 					continue
 				heart.position = hex.map_to_world(unit.grid_pos) + hex.tile_size * 0.65
-				heart.z_index = 10
+				heart.z_index = ORDER_ICON_Z
 				root.add_child(heart)
 
 func _draw_defends():
@@ -1415,7 +1416,7 @@ func _draw_defends():
 				if not _should_draw_unit(unit):
 					continue
 				defend.position = hex.map_to_world(unit.grid_pos) + hex.tile_size * 0.5
-				defend.z_index = 0
+				defend.z_index = ORDER_ICON_Z
 				root.add_child(defend)
 
 func _get_lookout_sprites_root() -> Node2D:
@@ -1451,7 +1452,7 @@ func _draw_lookouts():
 					var scale = (hex.tile_size.x * 0.3) / tex_size.x
 					lookout_icon.scale = Vector2(scale, scale)
 				lookout_icon.position = hex.map_to_world(unit.grid_pos) + (hex.tile_size * Vector2(0.5, 0.7))
-				lookout_icon.z_index = 10
+				lookout_icon.z_index = ORDER_ICON_Z
 				root.add_child(lookout_icon)
 
 func _get_building_sprites_root() -> Node2D:
@@ -1503,7 +1504,7 @@ func _draw_builds():
 					var scale = (hex.tile_size.x * 0.3) / tex_size.x
 					build_icon.scale = Vector2(scale, scale)
 				build_icon.position = hex.map_to_world(unit.grid_pos) + (hex.tile_size * Vector2(0.5, 0.7))
-				build_icon.z_index = 10
+				build_icon.z_index = ORDER_ICON_Z
 				root.add_child(build_icon)
 
 func _draw_repairs():
@@ -1531,7 +1532,7 @@ func _draw_repairs():
 					var scale = (hex.tile_size.x * 0.18) / tex_size.x
 					repair_icon.scale = Vector2(scale, scale)
 				repair_icon.position = hex.map_to_world(unit.grid_pos) + (hex.tile_size * Vector2(0.5, 0.7))
-				repair_icon.z_index = 10
+				repair_icon.z_index = ORDER_ICON_Z
 				root.add_child(repair_icon)
 
 func _draw_sabotages():
@@ -1559,7 +1560,7 @@ func _draw_sabotages():
 					var scale = (hex.tile_size.x * 0.18) / tex_size.x
 					sabotage_icon.scale = Vector2(scale, scale)
 				sabotage_icon.position = hex.map_to_world(unit.grid_pos) + (hex.tile_size * Vector2(0.5, 0.7))
-				sabotage_icon.z_index = 10
+				sabotage_icon.z_index = ORDER_ICON_Z
 				root.add_child(sabotage_icon)
 
 func _draw_all():

@@ -58,6 +58,7 @@ func _ready():
 		set_grid_position(grid_pos)
 	set_health_bar()
 	self.z_index = 7
+	$HealthBar.z_index = 20
 	owner_overlay = get_node_or_null("OwnerOverlay")
 	_update_owner_overlay()
 
