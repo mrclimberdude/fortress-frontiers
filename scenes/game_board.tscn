@@ -57,7 +57,10 @@ texture_region_size = Vector2i(170, 192)
 3:1/next_alternative_id = 2
 3:1/0 = 0
 4:1/0 = 0
+0:2/next_alternative_id = 2
 0:2/0 = 0
+0:2/1 = 1
+0:2/1/modulate = Color(1, 1, 1, 0.678431)
 1:2/0 = 0
 2:2/0 = 0
 3:2/0 = 0
@@ -112,7 +115,7 @@ rows = 30
 [node name="Structures" type="Node2D" parent="GameBoardNode/HexTileMap"]
 
 [node name="OrderReminderMap" type="TileMapLayer" parent="GameBoardNode"]
-self_modulate = Color(1, 1, 1, 0.588235)
+self_modulate = Color(1, 1, 1, 0.784314)
 z_index = 6
 tile_set = SubResource("TileSet_xh13x")
 script = ExtResource("11_cac7a")
