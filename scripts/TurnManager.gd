@@ -2148,18 +2148,25 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 			sanitized["target_tile"] = repair_tile
 		"sabotage":
 			var sabotage_raw = order.get("target_tile", unit.grid_pos)
-			if typeof(sabotage_raw) != TYPE_VECTOR2I:
+			var sabotage_tile: Vector2i
+			if typeof(sabotage_raw) == TYPE_VECTOR2I:
+				sabotage_tile = sabotage_raw
+			elif typeof(sabotage_raw) == TYPE_VECTOR2:
+				sabotage_tile = Vector2i(int(round(sabotage_raw.x)), int(round(sabotage_raw.y)))
+			else:
 				result["reason"] = "invalid_target"
 				return result
-			var sabotage_tile: Vector2i = sabotage_raw
 			if sabotage_tile != unit.grid_pos:
 				result["reason"] = "invalid_target"
 				return result
 			var sab_state = _structure_state(sabotage_tile)
-			if sab_state.is_empty():
+			var sab_owner = str(sab_state.get("owner", ""))
+			var sab_status = str(sab_state.get("status", ""))
+			var sab_type = str(sab_state.get("type", ""))
+			if sab_owner == player_id and sab_type == STRUCT_SPAWN_TOWER and sab_status != STRUCT_STATUS_BUILDING:
 				result["reason"] = "invalid_target"
 				return result
-			if str(sab_state.get("owner", "")) == player_id:
+			if sab_owner == player_id and sab_status != STRUCT_STATUS_BUILDING:
 				result["reason"] = "invalid_target"
 				return result
 			sanitized["target_tile"] = sabotage_tile
@@ -2644,20 +2651,22 @@ func _process_attacks():
 	$UI._draw_supports()
 	$GameBoardNode/FogOfWar._update_fog()
 
-func _apply_sabotage_at(tile: Vector2i) -> void:
+func _apply_sabotage_at(tile: Vector2i) -> bool:
 	var state = _structure_state(tile)
 	if state.is_empty():
-		return
+		return false
 	var status = str(state.get("status", ""))
 	if status == STRUCT_STATUS_BUILDING:
 		buildable_structures.erase(tile)
-		return
+		return true
 	if status == STRUCT_STATUS_INTACT:
 		state["status"] = STRUCT_STATUS_DISABLED
 		buildable_structures[tile] = state
-		return
+		return false
 	if status == STRUCT_STATUS_DISABLED:
 		buildable_structures.erase(tile)
+		return true
+	return false
 
 func _apply_repair_at(player_id: String, unit, tile: Vector2i) -> void:
 	if unit == null:
@@ -2769,6 +2778,8 @@ func _process_engineering() -> void:
 	var sabotage_orders := []
 	var repair_orders := []
 	var build_orders := []
+	var sabotaged_tiles := {}
+	var build_tiles := {}
 
 	for player in ["player1", "player2"]:
 		var unit_ids = player_orders[player].keys()
@@ -2784,6 +2795,9 @@ func _process_engineering() -> void:
 					repair_orders.append({"player": player, "unit_net_id": unit_net_id, "order": order})
 				"build":
 					build_orders.append({"player": player, "unit_net_id": unit_net_id, "order": order})
+					var raw_tile = order.get("target_tile", Vector2i(-9999, -9999))
+					if typeof(raw_tile) == TYPE_VECTOR2I:
+						build_tiles[raw_tile] = true
 
 	for entry in sabotage_orders:
 		var player_id = entry["player"]
@@ -2797,6 +2811,9 @@ func _process_engineering() -> void:
 			continue
 		var tile: Vector2i = raw_tile
 		if tile == unit.grid_pos:
+			var state = _structure_state(tile)
+			if not state.is_empty() or build_tiles.has(tile):
+				sabotaged_tiles[tile] = true
 			_apply_sabotage_at(tile)
 		_remove_player_order(player_id, entry["unit_net_id"])
 
@@ -2817,8 +2834,13 @@ func _process_engineering() -> void:
 		if unit == null or unit.curr_health <= 0:
 			_remove_player_order(player_id, entry["unit_net_id"])
 			continue
+		var raw_tile = entry["order"].get("target_tile", unit.grid_pos)
+		if typeof(raw_tile) == TYPE_VECTOR2I and sabotaged_tiles.has(raw_tile):
+			_remove_player_order(player_id, entry["unit_net_id"])
+			continue
 		_apply_build_at(player_id, unit, entry["order"])
 		_remove_player_order(player_id, entry["unit_net_id"])
+	$GameBoardNode/FogOfWar._update_fog()
 
 	refresh_structure_markers()
 	$GameBoardNode/FogOfWar._update_fog()
