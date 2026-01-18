@@ -1741,5 +1741,10 @@ func _unhandled_input(ev):
 					return
 				_on_unit_selected(unit)
 				last_click_pos = ev.position
-				action_menu.set_position(ev.position)
+				var menu_pos = ev.position
+				var menu_size = action_menu.size
+				var viewport_size = get_viewport().get_visible_rect().size
+				if menu_pos.y + menu_size.y > viewport_size.y:
+					menu_pos.y = max(0.0, menu_pos.y - menu_size.y)
+				action_menu.set_position(menu_pos)
 				action_menu.show()
