@@ -30,6 +30,8 @@ extends Node2D
 @export var build_queue_last_type: String = ""
 @export var build_queue_last_target: Vector2i = Vector2i(-9999, -9999)
 @export var build_queue_last_build_left: int = -1
+@export var move_queue: Array = []
+@export var move_queue_last_target: Vector2i = Vector2i(-9999, -9999)
 @export var is_moving:       bool = false
 @export var is_looking_out:  bool = false
 @export var moving_to:       Vector2i

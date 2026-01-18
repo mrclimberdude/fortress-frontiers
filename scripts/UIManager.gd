@@ -18,7 +18,7 @@ var support_tiles = []
 var current_path: Array = []
 var remaining_moves: float = 0.0
 var repair_tiles: Array = []
-var action_mode:       String   = ""     # "move", "ranged", "melee", "support", "hold", "repair", "build_road_to", "build_rail_to"
+var action_mode:       String   = ""     # "move", "move_to", "ranged", "melee", "support", "hold", "repair", "build_road_to", "build_rail_to"
 var move_priority: int = 0
 var allow_clicks: bool = true
 var last_click_pos: Vector2 = Vector2.ZERO
@@ -602,18 +602,22 @@ func _update_queue_preview() -> void:
 		return
 	var cell = hex.world_to_map(cam.get_global_mouse_position())
 	var unit = game_board.get_unit_at(cell)
-	if unit == null or not unit.is_builder:
+	if unit == null:
 		_clear_queue_preview()
 		return
 	if unit.player_id != turn_mgr.local_player_id:
 		_clear_queue_preview()
 		return
-	if unit.build_queue.size() < 2:
+	var path: Array = []
+	if unit.build_queue.size() >= 2:
+		path = unit.build_queue.duplicate()
+	elif unit.move_queue.size() >= 2:
+		path = unit.move_queue.duplicate()
+	else:
 		_clear_queue_preview()
 		return
 	if unit.net_id == _queue_preview_unit_id:
 		return
-	var path = unit.build_queue.duplicate()
 	var idx = _queue_path_index(path, unit.grid_pos)
 	if idx < 0:
 		_clear_queue_preview()
@@ -973,6 +977,10 @@ func _on_order_result(player_id: String, unit_net_id: int, order: Dictionary, ok
 				unit.build_queue_last_target = Vector2i(-9999, -9999)
 				unit.build_queue_last_build_left = -1
 				_queue_preview_unit_id = -1
+			if order.has("move_queue_path") and order["move_queue_path"] is Array:
+				unit.move_queue = order["move_queue_path"]
+				unit.move_queue_last_target = Vector2i(-9999, -9999)
+				_queue_preview_unit_id = -1
 			if order.get("type", "") != "heal":
 				unit.auto_heal = false
 			if order.get("type", "") != "defend":
@@ -1059,6 +1067,8 @@ func _on_finish_move_button_pressed():
 		finish_build_road_path()
 	elif action_mode == "build_rail_to":
 		finish_build_rail_path()
+	elif action_mode == "move_to":
+		finish_move_to_path()
 	else:
 		finish_current_path()
 
@@ -1095,8 +1105,10 @@ func _on_unit_selected(unit: Node) -> void:
 		action_menu.add_item("Undo Buy", 0)
 		if unit.first_turn_move:
 			action_menu.add_item("Move", 1)
+			action_menu.add_item("Move To", 12)
 		return
 	action_menu.add_item("Move", 1)
+	action_menu.add_item("Move To", 12)
 	if unit.is_ranged:
 		action_menu.add_item("Ranged Attack", 2)
 	if unit.can_melee:
@@ -1137,7 +1149,9 @@ func _on_action_selected(id: int) -> void:
 			game_board.show_highlights(tiles)
 			current_reachable = result
 			print("Move selected for %s" % currently_selected_unit.name)
-		
+		12:
+			_start_move_to()
+
 		2:
 			action_mode = "ranged"
 			var ranged_range = turn_mgr.get_effective_ranged_range(currently_selected_unit)
@@ -1372,6 +1386,40 @@ func _draw_paths() -> void:
 					
 					arrow.z_index = 10
 					root.add_child(arrow)
+	if turn_mgr.current_phase == turn_mgr.Phase.ORDERS and current_player != "":
+		var units = game_board.get_all_units().get(current_player, [])
+		for unit in units:
+			if unit == null or unit.is_base or unit.is_tower:
+				continue
+			if not _should_draw_unit(unit):
+				continue
+			var existing = turn_mgr.get_order(current_player, unit.net_id)
+			if not existing.is_empty():
+				continue
+			var queued = turn_mgr.get_move_queue_front_order(unit, current_player)
+			if queued.is_empty():
+				continue
+			var path = queued.get("path", [])
+			if not (path is Array) or path.size() < 2:
+				continue
+			var root = Node2D.new()
+			path_arrows_node.add_child(root)
+			for i in range(path.size() - 1):
+				var a = path[i]
+				var b = path[i + 1]
+				var p1 = hex.map_to_world(a) + hex.tile_size * 0.5
+				var p2 = hex.map_to_world(b) + hex.tile_size * 0.5
+				var arrow = ArrowScene.instantiate() as Sprite2D
+				var dir = (p2 - p1).normalized()
+				var tex_size = arrow.texture.get_size()
+				var distance: float = (p2 - p1).length()
+				var scale_x: float = distance / tex_size.x
+				arrow.scale = Vector2(scale_x, 1)
+				var half_length = tex_size.x * scale_x * 0.5
+				arrow.position = p1 + dir * half_length
+				arrow.rotation = (p2 - p1).angle()
+				arrow.z_index = 10
+				root.add_child(arrow)
 	if turn_mgr.current_phase == turn_mgr.Phase.ORDERS and current_player != "":
 		var units = game_board.get_all_units().get(current_player, [])
 		for unit in units:
@@ -1791,6 +1839,17 @@ func _get_build_road_reachable(start: Vector2i) -> Dictionary:
 		return {"tiles": [], "prev": {}}
 	return game_board.get_reachable_tiles(start, currently_selected_unit.move_range, "move", currently_selected_unit)
 
+func _start_move_to() -> void:
+	action_mode = "move_to"
+	current_path = [currently_selected_unit.grid_pos]
+	var result = _get_build_road_reachable(currently_selected_unit.grid_pos)
+	var tiles = result["tiles"]
+	if tiles.has(currently_selected_unit.grid_pos):
+		tiles.erase(currently_selected_unit.grid_pos)
+	game_board.show_highlights(tiles)
+	current_reachable = result
+	finish_move_button.visible = false
+
 func _start_build_road_to() -> void:
 	action_mode = "build_road_to"
 	current_path = [currently_selected_unit.grid_pos]
@@ -1841,6 +1900,26 @@ func finish_build_rail_path():
 	NetworkManager.request_order(current_player, {
 		"unit_net_id": currently_selected_unit.net_id,
 		"type": "build_rail_to",
+		"path": current_path
+	})
+	var preview_node = hex.get_node("PreviewPathArrows")
+	for child in preview_node.get_children():
+		child.queue_free()
+	finish_move_button.visible = false
+	action_mode = ""
+	current_path = []
+	remaining_moves = 0
+	game_board.clear_highlights()
+	$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
+	_update_done_button_state()
+
+func finish_move_to_path():
+	if current_path.size() == 1:
+		action_mode = ""
+		return
+	NetworkManager.request_order(current_player, {
+		"unit_net_id": currently_selected_unit.net_id,
+		"type": "move_to",
 		"path": current_path
 	})
 	var preview_node = hex.get_node("PreviewPathArrows")
@@ -1925,12 +2004,14 @@ func _unhandled_input(ev):
 			_cancel_purchase_mode()
 		return
 	
-	if (action_mode == "build_road_to" or action_mode == "build_rail_to") and currently_selected_unit:
+	if (action_mode == "build_road_to" or action_mode == "build_rail_to" or action_mode == "move_to") and currently_selected_unit:
 		if cell not in current_reachable["tiles"]:
 			if action_mode == "build_road_to":
 				finish_build_road_path()
-			else:
+			elif action_mode == "build_rail_to":
 				finish_build_rail_path()
+			else:
+				finish_move_to_path()
 			return
 		var path = []
 		var prev = current_reachable["prev"]

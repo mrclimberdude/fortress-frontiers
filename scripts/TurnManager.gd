@@ -1008,6 +1008,8 @@ func _serialize_unit(unit) -> Dictionary:
 		"build_queue_last_type": unit.build_queue_last_type,
 		"build_queue_last_target": unit.build_queue_last_target,
 		"build_queue_last_build_left": unit.build_queue_last_build_left,
+		"move_queue": unit.move_queue,
+		"move_queue_last_target": unit.move_queue_last_target,
 		"is_moving": unit.is_moving,
 		"is_looking_out": unit.is_looking_out,
 		"moving_to": unit.moving_to,
@@ -1290,6 +1292,10 @@ func _apply_units(units_data: Array) -> void:
 		var last_target = data.get("build_queue_last_target", Vector2i(-9999, -9999))
 		unit.build_queue_last_target = last_target if typeof(last_target) == TYPE_VECTOR2I else Vector2i(-9999, -9999)
 		unit.build_queue_last_build_left = int(data.get("build_queue_last_build_left", -1))
+		var move_queue_data = data.get("move_queue", [])
+		unit.move_queue = move_queue_data if move_queue_data is Array else []
+		var move_last_target = data.get("move_queue_last_target", Vector2i(-9999, -9999))
+		unit.move_queue_last_target = move_last_target if typeof(move_last_target) == TYPE_VECTOR2I else Vector2i(-9999, -9999)
 		unit.is_moving = bool(data.get("is_moving", false))
 		unit.is_looking_out = bool(data.get("is_looking_out", false))
 		unit.moving_to = data.get("moving_to", unit.grid_pos)
@@ -1710,6 +1716,7 @@ func _do_upkeep() -> void:
 	_apply_auto_defend_orders(all_units)
 	_apply_auto_build_orders(all_units)
 	_apply_build_queue_orders(all_units)
+	_apply_move_queue_orders(all_units)
 	_tick_neutral_respawns()
 	$GameBoardNode/FogOfWar._update_fog()
 	$UI/DamagePanel.visible = true
@@ -1725,6 +1732,8 @@ func _apply_auto_heal_orders(all_units: Dictionary) -> void:
 			NetworkManager.player_orders[player] = orders
 		for unit in all_units[player]:
 			if unit == null or unit.is_base or unit.is_tower:
+				continue
+			if unit.move_queue.size() > 0:
 				continue
 			if unit.build_queue.size() > 0:
 				continue
@@ -1751,6 +1760,8 @@ func _apply_auto_defend_orders(all_units: Dictionary) -> void:
 			NetworkManager.player_orders[player] = orders
 		for unit in all_units[player]:
 			if unit == null or unit.is_base or unit.is_tower:
+				continue
+			if unit.move_queue.size() > 0:
 				continue
 			if unit.build_queue.size() > 0:
 				continue
@@ -1779,6 +1790,8 @@ func _apply_auto_build_orders(all_units: Dictionary) -> void:
 				if unit != null:
 					unit.auto_build = false
 					unit.auto_build_type = ""
+				continue
+			if unit.move_queue.size() > 0:
 				continue
 			if unit.curr_health <= 0:
 				unit.auto_build = false
@@ -1826,6 +1839,12 @@ func _clear_build_queue(unit) -> void:
 	unit.build_queue_last_type = ""
 	unit.build_queue_last_target = Vector2i(-9999, -9999)
 	unit.build_queue_last_build_left = -1
+
+func _clear_move_queue(unit) -> void:
+	if unit == null:
+		return
+	unit.move_queue = []
+	unit.move_queue_last_target = Vector2i(-9999, -9999)
 
 func _road_queue_tile_status(tile: Vector2i, player_id: String, allow_start: bool = false) -> String:
 	if not $GameBoardNode/HexTileMap.is_cell_valid(tile):
@@ -1998,6 +2017,109 @@ func _record_build_queue_last_order(unit, order: Dictionary) -> void:
 					unit.build_queue_last_build_left = _structure_build_turns(struct_type, tile)
 				else:
 					unit.build_queue_last_build_left = int(build_left_val)
+
+func _move_queue_last_step_ok(unit) -> bool:
+	if unit == null:
+		return false
+	var target = unit.move_queue_last_target
+	if target == Vector2i(-9999, -9999):
+		return true
+	return unit.grid_pos == target
+
+func _move_queue_next_order(unit, player_id: String) -> Dictionary:
+	if unit == null:
+		return {}
+	var path = unit.move_queue
+	if not (path is Array) or path.size() < 2:
+		return {}
+	var idx = _queue_path_index(path, unit.grid_pos)
+	if idx < 0:
+		return {}
+	if idx >= path.size() - 1:
+		return {}
+	var budget = float(unit.move_range)
+	var segment: Array = [unit.grid_pos]
+	var prev = unit.grid_pos
+	for i in range(idx + 1, path.size()):
+		var step = path[i]
+		if typeof(step) != TYPE_VECTOR2I:
+			return {}
+		if not step in $GameBoardNode.get_offset_neighbors(prev):
+			return {}
+		if $GameBoardNode._terrain_is_impassable(step):
+			return {}
+		if $GameBoardNode.is_enemy_structure_tile(step, player_id) and i != path.size() - 1:
+			return {}
+		var cost = float($GameBoardNode.get_move_cost(step, unit))
+		if cost > budget + 0.001:
+			break
+		budget -= cost
+		segment.append(step)
+		prev = step
+		if $GameBoardNode.is_enemy_structure_tile(step, player_id):
+			break
+	if segment.size() < 2:
+		return {}
+	return {
+		"unit_net_id": unit.net_id,
+		"type": "move",
+		"path": segment,
+		"priority": 0
+	}
+
+func _record_move_queue_last_order(unit, order: Dictionary) -> void:
+	if unit == null:
+		return
+	unit.move_queue_last_target = Vector2i(-9999, -9999)
+	var path = order.get("path", [])
+	if path is Array and path.size() > 0:
+		var tail = path[path.size() - 1]
+		if typeof(tail) == TYPE_VECTOR2I:
+			unit.move_queue_last_target = tail
+
+func _apply_move_queue_orders(all_units: Dictionary) -> void:
+	for player in ["player1", "player2"]:
+		if not all_units.has(player):
+			continue
+		var orders = player_orders.get(player, {})
+		if not NetworkManager.player_orders.has(player):
+			NetworkManager.player_orders[player] = orders
+		for unit in all_units[player]:
+			if unit == null or unit.is_base or unit.is_tower:
+				continue
+			if unit.curr_health <= 0:
+				_clear_move_queue(unit)
+				continue
+			if unit.move_queue.size() == 0:
+				continue
+			if orders.has(unit.net_id):
+				_clear_move_queue(unit)
+				continue
+			if not _move_queue_last_step_ok(unit):
+				_clear_move_queue(unit)
+				continue
+			unit.move_queue_last_target = Vector2i(-9999, -9999)
+			var order = _move_queue_next_order(unit, player)
+			if order.is_empty():
+				_clear_move_queue(unit)
+				continue
+			orders[unit.net_id] = order
+			NetworkManager.player_orders[player][unit.net_id] = order
+			_apply_order_flags(unit, order)
+			_record_move_queue_last_order(unit, order)
+		player_orders[player] = orders
+
+func get_move_queue_front_order(unit, player_id: String) -> Dictionary:
+	if unit == null:
+		return {}
+	if unit.player_id != player_id:
+		return {}
+	if unit.move_queue.size() < 2:
+		return {}
+	var order = _move_queue_next_order(unit, player_id)
+	if order.is_empty():
+		return {}
+	return order
 
 func get_queue_front_order(unit, player_id: String) -> Dictionary:
 	if unit == null:
@@ -2180,10 +2302,10 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 		result["reason"] = "invalid_unit"
 		return result
 	var order_type = str(order.get("type", ""))
-	if unit.just_purchased and order_type != "move":
+	if unit.just_purchased and order_type not in ["move", "move_to"]:
 		result["reason"] = "not_ready"
 		return result
-	if unit.just_purchased and order_type == "move" and not unit.first_turn_move:
+	if unit.just_purchased and order_type in ["move", "move_to"] and not unit.first_turn_move:
 		result["reason"] = "not_ready"
 		return result
 	if order_type != "heal_until_full" and order_type != "heal":
@@ -2195,6 +2317,8 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 		unit.auto_build_type = ""
 	if order_type != "build_road_to" and order_type != "build_rail_to":
 		_clear_build_queue(unit)
+	if order_type != "move_to":
+		_clear_move_queue(unit)
 
 	var sanitized := {"unit_net_id": unit_net_id, "type": order_type}
 	match order_type:
@@ -2229,6 +2353,43 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 					return result
 			sanitized["path"] = path
 			sanitized["priority"] = int(order.get("priority", 0))
+		"move_to":
+			var path = order.get("path", [])
+			if not (path is Array) or path.size() < 2:
+				result["reason"] = "invalid_path"
+				return result
+			if path[0] != unit.grid_pos:
+				result["reason"] = "invalid_path"
+				return result
+			for i in range(1, path.size()):
+				var prev = path[i - 1]
+				var step = path[i]
+				if typeof(step) != TYPE_VECTOR2I:
+					result["reason"] = "invalid_path"
+					return result
+				if not $GameBoardNode/HexTileMap.is_cell_valid(step):
+					result["reason"] = "invalid_path"
+					return result
+				if not step in $GameBoardNode.get_offset_neighbors(prev):
+					result["reason"] = "invalid_path"
+					return result
+				if $GameBoardNode._terrain_is_impassable(step):
+					result["reason"] = "invalid_path"
+					return result
+				if $GameBoardNode.is_enemy_structure_tile(step, player_id) and i != path.size() - 1:
+					result["reason"] = "invalid_path"
+					return result
+			_clear_move_queue(unit)
+			unit.move_queue = path
+			unit.move_queue_last_target = Vector2i(-9999, -9999)
+			var queued = _move_queue_next_order(unit, player_id)
+			if queued.is_empty():
+				_clear_move_queue(unit)
+				result["reason"] = "invalid_path"
+				return result
+			sanitized = queued
+			sanitized["move_queue_path"] = path
+			_record_move_queue_last_order(unit, queued)
 		"ranged":
 			if not unit.is_ranged:
 				result["reason"] = "invalid_action"

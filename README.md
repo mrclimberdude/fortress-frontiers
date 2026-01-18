@@ -34,16 +34,27 @@ Available orders:
 - Ranged attack (ranged units only)
 - Melee attack (units with can_melee)
 - Heal
+- Heal until full (repeats each turn until full)
 - Defend
+- Always defend (repeats each turn until changed)
 - Build (builders only)
+- Build Road To (builders only, queued)
+- Build Railroad To (builders only, queued)
 - Repair (builders only)
 - Sabotage (any unit)
+- Lookout (scouts only)
 - Spawn (purchase during Orders)
 - Undo Buy (for units purchased this turn)
 
 Newly purchased units:
 - Cannot act on the turn they are purchased.
 - May be undone for a full refund during Orders.
+
+Queued and repeating orders:
+- Build repeats automatically while a structure is under construction unless the builder lacks gold for a step.
+- Build Road To queues move + build steps until complete, a step fails, or a new order is issued.
+- Build Railroad To only upgrades intact roads; if a step lands on a non-road tile, the queue ends.
+- Build queues may cross enemy-controlled tiles; they only stop when a step fails or is replaced.
 
 ## Visibility and Fog of War
 
@@ -52,6 +63,9 @@ Newly purchased units:
 - A blocking tile is still visible, but tiles beyond it are not.
 - Intact traps are hidden from enemies.
 - Newly purchased units are hidden from the opponent during Orders.
+- Lookout (scout order) increases sight range by 1 and lets scouts see over forests until the next Execution phase.
+- Explored (light) fog shows the last known structure and last known dragon on a tile, but not respawn countdowns.
+- Dragon color reflects its current reward type and is preserved in last-known fog memory.
 
 ## Terrain Rules
 
@@ -69,8 +83,9 @@ Terrain data comes from the tileset custom data:
 
 - You can spawn units on your base tile and on any tower tile you control.
 - You can also spawn on tiles adjacent to those spawn points.
-- Spawn towers only count if they are connected to your road or rail network.
+- Spawn towers only count if they are connected to your road or rail network (bases and towers count as rail endpoints).
 - Spawn orders resolve first during Execution.
+- Spawn towers have the same combat stats as starting towers but do not provide additional income.
 
 ## Movement and Pathing
 
@@ -80,12 +95,14 @@ Terrain data comes from the tileset custom data:
   - Road (intact): base_cost * 0.5
   - Rail (building): base_cost * 0.5
   - Rail (intact): base_cost * 0.25
+- Scouts treat forest tiles as cost 1 instead of 2.
 
 ### Movement Rules
 - Mountains are impassable.
-- Enemy bases and towers are impassable.
+- Enemy bases and towers can be entered as a destination, but you cannot path through them.
 - Roads and rails can be built across forest and river.
 - Road or rail built on a river tile takes +1 turn to complete.
+- Friendly units can hop over a stationary friendly builder on a road/rail if the landing tile is free and movement allows it.
 
 ### Movement Resolution (Execution)
 Movement resolves one step per tick with the following logic:
@@ -123,7 +140,8 @@ Movement resolves one step per tick with the following logic:
 ### Retaliation
 - A defending unit retaliates when attacked.
 - For ranged attacks, the defender retaliates if they are ranged OR the attacker is adjacent.
-- When a tower or base is attacked, a defending garrison unit on that tile retaliates instead.
+- Towers and bases never retaliate directly. If a defending garrison unit is on that tile, the unit retaliates instead.
+- Neutral units do not retaliate; they only deal damage during the neutral attack step.
 
 ### Damage Formula
 
@@ -133,14 +151,16 @@ Damage is symmetric and exponential:
 - Attack and defense strength scale with current health:
   - at full health: 100 percent strength
   - at 0 health: 50 percent strength
+- Neutral units and bases/towers always fight as if at full health.
 
 ### Strength Modifiers
 - Fortification (intact): +3 melee and +3 ranged (attack and defense).
 - Tower garrison bonus: +3 melee, +3 ranged, +1 ranged range.
 - Dragon rewards: +3 melee or +3 ranged (stacking per reward).
 - Terrain bonuses (see terrain table).
-- Multi-attack penalty: defender loses multi_def_penalty per additional attacker.
-- Phalanx defending bonus: +20 and negates multi-attack penalty.
+- Multi-attack penalty: defender loses multi_def_penalty per additional attacker (does not apply to neutral units).
+- Phalanx defending bonus: +20 and negates multi-attack penalty for the phalanx.
+- Adjacent defending phalanx: +2 melee and +2 ranged.
 
 ## Units
 
@@ -161,9 +181,9 @@ All units have default stats unless overridden:
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Archer | 100 | 10 | 25 | 2 | 2 | 2 | 10 | Ranged unit. |
 | Soldier | 75 | 20 | 0 | 2 | 0 | 2 | 10 | Melee unit. |
-| Scout | 50 | 4 | 0 | 3 | 0 | 3 | 15 | Fast and high vision. |
+| Scout | 50 | 4 | 0 | 3 | 0 | 3 | 15 | Fast and high vision; lookout; forest move cost 1. |
 | Miner | 75 | 1 | 0 | 2 | 0 | 2 | 15 | Provides mine bonus. |
-| Builder | 50 | 3 | 0 | 2 | 0 | 2 | 10 | Builds, repairs, sabotages. |
+| Builder | 50 | 3 | 0 | 2 | 0 | 2 | 10 | Builds, repairs, sabotages; can queue road/rail builds. |
 | Phalanx | 100 | 10 | 0 | 2 | 0 | 2 | 10 | Defend bonus; no multi-attack penalty. |
 | Cavalry | 125 | 20 | 0 | 3 | 0 | 3 | 10 | Fast melee unit. |
 | Tower | - | 20 | 0 | 0 | 0 | 2 | 0 | Static structure. |
@@ -185,8 +205,8 @@ Builders construct structures over multiple turns. Costs are paid per build step
 | Fortification | 2 | 15 | Open terrain only | +3 melee, +3 ranged on tile. |
 | Road | 2 | 5 | Can cross forest and river | Movement cost x0.5. |
 | Railroad | 2 | 10 | Must upgrade an intact road | Movement cost x0.25. |
-| Spawn Tower | 4 | 10 | Open terrain only | Adds a new spawn point. |
-| Trap | 2 | 15 | Open terrain only | Hidden; triggers on entry. |
+| Spawn Tower | 4 | 10 | Open terrain only | Adds a new spawn point (no extra gold). |
+| Trap | 2 | 15 | Open terrain or forest | Hidden; triggers on entry. |
 
 Roads and rails built on river tiles take +1 additional turn.
 
@@ -194,6 +214,7 @@ Roads and rails built on river tiles take +1 additional turn.
 - Building: under construction, no benefits.
 - Intact: full benefits.
 - Disabled: no benefits, can be repaired or destroyed.
+- Railroads under construction still count as roads for movement and connectivity.
 
 ### Engineering Phase
 The Engineering step resolves after Attacks and before Movement:
@@ -207,6 +228,7 @@ The Engineering step resolves after Attacks and before Movement:
   - Base or tower on the same tile -> +30 health (capped).
 - Build (builder only, same tile):
   - Deducts gold per step. If insufficient gold, the step does not progress.
+- Sabotage can target your own structures (except completed spawn towers).
 
 ### Traps
 - Intact traps are hidden from enemies.
@@ -218,8 +240,9 @@ The Engineering step resolves after Attacks and before Movement:
 - Friendly units can occupy base or tower tiles.
 - Towers grant garrison bonuses (+3 melee, +3 ranged, +1 ranged range).
 - Bases grant no combat bonuses.
-- Enemy units cannot enter enemy base or tower tiles.
+- Enemy units can enter enemy base or tower tiles as a destination.
 - Bases and towers are primary attack targets when a unit shares the tile.
+- Bases and towers never retaliate and always fight as if at full health.
 - Destroying a base ends the game.
 
 ## Mines
@@ -227,12 +250,15 @@ The Engineering step resolves after Attacks and before Movement:
 - Mines are captured by occupying their tile.
 - The owner retains control until the other player occupies the mine.
 - Mine income is granted each Upkeep if the owner controls the tile.
+- Road bonus: +10 gold if the mine is connected to your network by a continuous road path.
+- Rail bonus: +20 gold if the mine is connected by a continuous rail path (all tiles on the path must be intact rails).
+- Bases and towers count as rail tiles for connectivity.
 
 ## Neutral Monsters
 
 - Camps spawn neutral archers.
 - Dragons use two attack modes per neutral step:
-  - Fire: ranged attack within range 3, hitting two adjacent targets.
+  - Fire: ranged attack within range 3, hitting one target or two adjacent targets.
   - Cleave: melee attack within range 1, hitting up to three adjacent targets.
 - Neutrals do not move.
 - Neutrals attack after player actions resolve.
@@ -242,6 +268,7 @@ The Engineering step resolves after Attacks and before Movement:
 Targets are weighted by distance and health:
 - weight = (1 + 3 * (1 - hp_ratio)) * (1 / (distance + 1))
 - Lower health and closer distance increase the chance of being targeted.
+- Dragons choose melee targets first, then fire targets with a reduced chance to repeat melee targets.
 
 ### Respawns and Rewards
 - Camp respawn: 6 to 10 turns after cleared.
