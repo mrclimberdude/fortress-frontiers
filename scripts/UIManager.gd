@@ -620,6 +620,13 @@ func _find_placeable():
 	game_board.show_highlights(tiles)
 	current_reachable = result
 
+func _cancel_purchase_mode() -> void:
+	placing_unit = ""
+	action_mode = ""
+	current_reachable = {}
+	game_board.clear_highlights()
+	_update_done_button_state()
+
 func _on_dev_mode_toggled(pressed:bool):
 	print("Dev Mode → ", pressed)
 	if pressed:
@@ -854,6 +861,7 @@ func _on_buy_result(player_id: String, unit_type: String, grid_pos: Vector2i, ok
 		gold_lbl.text = "%s Gold: %d" % [current_player, turn_mgr.player_gold[current_player]]
 	else:
 		gold_lbl.text = _buy_error_message(reason, cost)
+		_cancel_purchase_mode()
 
 func _on_undo_result(player_id: String, unit_net_id: int, ok: bool, reason: String, refund: int) -> void:
 	if player_id != turn_mgr.local_player_id:
@@ -1668,6 +1676,7 @@ func _unhandled_input(ev):
 					_update_done_button_state()
 				else:
 					gold_lbl.text = "[Not enough gold]\nGold: %d" % turn_mgr.player_gold[current_player]
+					_cancel_purchase_mode()
 			else:
 				NetworkManager.request_buy_unit(current_player, placing_unit, cell)
 				placing_unit = ""
@@ -1676,6 +1685,7 @@ func _unhandled_input(ev):
 				_update_done_button_state()
 		else:
 			gold_lbl.text = "[Can't place there]\nGold: %d" % turn_mgr.player_gold[current_player]
+			_cancel_purchase_mode()
 		return
 	
 	# Order phase: if waiting for destination (move mode)
