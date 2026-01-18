@@ -1575,6 +1575,7 @@ func set_respawn_timer_override(enabled: bool) -> void:
 func _add_neutral_marker(root: Node2D, pos: Vector2i, text: String) -> void:
 	var label = Label.new()
 	label.text = text
+	label.add_theme_font_size_override("font_size", 36)
 	label.position = $GameBoardNode/HexTileMap.map_to_world(pos) + $GameBoardNode/HexTileMap.tile_size * 0.35
 	label.z_index = 101
 	root.add_child(label)

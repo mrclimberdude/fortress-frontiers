@@ -201,6 +201,15 @@ func _ready():
 	var base_font: FontFile = load("res://fonts/JetBrainsMono-Medium.ttf")
 	var unit_scenes = [ScoutScene, SoldierScene, MinerScene, BuilderScene, ArcherScene, PhalanxScene, CavalryScene]
 	var unit_names = ["Scout", "Soldier", "Miner", "Builder", "Archer", "Phalanx", "Cavalry"]
+	var unit_specials = [
+		"Sight 3; lookout; forest cost 1",
+		"None",
+		"Mine bonus +15 on mine",
+		"Build/repair/sabotage; queue roads/rails",
+		"Ranged range 2",
+		"Defend: +20 melee, no multi-def penalty; adjacent allies +2",
+		"Sight 3"
+	]
 	var unit_buy_buttons = [$Panel/VBoxContainer/ScoutButton,
 							$Panel/VBoxContainer/SoldierButton,
 							$Panel/VBoxContainer/MinerButton,
@@ -215,9 +224,10 @@ func _ready():
 	for i in range(unit_scenes.size()):
 		temp = unit_scenes[i].instantiate()
 		unit_buy_buttons[i].text = "Buy %s (%dG)" % [unit_names[i], temp.cost]
+		var special_text = unit_specials[i] if i < unit_specials.size() else temp.special_skills
 		_add_unit_stats_row(
 			unit_container,
-			[unit_names[i], str(temp.melee_strength), str(temp.ranged_strength), str(temp.move_range), str(temp.regen), temp.special_skills],
+			[unit_names[i], str(temp.melee_strength), str(temp.ranged_strength), str(temp.move_range), str(temp.regen), special_text],
 			unit_col_widths,
 			base_font,
 			true,
@@ -228,7 +238,7 @@ func _ready():
 	_add_unit_stats_row(unit_container, ["Neutral Units", "", "", "", "", ""], unit_col_widths, base_font, true, true)
 	var neutral_scenes = [CampArcherScene, DragonScene]
 	var neutral_names = ["Camp\nArcher", "Dragon"]
-	var neutral_specials = ["", "Ranged fire; melee cleave"]
+	var neutral_specials = ["Ranged range 2", "Fire range 3; cleave adj up to 3"]
 	for i in range(neutral_scenes.size()):
 		temp = neutral_scenes[i].instantiate()
 		var special_text = neutral_specials[i]
@@ -251,11 +261,11 @@ func _ready():
 	var tower_turns = int(turn_mgr.BUILD_TURNS_TOWER)
 	var fort_bonus = "%d/%d" % [turn_mgr.fort_melee_bonus, turn_mgr.fort_ranged_bonus]
 	var build_rows = [
-		{"name": "Fortification", "cost": turn_mgr.get_build_turn_cost("fortification"), "turns": short_turns, "effect": "+%s melee/ranged" % fort_bonus},
-		{"name": "Road", "cost": turn_mgr.get_build_turn_cost("road"), "turns": short_turns, "effect": "Move x0.5; +1 turn on river"},
-		{"name": "Railroad", "cost": turn_mgr.get_build_turn_cost("rail"), "turns": short_turns, "effect": "Move x0.25; upgrade road; +1 turn on river"},
-		{"name": "Spawn Tower", "cost": turn_mgr.get_build_turn_cost("spawn_tower"), "turns": tower_turns, "effect": "Spawns units; needs road link"},
-		{"name": "Trap", "cost": turn_mgr.get_build_turn_cost("trap"), "turns": short_turns, "effect": "Hidden; triggered by enemy: becomes disabled, stops movement, deals 30 dmg"}
+		{"name": "Fortification", "cost": turn_mgr.get_build_turn_cost("fortification"), "turns": short_turns, "effect": "+%s melee/ranged (atk/def)" % fort_bonus},
+		{"name": "Road", "cost": turn_mgr.get_build_turn_cost("road"), "turns": short_turns, "effect": "Move x0.5; +1 turn on river; mines +10 if connected"},
+		{"name": "Railroad", "cost": turn_mgr.get_build_turn_cost("rail"), "turns": short_turns, "effect": "Move x0.25; upgrade intact road; rail build counts as road; +1 turn on river; mines +20 if connected"},
+		{"name": "Spawn Tower", "cost": turn_mgr.get_build_turn_cost("spawn_tower"), "turns": tower_turns, "effect": "Spawn point; tower bonuses; no income; needs road/rail link"},
+		{"name": "Trap", "cost": turn_mgr.get_build_turn_cost("trap"), "turns": short_turns, "effect": "Hidden from enemies; triggers to disable, stop movement, deal 30 dmg"}
 	]
 	for i in range(build_rows.size()):
 		var row = build_rows[i]

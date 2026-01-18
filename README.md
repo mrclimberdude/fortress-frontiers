@@ -31,6 +31,7 @@ Each turn has three phases:
 
 Available orders:
 - Move
+- Move To (queued move)
 - Ranged attack (ranged units only)
 - Melee attack (units with can_melee)
 - Heal
@@ -55,6 +56,8 @@ Queued and repeating orders:
 - Build Road To queues move + build steps until complete, a step fails, or a new order is issued.
 - Build Railroad To only upgrades intact roads; if a step lands on a non-road tile, the queue ends.
 - Build queues may cross enemy-controlled tiles; they only stop when a step fails or is replaced.
+- Move To queues a path; each turn the unit moves as far as it can along that path.
+- Move To cancels if the unit ends a turn on a different tile than expected or a new order is issued.
 
 ## Visibility and Fog of War
 
@@ -84,8 +87,16 @@ Terrain data comes from the tileset custom data:
 - You can spawn units on your base tile and on any tower tile you control.
 - You can also spawn on tiles adjacent to those spawn points.
 - Spawn towers only count if they are connected to your road or rail network (bases and towers count as rail endpoints).
+- For connectivity, roads must be intact; rails (including rail under construction) count as roads.
 - Spawn orders resolve first during Execution.
 - Spawn towers have the same combat stats as starting towers but do not provide additional income.
+
+## Income
+
+Income is awarded during Upkeep:
+- Base: +10 if you control your base tile.
+- Starting towers: +5 each (spawn towers do not provide income).
+- Mines: +10 if controlled, +15 if a miner is on the mine, plus road/rail bonuses (see Mines).
 
 ## Movement and Pathing
 
@@ -182,19 +193,19 @@ All units have default stats unless overridden:
 | Archer | 100 | 10 | 25 | 2 | 2 | 2 | 10 | Ranged unit. |
 | Soldier | 75 | 20 | 0 | 2 | 0 | 2 | 10 | Melee unit. |
 | Scout | 50 | 4 | 0 | 3 | 0 | 3 | 15 | Fast and high vision; lookout; forest move cost 1. |
-| Miner | 75 | 1 | 0 | 2 | 0 | 2 | 15 | Provides mine bonus. |
+| Miner | 75 | 1 | 0 | 2 | 0 | 2 | 15 | Mine bonus +15 if on mine. |
 | Builder | 50 | 3 | 0 | 2 | 0 | 2 | 10 | Builds, repairs, sabotages; can queue road/rail builds. |
-| Phalanx | 100 | 10 | 0 | 2 | 0 | 2 | 10 | Defend bonus; no multi-attack penalty. |
+| Phalanx | 100 | 10 | 0 | 2 | 0 | 2 | 10 | Defend bonus; no multi-attack penalty; adjacent allies +2. |
 | Cavalry | 125 | 20 | 0 | 3 | 0 | 3 | 10 | Fast melee unit. |
-| Tower | - | 20 | 0 | 0 | 0 | 2 | 0 | Static structure. |
-| Base | - | 20 | 0 | 0 | 0 | 2 | 0 | 500 max health; losing it ends the game. |
+| Tower | - | 35 | 0 | 0 | 0 | 2 | 0 | Static structure; no passive regen. |
+| Base | - | 40 | 0 | 0 | 0 | 2 | 0 | No passive regen; losing it ends the game. |
 
 ### Neutral Units
 
 | Unit | Melee | Ranged | Range | Sight | Move | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
 | Camp Archer | 15 | 35 | 2 | 2 | 0 | Ranged attacker. |
-| Dragon | 25 | 40 | 3 | 3 | 0 | Ranged fire and melee cleave. |
+| Dragon | 35 | 35 | 3 | 3 | 0 | Ranged fire and melee cleave. |
 
 ## Structures and Engineering
 
@@ -205,13 +216,13 @@ Builders construct structures over multiple turns. Costs are paid per build step
 | Fortification | 2 | 15 | Open terrain only | +3 melee, +3 ranged on tile. |
 | Road | 2 | 5 | Can cross forest and river | Movement cost x0.5. |
 | Railroad | 2 | 10 | Must upgrade an intact road | Movement cost x0.25. |
-| Spawn Tower | 4 | 10 | Open terrain only | Adds a new spawn point (no extra gold). |
+| Spawn Tower | 4 | 10 | Open terrain only | Adds a new spawn point (no extra gold); needs road/rail link. |
 | Trap | 2 | 15 | Open terrain or forest | Hidden; triggers on entry. |
 
 Roads and rails built on river tiles take +1 additional turn.
 
 ### Structure States
-- Building: under construction, no benefits.
+- Building: under construction, no benefits (except rail under construction counts as a road).
 - Intact: full benefits.
 - Disabled: no benefits, can be repaired or destroyed.
 - Railroads under construction still count as roads for movement and connectivity.
@@ -250,8 +261,9 @@ The Engineering step resolves after Attacks and before Movement:
 - Mines are captured by occupying their tile.
 - The owner retains control until the other player occupies the mine.
 - Mine income is granted each Upkeep if the owner controls the tile.
-- Road bonus: +10 gold if the mine is connected to your network by a continuous road path.
-- Rail bonus: +20 gold if the mine is connected by a continuous rail path (all tiles on the path must be intact rails).
+- A miner on a controlled mine adds +15 income.
+- Road bonus: +10 gold if the mine is controlled and connected by a continuous road path.
+- Rail bonus: +20 gold if the mine is controlled and connected by a continuous rail path (all tiles on the path must be intact rails).
 - Bases and towers count as rail tiles for connectivity.
 
 ## Neutral Monsters
@@ -271,12 +283,12 @@ Targets are weighted by distance and health:
 - Dragons choose melee targets first, then fire targets with a reduced chance to repeat melee targets.
 
 ### Respawns and Rewards
-- Camp respawn: 6 to 10 turns after cleared.
-- Dragon respawn: 12 to 20 turns after cleared.
+- Camp respawn: 8 to 12 turns after cleared.
+- Dragon respawn: 14 to 20 turns after cleared.
 - Respawn countdown starts only when the tile is empty.
 - If a unit steps on a camp or dragon tile before respawn, the timer resets.
-- Camp rewards: random gold from 150 to 300.
-- Dragon rewards: predetermined per spawn (gold, melee bonus, or ranged bonus).
+- Camp rewards: random gold from 150 to 250 (in multiples of 5).
+- Dragon rewards: predetermined per spawn (gold +1000, melee +3, or ranged +3).
 - Respawn timers are only shown when close to respawn (3 turns for camps, 5 for dragons) unless dev override is enabled.
 
 ## Multiplayer
