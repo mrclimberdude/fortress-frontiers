@@ -909,6 +909,9 @@ func _ready():
 	NetworkManager.connect("state_snapshot_received", Callable(self, "_on_state_snapshot_received"))
 	NetworkManager.connect("execution_paused_received", Callable(self, "_on_execution_paused_received"))
 	NetworkManager.connect("execution_complete_received", Callable(self, "_on_execution_complete_received"))
+	var quit_button = $GameOver.get_node_or_null("QuitToLobbyButton")
+	if quit_button != null:
+		quit_button.connect("pressed", Callable(self, "_on_game_over_quit_pressed"))
 	
 	rng.randomize()
 	var mp = get_tree().get_multiplayer()
@@ -1558,11 +1561,23 @@ func _add_neutral_marker(root: Node2D, pos: Vector2i, text: String) -> void:
 	label.z_index = 101
 	root.add_child(label)
 
-func end_game(player_id):
+func _show_game_over(player_id: String) -> void:
 	$GameOver/GameOverLabel.add_theme_font_size_override("font_size", 100)
 	$GameOver/GameOverLabel.text = "%s lost!" % player_id
 	$GameOver.visible = true
 	$UI.visible = false
+
+func _on_game_over_quit_pressed() -> void:
+	if has_node("UI") and $UI.has_method("_on_cancel_game_pressed"):
+		$UI.visible = true
+		$UI._on_cancel_game_pressed()
+	else:
+		reset_to_lobby()
+
+func end_game(player_id: String) -> void:
+	_show_game_over(player_id)
+	if _is_host():
+		NetworkManager.broadcast_game_over(player_id)
 	print("the game has ended")
 
 func reset_to_lobby() -> void:

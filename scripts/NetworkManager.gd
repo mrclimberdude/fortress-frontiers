@@ -24,6 +24,7 @@ signal match_seed_received(match_seed: int)
 signal state_snapshot_received(state: Dictionary)
 signal execution_paused_received(step_idx: int, neutral_step_idx: int)
 signal execution_complete_received()
+signal game_over_received(player_id: String)
 signal buy_result(player_id: String, unit_type: String, grid_pos: Vector2i, ok: bool, reason: String, cost: int)
 signal undo_result(player_id: String, unit_net_id: int, ok: bool, reason: String, refund: int)
 signal order_result(player_id: String, unit_net_id: int, order: Dictionary, ok: bool, reason: String)
@@ -311,6 +312,24 @@ func broadcast_execution_complete() -> void:
 	if not mp.is_server():
 		return
 	rpc("rpc_execution_complete")
+
+func broadcast_game_over(player_id: String) -> void:
+	var mp = get_tree().get_multiplayer()
+	if mp == null or mp.multiplayer_peer == null:
+		return
+	if not mp.is_server():
+		return
+	if client_peer_id > 0:
+		rpc_id(client_peer_id, "rpc_game_over", player_id)
+
+@rpc("any_peer", "reliable")
+func rpc_game_over(player_id: String) -> void:
+	var mp = get_tree().get_multiplayer()
+	if mp.is_server():
+		return
+	if turn_mgr != null and turn_mgr.has_method("_show_game_over"):
+		turn_mgr._show_game_over(player_id)
+	emit_signal("game_over_received", player_id)
 
 @rpc("any_peer", "reliable")
 func rpc_submit_orders(player_id: String, orders: Array) -> void:

@@ -949,6 +949,7 @@ func _on_cancel_game_pressed():
 	$CancelGameButton.visible = false
 	$Panel.visible = false
 	cancel_done_button.visible = false
+	exec_panel.visible = false
 	turn_mgr.reset_to_lobby()
 	_reset_ui_for_snapshot()
 	_on_stats_toggled(false)
