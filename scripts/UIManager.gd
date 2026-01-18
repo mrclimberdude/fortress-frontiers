@@ -18,7 +18,7 @@ var support_tiles = []
 var current_path: Array = []
 var remaining_moves: float = 0.0
 var repair_tiles: Array = []
-var action_mode:       String   = ""     # "move", "ranged", "melee", "support", "hold", "repair"
+var action_mode:       String   = ""     # "move", "ranged", "melee", "support", "hold", "repair", "build_road_to"
 var move_priority: int = 0
 var allow_clicks: bool = true
 var last_click_pos: Vector2 = Vector2.ZERO
@@ -36,6 +36,7 @@ var auto_pass_enabled: bool = false
 var last_damage_log_count: int = 0
 var done_button_default_modulate: Color = Color(1, 1, 1)
 var _map_select_updating: bool = false
+var _queue_preview_unit_id: int = -1
 
 @onready var turn_mgr = get_node(turn_manager_path) as Node
 @onready var unit_mgr = get_node(unit_manager_path) as Node
@@ -96,6 +97,7 @@ const BUILD_OPTIONS = [
 	{"id": 3, "label": "Spawn Tower", "type": "spawn_tower"},
 	{"id": 4, "label": "Trap", "type": "trap"}
 ]
+const BUILD_MENU_ROAD_TO_ID: int = 100
 
 const ArcherScene = preload("res://scenes/Archer.tscn")
 const SoldierScene = preload("res://scenes/Soldier.tscn")
@@ -275,6 +277,8 @@ func _ready():
 	build_menu.hide()
 	for entry in BUILD_OPTIONS:
 		build_menu.add_item(entry["label"], entry["id"])
+	build_menu.add_separator()
+	build_menu.add_item("Build Road To", BUILD_MENU_ROAD_TO_ID)
 	_init_build_hover()
 	_init_menu()
 
@@ -515,6 +519,7 @@ func _init_build_hover() -> void:
 
 func _process(_delta: float) -> void:
 	_update_build_hover()
+	_update_queue_preview()
 
 func _update_build_hover() -> void:
 	if _build_hover_label == null:
@@ -540,6 +545,81 @@ func _hide_build_hover() -> void:
 	_build_hover_cell = Vector2i(-99999, -99999)
 	if _build_hover_label != null:
 		_build_hover_label.visible = false
+
+func _queue_path_index(path: Array, tile: Vector2i) -> int:
+	for i in range(path.size()):
+		if path[i] == tile:
+			return i
+	return -1
+
+func _clear_queue_preview() -> void:
+	if _queue_preview_unit_id == -1:
+		return
+	var preview_node = hex.get_node_or_null("PreviewPathArrows")
+	if preview_node != null:
+		for child in preview_node.get_children():
+			child.queue_free()
+	_queue_preview_unit_id = -1
+
+func _draw_preview_path(path: Array) -> void:
+	var preview_node = hex.get_node_or_null("PreviewPathArrows")
+	if preview_node == null:
+		return
+	for child in preview_node.get_children():
+		child.queue_free()
+	if path.size() < 2:
+		return
+	var root = Node2D.new()
+	preview_node.add_child(root)
+	for i in range(path.size() - 1):
+		var a = path[i]
+		var b = path[i + 1]
+		if typeof(a) != TYPE_VECTOR2I or typeof(b) != TYPE_VECTOR2I:
+			continue
+		var p1 = hex.map_to_world(a) + hex.tile_size * 0.5
+		var p2 = hex.map_to_world(b) + hex.tile_size * 0.5
+		var arrow = SupportArrowScene.instantiate() as Sprite2D
+		var dir = (p2 - p1).normalized()
+		var tex_size = arrow.texture.get_size()
+		var distance: float = (p2 - p1).length()
+		var scale_x: float = distance / tex_size.x
+		arrow.scale = Vector2(scale_x, 1)
+		var half_length = tex_size.x * scale_x * 0.5
+		arrow.position = p1 + dir * half_length
+		arrow.rotation = (p2 - p1).angle()
+		arrow.z_index = 10
+		root.add_child(arrow)
+
+func _update_queue_preview() -> void:
+	if action_mode != "" or placing_unit != "" or current_path.size() > 1:
+		_clear_queue_preview()
+		return
+	var cam = get_viewport().get_camera_2d()
+	if cam == null:
+		_clear_queue_preview()
+		return
+	var cell = hex.world_to_map(cam.get_global_mouse_position())
+	var unit = game_board.get_unit_at(cell)
+	if unit == null or not unit.is_builder:
+		_clear_queue_preview()
+		return
+	if unit.player_id != turn_mgr.local_player_id:
+		_clear_queue_preview()
+		return
+	if unit.build_queue.size() < 2:
+		_clear_queue_preview()
+		return
+	if unit.net_id == _queue_preview_unit_id:
+		return
+	var path = unit.build_queue.duplicate()
+	var idx = _queue_path_index(path, unit.grid_pos)
+	if idx < 0:
+		_clear_queue_preview()
+		return
+	if idx > 0:
+		path = path.slice(idx)
+	_queue_preview_unit_id = unit.net_id
+	_draw_preview_path(path)
 
 func _refresh_build_menu_labels() -> void:
 	for entry in BUILD_OPTIONS:
@@ -884,6 +964,13 @@ func _on_order_result(player_id: String, unit_net_id: int, order: Dictionary, ok
 			unit.is_defending = false
 			unit.is_healing = false
 			unit.is_moving = false
+			if order.has("queue_path") and order["queue_path"] is Array:
+				unit.build_queue = order["queue_path"]
+				unit.build_queue_type = str(order.get("queue_type", ""))
+				unit.build_queue_last_type = ""
+				unit.build_queue_last_target = Vector2i(-9999, -9999)
+				unit.build_queue_last_build_left = -1
+				_queue_preview_unit_id = -1
 			if order.get("type", "") != "heal":
 				unit.auto_heal = false
 			if order.get("type", "") != "defend":
@@ -966,7 +1053,10 @@ func _on_cancel_game_pressed():
 	NetworkManager.close_connection()
 
 func _on_finish_move_button_pressed():
-	finish_current_path()
+	if action_mode == "build_road_to":
+		finish_build_road_path()
+	else:
+		finish_current_path()
 
 func _on_stats_toggled(toggled):
 	if toggled:
@@ -1164,11 +1254,13 @@ func _clear_all_drawings():
 	if sabotage_node != null:
 		for child in sabotage_node.get_children():
 			child.queue_free()
+	_queue_preview_unit_id = -1
 
 func _reset_ui_for_snapshot() -> void:
 	action_menu.hide()
 	build_menu.hide()
 	finish_move_button.visible = false
+	_clear_queue_preview()
 	placing_unit = ""
 	currently_selected_unit = null
 	action_mode = ""
@@ -1276,6 +1368,42 @@ func _draw_paths() -> void:
 					
 					arrow.z_index = 10
 					root.add_child(arrow)
+	if turn_mgr.current_phase == turn_mgr.Phase.ORDERS and current_player != "":
+		var units = game_board.get_all_units().get(current_player, [])
+		for unit in units:
+			if unit == null or not unit.is_builder:
+				continue
+			if not _should_draw_unit(unit):
+				continue
+			var existing = turn_mgr.get_order(current_player, unit.net_id)
+			if not existing.is_empty():
+				continue
+			var queued = turn_mgr.get_queue_front_order(unit, current_player)
+			if queued.is_empty():
+				continue
+			if str(queued.get("type", "")) != "move":
+				continue
+			var path = queued.get("path", [])
+			if not (path is Array) or path.size() < 2:
+				continue
+			var root = Node2D.new()
+			path_arrows_node.add_child(root)
+			for i in range(path.size() - 1):
+				var a = path[i]
+				var b = path[i + 1]
+				var p1 = hex.map_to_world(a) + hex.tile_size * 0.5
+				var p2 = hex.map_to_world(b) + hex.tile_size * 0.5
+				var arrow = ArrowScene.instantiate() as Sprite2D
+				var dir = (p2 - p1).normalized()
+				var tex_size = arrow.texture.get_size()
+				var distance: float = (p2 - p1).length()
+				var scale_x: float = distance / tex_size.x
+				arrow.scale = Vector2(scale_x, 1)
+				var half_length = tex_size.x * scale_x * 0.5
+				arrow.position = p1 + dir * half_length
+				arrow.rotation = (p2 - p1).angle()
+				arrow.z_index = 10
+				root.add_child(arrow)
 
 func _draw_partial_path() -> void:
 	var preview_node = hex.get_node("PreviewPathArrows")
@@ -1515,6 +1643,32 @@ func _draw_builds():
 				build_icon.position = hex.map_to_world(unit.grid_pos) + (hex.tile_size * Vector2(0.5, 0.7))
 				build_icon.z_index = ORDER_ICON_Z
 				root.add_child(build_icon)
+	if turn_mgr.current_phase == turn_mgr.Phase.ORDERS and current_player != "":
+		var units = game_board.get_all_units().get(current_player, [])
+		for unit in units:
+			if unit == null or not unit.is_builder:
+				continue
+			if not _should_draw_unit(unit):
+				continue
+			var existing = turn_mgr.get_order(current_player, unit.net_id)
+			if not existing.is_empty():
+				continue
+			var queued = turn_mgr.get_queue_front_order(unit, current_player)
+			if queued.is_empty():
+				continue
+			if str(queued.get("type", "")) != "build":
+				continue
+			var root = Node2D.new()
+			build_node.add_child(root)
+			var build_icon = Sprite2D.new()
+			build_icon.texture = BuildIcon
+			var tex_size = BuildIcon.get_size()
+			if tex_size.x > 0:
+				var scale = (hex.tile_size.x * 0.3) / tex_size.x
+				build_icon.scale = Vector2(scale, scale)
+			build_icon.position = hex.map_to_world(unit.grid_pos) + (hex.tile_size * Vector2(0.5, 0.7))
+			build_icon.z_index = ORDER_ICON_Z
+			root.add_child(build_icon)
 
 func _draw_repairs():
 	var repair_node = _get_repair_sprites_root()
@@ -1602,6 +1756,11 @@ func _has_repair_target_here(unit: Node) -> bool:
 	return _get_repair_targets(unit).size() > 0
 
 func _on_build_selected(id: int) -> void:
+	if id == BUILD_MENU_ROAD_TO_ID:
+		if currently_selected_unit != null:
+			_start_build_road_to()
+		build_menu.hide()
+		return
 	var struct_type = ""
 	for entry in BUILD_OPTIONS:
 		if entry["id"] == id:
@@ -1618,6 +1777,43 @@ func _on_build_selected(id: int) -> void:
 	action_mode = ""
 	build_menu.hide()
 
+func _get_build_road_reachable(start: Vector2i) -> Dictionary:
+	if currently_selected_unit == null:
+		return {"tiles": [], "prev": {}}
+	return game_board.get_reachable_tiles(start, currently_selected_unit.move_range, "move", currently_selected_unit)
+
+func _start_build_road_to() -> void:
+	action_mode = "build_road_to"
+	current_path = [currently_selected_unit.grid_pos]
+	var result = _get_build_road_reachable(currently_selected_unit.grid_pos)
+	var tiles = result["tiles"]
+	if tiles.has(currently_selected_unit.grid_pos):
+		tiles.erase(currently_selected_unit.grid_pos)
+	game_board.show_highlights(tiles)
+	current_reachable = result
+	finish_move_button.visible = false
+
+func finish_build_road_path():
+	if current_path.size() == 1:
+		action_mode = ""
+		return
+	NetworkManager.request_order(current_player, {
+		"unit_net_id": currently_selected_unit.net_id,
+		"type": "build_road_to",
+		"path": current_path
+	})
+	var preview_node = hex.get_node("PreviewPathArrows")
+	for child in preview_node.get_children():
+		child.queue_free()
+	_queue_preview_unit_id = -1
+	finish_move_button.visible = false
+	action_mode = ""
+	current_path = []
+	remaining_moves = 0
+	game_board.clear_highlights()
+	$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
+	_update_done_button_state()
+
 func finish_current_path():
 	if current_path.size() == 1:
 		action_mode = ""
@@ -1632,6 +1828,7 @@ func finish_current_path():
 	var preview_node = hex.get_node("PreviewPathArrows")
 	for child in preview_node.get_children():
 		child.queue_free()
+	_queue_preview_unit_id = -1
 	finish_move_button.visible = false
 	action_mode = ""
 	current_path = []
@@ -1688,6 +1885,31 @@ func _unhandled_input(ev):
 			_cancel_purchase_mode()
 		return
 	
+	if action_mode == "build_road_to" and currently_selected_unit:
+		if cell not in current_reachable["tiles"]:
+			finish_build_road_path()
+			return
+		var path = []
+		var prev = current_reachable["prev"]
+		var cur = cell
+		while cur in prev:
+			path.insert(0, cur)
+			cur = prev[cur]
+		current_path += path
+		_draw_partial_path()
+		var result = _get_build_road_reachable(cell)
+		var tiles = result["tiles"]
+		if tiles.has(cell):
+			tiles.erase(cell)
+		if tiles.size() == 0:
+			finish_build_road_path()
+			return
+		game_board.show_highlights(tiles)
+		current_reachable = result
+		finish_move_button.set_position(ev.position)
+		finish_move_button.visible = true
+		return
+
 	# Order phase: if waiting for destination (move mode)
 	if action_mode == "move" and currently_selected_unit:
 		if cell not in current_reachable["tiles"]:

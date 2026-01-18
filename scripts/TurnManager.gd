@@ -1003,6 +1003,11 @@ func _serialize_unit(unit) -> Dictionary:
 		"auto_defend": unit.auto_defend,
 		"auto_build": unit.auto_build,
 		"auto_build_type": unit.auto_build_type,
+		"build_queue": unit.build_queue,
+		"build_queue_type": unit.build_queue_type,
+		"build_queue_last_type": unit.build_queue_last_type,
+		"build_queue_last_target": unit.build_queue_last_target,
+		"build_queue_last_build_left": unit.build_queue_last_build_left,
 		"is_moving": unit.is_moving,
 		"is_looking_out": unit.is_looking_out,
 		"moving_to": unit.moving_to,
@@ -1278,6 +1283,13 @@ func _apply_units(units_data: Array) -> void:
 		unit.auto_defend = bool(data.get("auto_defend", false))
 		unit.auto_build = bool(data.get("auto_build", false))
 		unit.auto_build_type = str(data.get("auto_build_type", ""))
+		var queue_data = data.get("build_queue", [])
+		unit.build_queue = queue_data if queue_data is Array else []
+		unit.build_queue_type = str(data.get("build_queue_type", ""))
+		unit.build_queue_last_type = str(data.get("build_queue_last_type", ""))
+		var last_target = data.get("build_queue_last_target", Vector2i(-9999, -9999))
+		unit.build_queue_last_target = last_target if typeof(last_target) == TYPE_VECTOR2I else Vector2i(-9999, -9999)
+		unit.build_queue_last_build_left = int(data.get("build_queue_last_build_left", -1))
 		unit.is_moving = bool(data.get("is_moving", false))
 		unit.is_looking_out = bool(data.get("is_looking_out", false))
 		unit.moving_to = data.get("moving_to", unit.grid_pos)
@@ -1697,6 +1709,7 @@ func _do_upkeep() -> void:
 	_apply_auto_heal_orders(all_units)
 	_apply_auto_defend_orders(all_units)
 	_apply_auto_build_orders(all_units)
+	_apply_build_queue_orders(all_units)
 	_tick_neutral_respawns()
 	$GameBoardNode/FogOfWar._update_fog()
 	$UI/DamagePanel.visible = true
@@ -1712,6 +1725,8 @@ func _apply_auto_heal_orders(all_units: Dictionary) -> void:
 			NetworkManager.player_orders[player] = orders
 		for unit in all_units[player]:
 			if unit == null or unit.is_base or unit.is_tower:
+				continue
+			if unit.build_queue.size() > 0:
 				continue
 			if unit.curr_health <= 0:
 				unit.auto_heal = false
@@ -1736,6 +1751,8 @@ func _apply_auto_defend_orders(all_units: Dictionary) -> void:
 			NetworkManager.player_orders[player] = orders
 		for unit in all_units[player]:
 			if unit == null or unit.is_base or unit.is_tower:
+				continue
+			if unit.build_queue.size() > 0:
 				continue
 			if unit.curr_health <= 0:
 				unit.auto_defend = false
@@ -1766,6 +1783,8 @@ func _apply_auto_build_orders(all_units: Dictionary) -> void:
 			if unit.curr_health <= 0:
 				unit.auto_build = false
 				unit.auto_build_type = ""
+				continue
+			if unit.build_queue.size() > 0:
 				continue
 			if not unit.auto_build:
 				continue
@@ -1798,6 +1817,192 @@ func _apply_auto_build_orders(all_units: Dictionary) -> void:
 			NetworkManager.player_orders[player][unit.net_id] = order
 			_apply_order_flags(unit, order)
 		player_orders[player] = orders
+
+func _clear_build_queue(unit) -> void:
+	if unit == null:
+		return
+	unit.build_queue = []
+	unit.build_queue_type = ""
+	unit.build_queue_last_type = ""
+	unit.build_queue_last_target = Vector2i(-9999, -9999)
+	unit.build_queue_last_build_left = -1
+
+func _road_queue_tile_status(tile: Vector2i, player_id: String, allow_start: bool = false) -> String:
+	if not $GameBoardNode/HexTileMap.is_cell_valid(tile):
+		return "invalid"
+	if $GameBoardNode._terrain_is_impassable(tile):
+		return "invalid"
+	var terrain = _terrain_type(tile)
+	if terrain in ["mountain", "lake"]:
+		return "invalid"
+	if tile in camps.get("basic", []) or tile in camps.get("dragon", []):
+		return "skip" if allow_start else "invalid"
+	if tile in structure_positions:
+		if tile == base_positions.get(player_id, Vector2i(-9999, -9999)) or tile in tower_positions.get(player_id, []):
+			return "skip"
+		return "skip" if allow_start else "invalid"
+	var state = _structure_state(tile)
+	if not state.is_empty():
+		var stype = str(state.get("type", ""))
+		var status = str(state.get("status", ""))
+		var owner = str(state.get("owner", ""))
+		if status == STRUCT_STATUS_DISABLED:
+			return "skip" if allow_start else "invalid"
+		if stype == STRUCT_ROAD:
+			if status == STRUCT_STATUS_BUILDING:
+				return "build" if owner == player_id else ("skip" if allow_start else "invalid")
+			if status == STRUCT_STATUS_INTACT:
+				return "skip"
+		if stype == STRUCT_RAIL:
+			if status in [STRUCT_STATUS_BUILDING, STRUCT_STATUS_INTACT]:
+				return "skip"
+		return "skip" if allow_start else "invalid"
+	return "build"
+
+func is_road_queue_tile_valid(tile: Vector2i, player_id: String, allow_start: bool = false) -> bool:
+	return _road_queue_tile_status(tile, player_id, allow_start) != "invalid"
+
+func _queue_path_index(path: Array, tile: Vector2i) -> int:
+	for i in range(path.size()):
+		if path[i] == tile:
+			return i
+	return -1
+
+func _build_queue_last_step_ok(unit, player_id: String) -> bool:
+	var last_type = str(unit.build_queue_last_type)
+	if last_type == "":
+		return true
+	if last_type == "move":
+		return unit.grid_pos == unit.build_queue_last_target
+	if last_type == "build":
+		var tile: Vector2i = unit.build_queue_last_target
+		var state = _structure_state(tile)
+		if state.is_empty():
+			return false
+		var status = str(state.get("status", ""))
+		if status == STRUCT_STATUS_DISABLED:
+			return false
+		var prev_left = int(unit.build_queue_last_build_left)
+		var current_left = int(state.get("build_left", -1))
+		if prev_left < 0 or current_left < 0:
+			return false
+		return current_left < prev_left
+	return true
+
+func _build_queue_next_order(unit, player_id: String) -> Dictionary:
+	if unit == null:
+		return {}
+	var path = unit.build_queue
+	if not (path is Array) or path.size() < 2:
+		return {}
+	var idx = _queue_path_index(path, unit.grid_pos)
+	if idx < 0:
+		return {}
+	var status = _road_queue_tile_status(unit.grid_pos, player_id, idx == 0)
+	if status == "invalid":
+		return {}
+	if status == "build":
+		var turn_cost = _structure_turn_cost(STRUCT_ROAD)
+		if turn_cost > 0 and player_gold[player_id] < turn_cost:
+			return {"_queue_fail": "not_enough_gold"}
+		return {
+			"unit_net_id": unit.net_id,
+			"type": "build",
+			"structure_type": STRUCT_ROAD,
+			"target_tile": unit.grid_pos,
+			"priority": 0
+		}
+	if idx >= path.size() - 1:
+		return {}
+	var next_tile = path[idx + 1]
+	if not $GameBoardNode/HexTileMap.is_cell_valid(next_tile):
+		return {}
+	if not next_tile in $GameBoardNode.get_offset_neighbors(unit.grid_pos):
+		return {}
+	if $GameBoardNode._terrain_is_impassable(next_tile):
+		return {}
+	if $GameBoardNode.is_enemy_structure_tile(next_tile, player_id):
+		return {}
+	return {
+		"unit_net_id": unit.net_id,
+		"type": "move",
+		"path": [unit.grid_pos, next_tile],
+		"priority": 0
+	}
+
+func _record_build_queue_last_order(unit, order: Dictionary) -> void:
+	if unit == null:
+		return
+	var otype = str(order.get("type", ""))
+	unit.build_queue_last_type = otype
+	unit.build_queue_last_target = Vector2i(-9999, -9999)
+	unit.build_queue_last_build_left = -1
+	if otype == "move":
+		var path = order.get("path", [])
+		if path is Array and path.size() > 0:
+			var tail = path[path.size() - 1]
+			if typeof(tail) == TYPE_VECTOR2I:
+				unit.build_queue_last_target = tail
+	elif otype == "build":
+		var tile = order.get("target_tile", unit.grid_pos)
+		if typeof(tile) == TYPE_VECTOR2I:
+			unit.build_queue_last_target = tile
+			var state = _structure_state(tile)
+			if state.is_empty():
+				unit.build_queue_last_build_left = _structure_build_turns(STRUCT_ROAD, tile)
+			else:
+				unit.build_queue_last_build_left = int(state.get("build_left", -1))
+
+func get_queue_front_order(unit, player_id: String) -> Dictionary:
+	if unit == null:
+		return {}
+	if unit.player_id != player_id:
+		return {}
+	if unit.build_queue.size() < 2:
+		return {}
+	var order = _build_queue_next_order(unit, player_id)
+	if order.is_empty() or order.has("_queue_fail"):
+		return {}
+	return order
+
+func _apply_build_queue_orders(all_units: Dictionary) -> void:
+	for player in ["player1", "player2"]:
+		if not all_units.has(player):
+			continue
+		var orders = player_orders.get(player, {})
+		if not NetworkManager.player_orders.has(player):
+			NetworkManager.player_orders[player] = orders
+		for unit in all_units[player]:
+			if unit == null or not unit.is_builder:
+				if unit != null:
+					_clear_build_queue(unit)
+				continue
+			if unit.curr_health <= 0:
+				_clear_build_queue(unit)
+				continue
+			if unit.build_queue.size() == 0:
+				continue
+			if orders.has(unit.net_id):
+				_clear_build_queue(unit)
+				continue
+			if not _build_queue_last_step_ok(unit, player):
+				_clear_build_queue(unit)
+				continue
+			unit.build_queue_last_type = ""
+			unit.build_queue_last_target = Vector2i(-9999, -9999)
+			unit.build_queue_last_build_left = -1
+			var order = _build_queue_next_order(unit, player)
+			if order.is_empty():
+				_clear_build_queue(unit)
+				continue
+			if order.has("_queue_fail"):
+				_clear_build_queue(unit)
+				continue
+			orders[unit.net_id] = order
+			NetworkManager.player_orders[player][unit.net_id] = order
+			_apply_order_flags(unit, order)
+			_record_build_queue_last_order(unit, order)
+		player_orders[player] = orders
 # --------------------------------------------------------
 # Phase 2: Orders — async per-player input
 # --------------------------------------------------------
@@ -1807,6 +2012,11 @@ func _do_orders() -> void:
 	var me = local_player_id
 	print("--- Orders Phase for %s ---" % me.capitalize())
 	emit_signal("orders_phase_begin", me)
+	_broadcast_state()
+	if has_node("UI"):
+		$UI._draw_all()
+		if $UI.has_method("_update_done_button_state"):
+			$UI._update_done_button_state()
 
 	# wait until both players have submitted
 	await NetworkManager.orders_ready
@@ -1937,6 +2147,8 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 	if order_type != "build":
 		unit.auto_build = false
 		unit.auto_build_type = ""
+	if order_type != "build_road_to":
+		_clear_build_queue(unit)
 
 	var sanitized := {"unit_net_id": unit_net_id, "type": order_type}
 	match order_type:
@@ -2035,6 +2247,59 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 			if unit_type != "scout":
 				result["reason"] = "invalid_action"
 				return result
+		"build_road_to":
+			if not unit.is_builder:
+				result["reason"] = "not_builder"
+				return result
+			var path = order.get("path", [])
+			if not (path is Array) or path.size() < 2:
+				result["reason"] = "invalid_path"
+				return result
+			if path[0] != unit.grid_pos:
+				result["reason"] = "invalid_path"
+				return result
+			var has_build := false
+			for i in range(path.size()):
+				var step = path[i]
+				if typeof(step) != TYPE_VECTOR2I:
+					result["reason"] = "invalid_path"
+					return result
+				if i > 0:
+					var prev = path[i - 1]
+					if not step in $GameBoardNode.get_offset_neighbors(prev):
+						result["reason"] = "invalid_path"
+						return result
+				if $GameBoardNode.is_enemy_structure_tile(step, player_id):
+					result["reason"] = "invalid_path"
+					return result
+				var status = _road_queue_tile_status(step, player_id, i == 0)
+				if status == "invalid":
+					result["reason"] = "invalid_path"
+					return result
+				if status == "build":
+					has_build = true
+			if not has_build:
+				result["reason"] = "invalid_path"
+				return result
+			_clear_build_queue(unit)
+			unit.build_queue = path
+			unit.build_queue_type = STRUCT_ROAD
+			unit.build_queue_last_type = ""
+			unit.build_queue_last_target = Vector2i(-9999, -9999)
+			unit.build_queue_last_build_left = -1
+			var queued = _build_queue_next_order(unit, player_id)
+			if queued.is_empty():
+				_clear_build_queue(unit)
+				result["reason"] = "invalid_path"
+				return result
+			if queued.has("_queue_fail"):
+				_clear_build_queue(unit)
+				result["reason"] = str(queued.get("_queue_fail"))
+				return result
+			sanitized = queued
+			sanitized["queue_path"] = path
+			sanitized["queue_type"] = STRUCT_ROAD
+			_record_build_queue_last_order(unit, queued)
 		"build":
 			if not unit.is_builder:
 				result["reason"] = "not_builder"
