@@ -18,7 +18,7 @@ var support_tiles = []
 var current_path: Array = []
 var remaining_moves: float = 0.0
 var repair_tiles: Array = []
-var action_mode:       String   = ""     # "move", "ranged", "melee", "support", "hold", "repair", "build_road_to"
+var action_mode:       String   = ""     # "move", "ranged", "melee", "support", "hold", "repair", "build_road_to", "build_rail_to"
 var move_priority: int = 0
 var allow_clicks: bool = true
 var last_click_pos: Vector2 = Vector2.ZERO
@@ -98,6 +98,7 @@ const BUILD_OPTIONS = [
 	{"id": 4, "label": "Trap", "type": "trap"}
 ]
 const BUILD_MENU_ROAD_TO_ID: int = 100
+const BUILD_MENU_RAIL_TO_ID: int = 101
 
 const ArcherScene = preload("res://scenes/Archer.tscn")
 const SoldierScene = preload("res://scenes/Soldier.tscn")
@@ -279,6 +280,7 @@ func _ready():
 		build_menu.add_item(entry["label"], entry["id"])
 	build_menu.add_separator()
 	build_menu.add_item("Build Road To", BUILD_MENU_ROAD_TO_ID)
+	build_menu.add_item("Build Railroad To", BUILD_MENU_RAIL_TO_ID)
 	_init_build_hover()
 	_init_menu()
 
@@ -1055,6 +1057,8 @@ func _on_cancel_game_pressed():
 func _on_finish_move_button_pressed():
 	if action_mode == "build_road_to":
 		finish_build_road_path()
+	elif action_mode == "build_rail_to":
+		finish_build_rail_path()
 	else:
 		finish_current_path()
 
@@ -1761,6 +1765,11 @@ func _on_build_selected(id: int) -> void:
 			_start_build_road_to()
 		build_menu.hide()
 		return
+	if id == BUILD_MENU_RAIL_TO_ID:
+		if currently_selected_unit != null:
+			_start_build_rail_to()
+		build_menu.hide()
+		return
 	var struct_type = ""
 	for entry in BUILD_OPTIONS:
 		if entry["id"] == id:
@@ -1793,6 +1802,17 @@ func _start_build_road_to() -> void:
 	current_reachable = result
 	finish_move_button.visible = false
 
+func _start_build_rail_to() -> void:
+	action_mode = "build_rail_to"
+	current_path = [currently_selected_unit.grid_pos]
+	var result = _get_build_road_reachable(currently_selected_unit.grid_pos)
+	var tiles = result["tiles"]
+	if tiles.has(currently_selected_unit.grid_pos):
+		tiles.erase(currently_selected_unit.grid_pos)
+	game_board.show_highlights(tiles)
+	current_reachable = result
+	finish_move_button.visible = false
+
 func finish_build_road_path():
 	if current_path.size() == 1:
 		action_mode = ""
@@ -1806,6 +1826,26 @@ func finish_build_road_path():
 	for child in preview_node.get_children():
 		child.queue_free()
 	_queue_preview_unit_id = -1
+	finish_move_button.visible = false
+	action_mode = ""
+	current_path = []
+	remaining_moves = 0
+	game_board.clear_highlights()
+	$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
+	_update_done_button_state()
+
+func finish_build_rail_path():
+	if current_path.size() == 1:
+		action_mode = ""
+		return
+	NetworkManager.request_order(current_player, {
+		"unit_net_id": currently_selected_unit.net_id,
+		"type": "build_rail_to",
+		"path": current_path
+	})
+	var preview_node = hex.get_node("PreviewPathArrows")
+	for child in preview_node.get_children():
+		child.queue_free()
 	finish_move_button.visible = false
 	action_mode = ""
 	current_path = []
@@ -1885,9 +1925,12 @@ func _unhandled_input(ev):
 			_cancel_purchase_mode()
 		return
 	
-	if action_mode == "build_road_to" and currently_selected_unit:
+	if (action_mode == "build_road_to" or action_mode == "build_rail_to") and currently_selected_unit:
 		if cell not in current_reachable["tiles"]:
-			finish_build_road_path()
+			if action_mode == "build_road_to":
+				finish_build_road_path()
+			else:
+				finish_build_rail_path()
 			return
 		var path = []
 		var prev = current_reachable["prev"]

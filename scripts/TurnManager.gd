@@ -1859,6 +1859,41 @@ func _road_queue_tile_status(tile: Vector2i, player_id: String, allow_start: boo
 		return "skip" if allow_start else "invalid"
 	return "build"
 
+func _rail_queue_tile_status(tile: Vector2i, player_id: String, allow_start: bool = false) -> String:
+	if not $GameBoardNode/HexTileMap.is_cell_valid(tile):
+		return "invalid"
+	if $GameBoardNode._terrain_is_impassable(tile):
+		return "invalid"
+	var terrain = _terrain_type(tile)
+	if terrain in ["mountain", "lake"]:
+		return "invalid"
+	if tile in camps.get("basic", []) or tile in camps.get("dragon", []):
+		return "invalid"
+	if tile in structure_positions:
+		if tile == base_positions.get(player_id, Vector2i(-9999, -9999)) or tile in tower_positions.get(player_id, []):
+			return "skip"
+		return "invalid"
+	var state = _structure_state(tile)
+	if state.is_empty():
+		return "invalid"
+	var stype = str(state.get("type", ""))
+	var status = str(state.get("status", ""))
+	var owner = str(state.get("owner", ""))
+	if status == STRUCT_STATUS_DISABLED:
+		return "invalid"
+	if stype == STRUCT_ROAD:
+		if status == STRUCT_STATUS_INTACT and owner == player_id:
+			return "build"
+		return "invalid"
+	if stype == STRUCT_RAIL:
+		if owner != player_id:
+			return "invalid"
+		if status == STRUCT_STATUS_BUILDING:
+			return "build"
+		if status == STRUCT_STATUS_INTACT:
+			return "skip"
+	return "invalid"
+
 func is_road_queue_tile_valid(tile: Vector2i, player_id: String, allow_start: bool = false) -> bool:
 	return _road_queue_tile_status(tile, player_id, allow_start) != "invalid"
 
@@ -1898,17 +1933,23 @@ func _build_queue_next_order(unit, player_id: String) -> Dictionary:
 	var idx = _queue_path_index(path, unit.grid_pos)
 	if idx < 0:
 		return {}
+	var queue_type = str(unit.build_queue_type)
+	if queue_type == "":
+		queue_type = STRUCT_ROAD
 	var status = _road_queue_tile_status(unit.grid_pos, player_id, idx == 0)
+	if queue_type == STRUCT_RAIL:
+		status = _rail_queue_tile_status(unit.grid_pos, player_id, idx == 0)
 	if status == "invalid":
 		return {}
 	if status == "build":
-		var turn_cost = _structure_turn_cost(STRUCT_ROAD)
+		var struct_type = STRUCT_ROAD if queue_type != STRUCT_RAIL else STRUCT_RAIL
+		var turn_cost = _structure_turn_cost(struct_type)
 		if turn_cost > 0 and player_gold[player_id] < turn_cost:
 			return {"_queue_fail": "not_enough_gold"}
 		return {
 			"unit_net_id": unit.net_id,
 			"type": "build",
-			"structure_type": STRUCT_ROAD,
+			"structure_type": struct_type,
 			"target_tile": unit.grid_pos,
 			"priority": 0
 		}
@@ -1947,11 +1988,16 @@ func _record_build_queue_last_order(unit, order: Dictionary) -> void:
 		var tile = order.get("target_tile", unit.grid_pos)
 		if typeof(tile) == TYPE_VECTOR2I:
 			unit.build_queue_last_target = tile
+			var struct_type = str(order.get("structure_type", STRUCT_ROAD))
 			var state = _structure_state(tile)
 			if state.is_empty():
-				unit.build_queue_last_build_left = _structure_build_turns(STRUCT_ROAD, tile)
+				unit.build_queue_last_build_left = _structure_build_turns(struct_type, tile)
 			else:
-				unit.build_queue_last_build_left = int(state.get("build_left", -1))
+				var build_left_val = state.get("build_left", null)
+				if build_left_val == null:
+					unit.build_queue_last_build_left = _structure_build_turns(struct_type, tile)
+				else:
+					unit.build_queue_last_build_left = int(build_left_val)
 
 func get_queue_front_order(unit, player_id: String) -> Dictionary:
 	if unit == null:
@@ -2147,7 +2193,7 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 	if order_type != "build":
 		unit.auto_build = false
 		unit.auto_build_type = ""
-	if order_type != "build_road_to":
+	if order_type != "build_road_to" and order_type != "build_rail_to":
 		_clear_build_queue(unit)
 
 	var sanitized := {"unit_net_id": unit_net_id, "type": order_type}
@@ -2300,6 +2346,52 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 			sanitized["queue_path"] = path
 			sanitized["queue_type"] = STRUCT_ROAD
 			_record_build_queue_last_order(unit, queued)
+		"build_rail_to":
+			if not unit.is_builder:
+				result["reason"] = "not_builder"
+				return result
+			var rail_path = order.get("path", [])
+			if not (rail_path is Array) or rail_path.size() < 2:
+				result["reason"] = "invalid_path"
+				return result
+			if rail_path[0] != unit.grid_pos:
+				result["reason"] = "invalid_path"
+				return result
+			for i in range(rail_path.size()):
+				var step = rail_path[i]
+				if typeof(step) != TYPE_VECTOR2I:
+					result["reason"] = "invalid_path"
+					return result
+				if i > 0:
+					var prev = rail_path[i - 1]
+					if not step in $GameBoardNode.get_offset_neighbors(prev):
+						result["reason"] = "invalid_path"
+						return result
+				if $GameBoardNode._terrain_is_impassable(step):
+					result["reason"] = "invalid_path"
+					return result
+				if $GameBoardNode.is_enemy_structure_tile(step, player_id):
+					result["reason"] = "invalid_path"
+					return result
+			_clear_build_queue(unit)
+			unit.build_queue = rail_path
+			unit.build_queue_type = STRUCT_RAIL
+			unit.build_queue_last_type = ""
+			unit.build_queue_last_target = Vector2i(-9999, -9999)
+			unit.build_queue_last_build_left = -1
+			var rail_queued = _build_queue_next_order(unit, player_id)
+			if rail_queued.is_empty():
+				_clear_build_queue(unit)
+				result["reason"] = "invalid_path"
+				return result
+			if rail_queued.has("_queue_fail"):
+				_clear_build_queue(unit)
+				result["reason"] = str(rail_queued.get("_queue_fail"))
+				return result
+			sanitized = rail_queued
+			sanitized["queue_path"] = rail_path
+			sanitized["queue_type"] = STRUCT_RAIL
+			_record_build_queue_last_order(unit, rail_queued)
 		"build":
 			if not unit.is_builder:
 				result["reason"] = "not_builder"
