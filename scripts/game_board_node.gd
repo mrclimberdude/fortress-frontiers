@@ -270,6 +270,10 @@ func get_reachable_tiles(start: Vector2i, range: float, mode: String, mover_over
 					if mode in ["move", "place"] and _terrain_is_impassable(neighbor):
 						continue
 					if mode == "move" and is_enemy_structure_tile(neighbor, mover_player):
+						if not visited.has(neighbor):
+							visited[neighbor] = dist + 1
+							prev[neighbor] = current
+							reachable.append(neighbor)
 						continue
 					if visited.has(neighbor):
 						continue
@@ -304,11 +308,16 @@ func get_reachable_tiles(start: Vector2i, range: float, mode: String, mover_over
 					continue
 				if _terrain_is_impassable(neighbor):
 					continue
-				if is_enemy_structure_tile(neighbor, mover_player):
-					continue
 				var step_cost: float = get_move_cost(neighbor, mover)
 				var new_cost: float = float(visited[current]) + step_cost
 				if new_cost > range_limit:
+					continue
+				if is_enemy_structure_tile(neighbor, mover_player):
+					if not visited.has(neighbor) or new_cost < visited[neighbor]:
+						visited[neighbor] = new_cost
+						prev[neighbor] = current
+					if neighbor not in reachable:
+						reachable.append(neighbor)
 					continue
 				if not visited.has(neighbor) or new_cost < visited[neighbor]:
 					visited[neighbor] = new_cost

@@ -1947,8 +1947,9 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 					result["reason"] = "invalid_path"
 					return result
 				if $GameBoardNode.is_enemy_structure_tile(step, unit.player_id):
-					result["reason"] = "invalid_path"
-					return result
+					if i != path.size() - 1:
+						result["reason"] = "invalid_path"
+						return result
 				total_cost += float($GameBoardNode.get_move_cost(step, unit))
 				if total_cost > float(unit.move_range):
 					result["reason"] = "invalid_path"
@@ -3020,7 +3021,7 @@ func _pop_next_unfought(q: Array) -> Dictionary:
 # Decide the winner for a single tile t this tick.
 # If stationary_defender is non-null, treat them as a pinned queue item.
 # Returns either a winner_from (Vector2i) or null. This function mutates HP and may free nodes.
-func _mg_tile_fifo_commit(t: Vector2i, entrants: Array, stationary_defender: Node) -> Variant:
+func _mg_tile_fifo_commit(t: Vector2i, entrants: Array, stationary_defender: Node, retaliator_override: Node = null, fallback_defender: Node = null) -> Variant:
 	# Build entrant items with their native player_id; don't assume labels
 	var entrant_items := []
 	for src in entrants:
@@ -3096,17 +3097,27 @@ func _mg_tile_fifo_commit(t: Vector2i, entrants: Array, stationary_defender: Nod
 		if atk == null:
 			continue
 
-		# Attacker hits defender; defender retaliates if still alive & is_defending
+		# Attacker hits defender; optional retaliator can strike back after defender takes damage
 		var dmg = calculate_damage(atk, stationary_defender, "move", 1)
 		stationary_defender.curr_health -= dmg[1]
 		stationary_defender.last_damaged_by = atk.player_id
 		stationary_defender.set_health_bar()
-		dealt_dmg_report(atk, stationary_defender, dmg[0], dmg[1], stationary_defender.is_defending, "move")
-
-		if stationary_defender.is_defending:
-			atk.curr_health -= dmg[0]
-			atk.last_damaged_by = stationary_defender.player_id
+		var retaliator = retaliator_override
+		if retaliator == null:
+			if stationary_defender != null and (stationary_defender.is_base or stationary_defender.is_tower):
+				retaliator = null
+			else:
+				retaliator = stationary_defender
+		var retaliate = retaliator != null and retaliator.is_defending
+		var ret_dmg = 0.0
+		if retaliate:
+			ret_dmg = dmg[0]
+			if retaliator != stationary_defender:
+				ret_dmg = calculate_damage(atk, retaliator, "move", 1)[0]
+			atk.curr_health -= ret_dmg
+			atk.last_damaged_by = retaliator.player_id
 			atk.set_health_bar()
+		dealt_dmg_report(atk, stationary_defender, ret_dmg, dmg[1], retaliate, "move")
 
 		# Attacker fought this tick -> stop and clear order
 		atk.is_moving = false
@@ -3121,9 +3132,14 @@ func _mg_tile_fifo_commit(t: Vector2i, entrants: Array, stationary_defender: Nod
 			# Defender died at atk's hand; remember killer if alive
 			if atk != null and atk.curr_health > 0:
 				killer_item = {"from": atk.grid_pos, "unit": atk, "fought": true}
-			# Remove defender from board and proceed to empty-tile FIFO
+			# Remove defender from board
 			_cleanup_dead_unit(stationary_defender)
 			stationary_defender = null
+			if fallback_defender != null and is_instance_valid(fallback_defender) and fallback_defender.curr_health > 0:
+				stationary_defender = fallback_defender
+				retaliator_override = null
+				def_item = {"from": stationary_defender.grid_pos, "unit": stationary_defender, "fought": false, "is_defender": true}
+				continue
 			# loop continues; next iteration will fall into the contested-empty branch
 			continue
 
@@ -3151,8 +3167,6 @@ func _can_hop_over_builder(mover, blocker_tile: Vector2i, landing_tile: Vector2i
 	if blocker.is_moving:
 		return false
 	if $GameBoardNode.get_unit_at(landing_tile) != null:
-		return false
-	if $GameBoardNode.is_enemy_structure_tile(landing_tile, mover.player_id):
 		return false
 	return true
 
@@ -3315,7 +3329,23 @@ func _mg_resolve_chain_from_sink(mg: MovementGraph, entrants_map: Dictionary, st
 		var winner_from = null
 		var fought = false
 		# stationary defender if occupant has no outgoing move (or is stayed)
-		if occ != null and not occ.is_moving:
+		var structure_defender = null
+		var structure_garrison = null
+		var s = $GameBoardNode.get_structure_unit_at(t)
+		if s != null and (s.is_base or s.is_tower):
+			var has_enemy = false
+			for src in entrants:
+				var u = $GameBoardNode.get_unit_at(src)
+				if u != null and u.player_id != s.player_id:
+					has_enemy = true
+					break
+			if has_enemy:
+				structure_defender = s
+				if occ != null and occ.player_id == s.player_id and not occ.is_moving:
+					structure_garrison = occ
+		if structure_defender != null:
+			winner_from = _mg_tile_fifo_commit(t, entrants, structure_defender, structure_garrison, structure_garrison)
+		elif occ != null and not occ.is_moving:
 			winner_from = _mg_tile_fifo_commit(t, entrants, occ)
 		else:
 			winner_from = _mg_tile_fifo_commit(t, entrants, null)
