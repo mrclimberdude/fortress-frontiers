@@ -205,6 +205,7 @@ var spawn_tower_positions := { "player1": [], "player2": [] }
 var income_tower_positions := { "player1": [], "player2": [] }
 var structure_markers := {}
 var structure_memory := { "player1": {}, "player2": {} }
+var neutral_tile_memory := { "player1": {}, "player2": {} }
 var _structure_marker_points: PackedVector2Array = PackedVector2Array()
 
 func _get_terrain_tile_data(cell: Vector2i) -> TileData:
@@ -502,6 +503,13 @@ func _get_structure_memory(player_id: String) -> Dictionary:
 		structure_memory[player_id] = {}
 	return structure_memory[player_id]
 
+func _get_neutral_tile_memory(player_id: String) -> Dictionary:
+	if player_id == "":
+		return {}
+	if not neutral_tile_memory.has(player_id):
+		neutral_tile_memory[player_id] = {}
+	return neutral_tile_memory[player_id]
+
 func update_structure_memory_for(player_id: String, vis: Dictionary) -> void:
 	if player_id == "":
 		return
@@ -517,6 +525,33 @@ func update_structure_memory_for(player_id: String, vis: Dictionary) -> void:
 			memory[cell] = state.duplicate(true)
 		else:
 			memory.erase(cell)
+
+func update_neutral_tile_memory_for(player_id: String, vis: Dictionary) -> void:
+	if player_id == "":
+		return
+	var memory = _get_neutral_tile_memory(player_id)
+	for cell in vis.keys():
+		if int(vis.get(cell, 0)) != 2:
+			continue
+		var tile_type := ""
+		if cell in camps["basic"]:
+			tile_type = "camp"
+		elif cell in camps["dragon"]:
+			tile_type = "dragon"
+		if tile_type == "":
+			memory.erase(cell)
+			continue
+		var entry := { "tile": tile_type }
+		if tile_type == "dragon":
+			var unit = $GameBoardNode.get_unit_at(cell)
+			if unit != null and unit.player_id == "neutral" and str(unit.unit_type) == "dragon":
+				entry["unit"] = "dragon"
+				var reward = str(dragon_rewards.get(cell, ""))
+				if reward == "":
+					var spawn_count = int(dragon_spawn_counts.get(cell, 0))
+					reward = _dragon_reward_for_pos(cell, spawn_count)
+				entry["reward"] = reward
+		memory[cell] = entry
 
 func refresh_structure_markers() -> void:
 	var root = _get_structure_marker_root()
@@ -1066,6 +1101,7 @@ func _collect_state() -> Dictionary:
 		"structure_positions": structure_positions,
 		"buildable_structures": buildable_structures,
 		"structure_memory": structure_memory,
+		"neutral_tile_memory": neutral_tile_memory,
 		"spawn_tower_positions": spawn_tower_positions,
 		"income_tower_positions": income_tower_positions,
 		"base_positions": base_positions,
@@ -1306,6 +1342,8 @@ func apply_state(state: Dictionary, force_host: bool = false) -> void:
 		buildable_structures = state["buildable_structures"]
 	if state.has("structure_memory"):
 		structure_memory = state["structure_memory"]
+	if state.has("neutral_tile_memory"):
+		neutral_tile_memory = state["neutral_tile_memory"]
 	if state.has("spawn_tower_positions"):
 		spawn_tower_positions = state["spawn_tower_positions"]
 	if state.has("income_tower_positions"):
@@ -1386,6 +1424,7 @@ func _reset_map_state() -> void:
 	income_tower_positions = { "player1": [], "player2": [] }
 	structure_markers.clear()
 	structure_memory = { "player1": {}, "player2": {} }
+	neutral_tile_memory = { "player1": {}, "player2": {} }
 	camps = {"basic": [], "dragon": []}
 	mines = {"unclaimed": [], "player1": [], "player2": []}
 	camp_units.clear()
