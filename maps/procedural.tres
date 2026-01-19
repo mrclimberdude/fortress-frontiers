@@ -1,14 +1,14 @@
-[gd_resource type="Resource" script_class="MapData" load_steps=3 format=3 uid="uid://ci4tioylp3lfn"]
+[gd_resource type="Resource" script_class="MapData" load_steps=3 format=3 uid="uid://n5q02a2ce40l"]
 
-[ext_resource type="Script" uid="uid://cn4p2nw8xl7rs" path="res://scripts/MapData.gd" id="1_dv3hg"]
-[ext_resource type="PackedScene" uid="uid://ux2vdcgsb2uq" path="res://maps/map_3.tscn" id="2_dv3hg"]
+[ext_resource type="Script" uid="uid://cn4p2nw8xl7rs" path="res://scripts/MapData.gd" id="1_mapdata"]
+[ext_resource type="PackedScene" uid="uid://cfns25w7yjnlf" path="res://maps/map_template.tscn" id="2_template"]
 
 [resource]
-script = ExtResource("1_dv3hg")
-map_name = "map_3"
+script = ExtResource("1_mapdata")
+map_name = "Procedural"
 map_category = "normal"
 map_size = "normal"
-procedural = false
+procedural = true
 proc_columns = 0
 proc_rows = 0
 proc_forest_ratio = 0.18
@@ -18,7 +18,7 @@ proc_lake_ratio = 0.03
 proc_mine_count = 0
 proc_camp_count = 0
 proc_dragon_count = 0
-terrain_scene = ExtResource("2_dv3hg")
+terrain_scene = ExtResource("2_template")
 base_positions = {
 "player1": Vector2i(-1, 15),
 "player2": Vector2i(35, 15)

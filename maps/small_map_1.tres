@@ -8,6 +8,16 @@ script = ExtResource("1_7orcq")
 map_name = "small_map_1"
 map_category = "normal"
 map_size = "small"
+procedural = false
+proc_columns = 0
+proc_rows = 0
+proc_forest_ratio = 0.18
+proc_mountain_ratio = 0.06
+proc_river_ratio = 0.04
+proc_lake_ratio = 0.03
+proc_mine_count = 0
+proc_camp_count = 0
+proc_dragon_count = 0
 terrain_scene = ExtResource("2_7orcq")
 base_positions = {
 "player1": Vector2i(-1, 15),

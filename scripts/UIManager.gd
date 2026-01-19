@@ -90,6 +90,7 @@ const MAP_SELECT_RANDOM_ANY: int = 1000
 const MAP_SELECT_RANDOM_NORMAL: int = 1001
 const MAP_SELECT_RANDOM_THEMED: int = 1002
 const MAP_SELECT_RANDOM_SMALL: int = 1003
+const MAP_SELECT_PROCEDURAL: int = 1004
 const MAP_SELECT_MAP_BASE: int = 2000
 
 const BUILD_OPTIONS = [
@@ -337,6 +338,7 @@ func _init_map_select() -> void:
 	popup.add_item("Random Normal", MAP_SELECT_RANDOM_NORMAL)
 	popup.add_item("Random Themed", MAP_SELECT_RANDOM_THEMED)
 	popup.add_item("Random Small", MAP_SELECT_RANDOM_SMALL)
+	popup.add_item("Procedural Map", MAP_SELECT_PROCEDURAL)
 	popup.add_separator()
 	var themed := []
 	var normal := []
@@ -344,6 +346,8 @@ func _init_map_select() -> void:
 	for i in range(turn_mgr.map_data.size()):
 		var md = turn_mgr.map_data[i] as MapData
 		if md == null:
+			continue
+		if md.procedural:
 			continue
 		var name = str(md.map_name)
 		var category = turn_mgr._map_category_for(md)
@@ -397,6 +401,8 @@ func _sync_map_select_from_state() -> void:
 				id = MAP_SELECT_RANDOM_THEMED
 			"random_small":
 				id = MAP_SELECT_RANDOM_SMALL
+			"procedural":
+				id = MAP_SELECT_PROCEDURAL
 			"random_normal":
 				id = MAP_SELECT_RANDOM_NORMAL
 			_:
@@ -417,6 +423,8 @@ func _set_map_select_label(id: int) -> void:
 			label = "Random Themed"
 		MAP_SELECT_RANDOM_SMALL:
 			label = "Random Small"
+		MAP_SELECT_PROCEDURAL:
+			label = "Procedural Map"
 		_:
 			label = str(_map_select_names.get(id, "Map"))
 	map_select.text = label
@@ -444,6 +452,10 @@ func _apply_map_selection(id: int) -> void:
 	if id == MAP_SELECT_RANDOM_SMALL:
 		NetworkManager.selected_map_index = -1
 		NetworkManager.map_selection_mode = "random_small"
+		return
+	if id == MAP_SELECT_PROCEDURAL:
+		NetworkManager.selected_map_index = -1
+		NetworkManager.map_selection_mode = "procedural"
 		return
 	if id >= MAP_SELECT_MAP_BASE:
 		var idx = id - MAP_SELECT_MAP_BASE
