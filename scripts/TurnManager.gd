@@ -3197,7 +3197,7 @@ func _process_attacks():
 				if allow_move:
 					for unit_priority_pair in attacks:
 						var unit = unit_manager.get_unit_by_net_id(unit_priority_pair[0])
-						if unit.curr_health > 0:
+						if unit != null and unit.curr_health > 0:
 							unit.set_grid_position(target.grid_pos)
 							break
 				pass
