@@ -202,7 +202,7 @@ offset_right = 690.0
 offset_bottom = 270.0
 text = "Map"
 
-[node name="MapSelect" type="OptionButton" parent="UI"]
+[node name="MapSelect" type="MenuButton" parent="UI"]
 offset_left = 517.0
 offset_top = 270.0
 offset_right = 725.0

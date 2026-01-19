@@ -35,7 +35,8 @@ var damage_panel_full_position: Vector2 = Vector2.ZERO
 var auto_pass_enabled: bool = false
 var last_damage_log_count: int = 0
 var done_button_default_modulate: Color = Color(1, 1, 1)
-var _map_select_updating: bool = false
+var _map_select_id: int = MAP_SELECT_RANDOM_NORMAL
+var _map_select_names: Dictionary = {}
 var _queue_preview_unit_id: int = -1
 
 @onready var turn_mgr = get_node(turn_manager_path) as Node
@@ -62,7 +63,7 @@ var _queue_preview_unit_id: int = -1
 @onready var damage_scroll = $DamagePanel/ScrollContainer as ScrollContainer
 @onready var damage_toggle_button = $DamagePanel/ToggleDamageButton as Button
 @onready var finish_move_button = $Panel/FinishMoveButton
-@onready var map_select = $MapSelect as OptionButton
+@onready var map_select = $MapSelect as MenuButton
 @onready var map_label = $MapLabel as Label
 
 const ArrowScene = preload("res://scenes/Arrow.tscn")
@@ -117,6 +118,8 @@ func _ready():
 	# Enable unhandled input processing
 	set_process_unhandled_input(true)
 	set_process(true)
+	if map_select != null:
+		map_select.flat = false
 	
 	$HostButton.connect("pressed",
 					Callable(self, "_on_host_pressed"))
@@ -321,14 +324,20 @@ func _init_menu() -> void:
 func _init_map_select() -> void:
 	if map_select == null or turn_mgr == null:
 		return
-	map_select.clear()
-	map_select.add_item("Random (Any)", MAP_SELECT_RANDOM_ANY)
-	map_select.add_item("Random Normal", MAP_SELECT_RANDOM_NORMAL)
-	map_select.add_item("Random Themed", MAP_SELECT_RANDOM_THEMED)
-	map_select.add_item("Random Small", MAP_SELECT_RANDOM_SMALL)
 	var popup = map_select.get_popup()
-	if popup != null:
-		popup.add_separator()
+	if popup == null:
+		return
+	popup.clear()
+	_map_select_names.clear()
+	for name in ["ThemedMapsMenu", "NormalMapsMenu", "SmallMapsMenu"]:
+		var old = popup.get_node_or_null(name)
+		if old != null:
+			old.queue_free()
+	popup.add_item("Random (Any)", MAP_SELECT_RANDOM_ANY)
+	popup.add_item("Random Normal", MAP_SELECT_RANDOM_NORMAL)
+	popup.add_item("Random Themed", MAP_SELECT_RANDOM_THEMED)
+	popup.add_item("Random Small", MAP_SELECT_RANDOM_SMALL)
+	popup.add_separator()
 	var themed := []
 	var normal := []
 	var small := []
@@ -348,18 +357,29 @@ func _init_map_select() -> void:
 	themed.sort_custom(func(a, b): return str(a["name"]).to_lower() < str(b["name"]).to_lower())
 	normal.sort_custom(func(a, b): return str(a["name"]).to_lower() < str(b["name"]).to_lower())
 	small.sort_custom(func(a, b): return str(a["name"]).to_lower() < str(b["name"]).to_lower())
-	for entry in themed:
-		map_select.add_item(entry["name"], entry["id"])
-	for entry in normal:
-		map_select.add_item(entry["name"], entry["id"])
-	if small.size() > 0:
-		if popup != null:
-			popup.add_separator()
-		for entry in small:
-			map_select.add_item(entry["name"], entry["id"])
-	if not map_select.is_connected("item_selected", Callable(self, "_on_map_select_item_selected")):
-		map_select.connect("item_selected", Callable(self, "_on_map_select_item_selected"))
+	_add_map_submenu(popup, "Themed Maps", "ThemedMapsMenu", themed)
+	_add_map_submenu(popup, "Normal Maps", "NormalMapsMenu", normal)
+	_add_map_submenu(popup, "Small Maps", "SmallMapsMenu", small)
+	if not popup.is_connected("id_pressed", Callable(self, "_on_map_select_menu_pressed")):
+		popup.connect("id_pressed", Callable(self, "_on_map_select_menu_pressed"))
 	_sync_map_select_from_state()
+
+func _add_map_submenu(parent_menu: PopupMenu, label: String, node_name: String, entries: Array) -> void:
+	if parent_menu == null:
+		return
+	var submenu = PopupMenu.new()
+	submenu.name = node_name
+	parent_menu.add_child(submenu)
+	if entries.is_empty():
+		submenu.add_item("(none)", -1)
+		submenu.set_item_disabled(0, true)
+	else:
+		for entry in entries:
+			submenu.add_item(entry["name"], entry["id"])
+			_map_select_names[entry["id"]] = entry["name"]
+	parent_menu.add_submenu_item(label, submenu.name)
+	if not submenu.is_connected("id_pressed", Callable(self, "_on_map_select_menu_pressed")):
+		submenu.connect("id_pressed", Callable(self, "_on_map_select_menu_pressed"))
 
 func _sync_map_select_from_state() -> void:
 	if map_select == null:
@@ -381,29 +401,34 @@ func _sync_map_select_from_state() -> void:
 				id = MAP_SELECT_RANDOM_NORMAL
 			_:
 				id = MAP_SELECT_RANDOM_NORMAL
-	_set_map_select_id(id)
+	_set_map_select_label(id)
 	_apply_map_selection(id)
 
-func _set_map_select_id(id: int) -> void:
+func _set_map_select_label(id: int) -> void:
 	if map_select == null:
 		return
-	var popup = map_select.get_popup()
-	if popup == null:
-		return
-	var idx = popup.get_item_index(id)
-	if idx < 0:
-		return
-	_map_select_updating = true
-	map_select.select(idx)
-	_map_select_updating = false
+	var label = ""
+	match id:
+		MAP_SELECT_RANDOM_ANY:
+			label = "Random (Any)"
+		MAP_SELECT_RANDOM_NORMAL:
+			label = "Random Normal"
+		MAP_SELECT_RANDOM_THEMED:
+			label = "Random Themed"
+		MAP_SELECT_RANDOM_SMALL:
+			label = "Random Small"
+		_:
+			label = str(_map_select_names.get(id, "Map"))
+	map_select.text = label
 
-func _on_map_select_item_selected(index: int) -> void:
-	if _map_select_updating:
+func _on_map_select_menu_pressed(id: int) -> void:
+	if id < 0:
 		return
-	var id = map_select.get_item_id(index)
+	_set_map_select_label(id)
 	_apply_map_selection(id)
 
 func _apply_map_selection(id: int) -> void:
+	_map_select_id = id
 	if id == MAP_SELECT_RANDOM_ANY:
 		NetworkManager.selected_map_index = -1
 		NetworkManager.map_selection_mode = "random_any"
@@ -1036,8 +1061,7 @@ func _on_order_result(player_id: String, unit_net_id: int, order: Dictionary, ok
 	
 
 func _on_host_pressed():
-	if map_select != null:
-		_apply_map_selection(map_select.get_selected_id())
+	_apply_map_selection(_map_select_id)
 	if turn_mgr != null and turn_mgr.has_method("_reset_map_state"):
 		turn_mgr.current_map_index = -1
 		turn_mgr._reset_map_state()
