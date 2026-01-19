@@ -6,7 +6,8 @@
 [resource]
 script = ExtResource("1_ya0nx")
 map_name = "The Wheel"
-map_category = ""
+map_category = "themed"
+map_size = "normal"
 terrain_scene = ExtResource("2_pjn8d")
 base_positions = {
 "player1": Vector2i(-1, 15),

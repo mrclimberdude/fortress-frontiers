@@ -1,0 +1,28 @@
+[gd_resource type="Resource" script_class="MapData" load_steps=3 format=3 uid="uid://iaq12pa0xsy5"]
+
+[ext_resource type="Script" uid="uid://cn4p2nw8xl7rs" path="res://scripts/MapData.gd" id="1_hwm1n"]
+[ext_resource type="PackedScene" uid="uid://ddf0m4qbeqtst" path="res://maps/small_map_template.tscn" id="2_pqoxj"]
+
+[resource]
+script = ExtResource("1_hwm1n")
+map_name = "map_1"
+map_category = ""
+map_size = "small"
+terrain_scene = ExtResource("2_pqoxj")
+base_positions = {
+"player1": Vector2i(-1, 15),
+"player2": Vector2i(29, 15)
+}
+tower_positions = {
+"player1": [Vector2i(1, 10), Vector2i(2, 15), Vector2i(1, 20)],
+"player2": [Vector2i(28, 10), Vector2i(26, 15), Vector2i(28, 20)]
+}
+mines = {
+"player1": [],
+"player2": [],
+"unclaimed": []
+}
+camps = {
+"basic": [],
+"dragon": []
+}

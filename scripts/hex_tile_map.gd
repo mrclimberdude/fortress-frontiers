@@ -47,6 +47,19 @@ func _generate_board():
 			set_cell(Vector2i(x,y), src, ground)
 	update_internals()
 
+func apply_bounds(cells: Array) -> void:
+	used_cells = []
+	valid_cells.clear()
+	clear()
+	var src = tile_set.get_source_id(0)
+	for cell in cells:
+		if typeof(cell) != TYPE_VECTOR2I:
+			continue
+		used_cells.append(cell)
+		valid_cells[cell] = true
+		set_cell(cell, src, ground_tile)
+	update_internals()
+
 func is_cell_valid(cell: Vector2i) -> bool:
 	return valid_cells.has(cell)
 

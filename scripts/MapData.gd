@@ -4,6 +4,7 @@ extends Resource
 
 @export var map_name: String = "New Map"
 @export var map_category: String = "" # "normal" or "themed"; empty = infer from name
+@export var map_size: String = "normal" # "normal" or "small"
 
 @export var terrain_scene: PackedScene
 

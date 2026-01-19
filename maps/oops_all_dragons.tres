@@ -6,7 +6,8 @@
 [resource]
 script = ExtResource("1_4g70n")
 map_name = "oops_all_dragons"
-map_category = ""
+map_category = "themed"
+map_size = "normal"
 terrain_scene = ExtResource("2_7xvny")
 base_positions = {
 "player1": Vector2i(-1, 15),

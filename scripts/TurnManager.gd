@@ -43,6 +43,14 @@ func _map_category_for(md: MapData) -> String:
 			return "normal"
 	return "themed"
 
+func _map_size_for(md: MapData) -> String:
+	if md == null:
+		return "normal"
+	var size = str(md.map_size).strip_edges().to_lower()
+	if size != "":
+		return size
+	return "normal"
+
 func _pick_random_map_index(mode: String) -> int:
 	if map_data.size() == 0:
 		return -1
@@ -55,9 +63,12 @@ func _pick_random_map_index(mode: String) -> int:
 		if md == null:
 			continue
 		var cat = _map_category_for(md)
-		if normalized == "random_themed" and cat != "themed":
+		var size = _map_size_for(md)
+		if normalized == "random_themed" and (cat != "themed" or size != "normal"):
 			continue
-		if normalized == "random_normal" and cat != "normal":
+		if normalized == "random_normal" and (cat != "normal" or size != "normal"):
+			continue
+		if normalized == "random_small" and size != "small":
 			continue
 		candidates.append(i)
 	if candidates.size() == 0:
@@ -948,6 +959,10 @@ func _load_map_by_index(map_index: int) -> void:
 	md = md.duplicate(true)
 	print("loaded map: ", md.map_name)
 	var inst: Node = md.terrain_scene.instantiate()
+	var bounds_cells: Array = []
+	var bounds_ref = inst.get_node_or_null("UnderlyingReference")
+	if bounds_ref != null and bounds_ref is TileMapLayer:
+		bounds_cells = (bounds_ref as TileMapLayer).get_used_cells()
 	var tmap = inst.get_node_or_null("TerrainMap")
 	if tmap == null and inst is TileMapLayer:
 		tmap = inst as TileMapLayer
@@ -958,6 +973,15 @@ func _load_map_by_index(map_index: int) -> void:
 	terrain_overlay = tmap
 	if $GameBoardNode != null:
 		$GameBoardNode.terrain_overlay = tmap
+	if bounds_cells.is_empty() and tmap != null:
+		bounds_cells = tmap.get_used_cells()
+	if bounds_cells.size() > 0:
+		var hex = $GameBoardNode/HexTileMap
+		if hex != null and hex.has_method("apply_bounds"):
+			hex.apply_bounds(bounds_cells)
+			var fog = $GameBoardNode.get_node_or_null("FogOfWar")
+			if fog != null and fog.has_method("reset_fog"):
+				fog.reset_fog()
 	md.populate_from_terrain(terrain_overlay)
 	base_positions = md.base_positions
 	tower_positions = md.tower_positions

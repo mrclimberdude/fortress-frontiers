@@ -6,6 +6,8 @@
 [resource]
 script = ExtResource("1_kek77")
 map_name = "map_2"
+map_category = "normal"
+map_size = "normal"
 terrain_scene = ExtResource("2_kek77")
 base_positions = {
 "player1": Vector2i(-1, 15),
