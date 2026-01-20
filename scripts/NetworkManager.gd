@@ -13,6 +13,7 @@ var mp
 var selected_map_index: int = -1
 var map_selection_mode: String = "random_normal"
 var match_seed: int = -1
+var custom_proc_params: Dictionary = {}
 
 
 var _step_ready_counts := {}
@@ -21,6 +22,7 @@ signal orders_ready(all_orders: Dictionary)
 signal orders_cancelled(player_id: String)
 signal map_index_received(map_index: int)
 signal match_seed_received(match_seed: int)
+signal custom_proc_params_received(params: Dictionary)
 signal state_snapshot_received(state: Dictionary)
 signal execution_paused_received(step_idx: int, neutral_step_idx: int)
 signal execution_complete_received()
@@ -61,6 +63,8 @@ func _on_peer_connected(id: int) -> void:
 		# Host sees a new client
 		client_peer_id = id
 		print("Client joined as peer %d - starting game!" % id)
+		if custom_proc_params.size() > 0:
+			rpc_id(id, "rpc_set_custom_proc_params", custom_proc_params)
 		if selected_map_index >= 0:
 			rpc_id(id, "rpc_set_map_index", selected_map_index)
 		if match_seed >= 0:
@@ -90,6 +94,17 @@ func rpc_set_map_index(map_index: int) -> void:
 func rpc_set_match_seed(seed_value: int) -> void:
 	match_seed = seed_value
 	emit_signal("match_seed_received", seed_value)
+
+@rpc("any_peer", "reliable")
+func rpc_set_custom_proc_params(params: Dictionary) -> void:
+	custom_proc_params = params.duplicate(true)
+	emit_signal("custom_proc_params_received", custom_proc_params)
+
+func set_custom_proc_params(params: Dictionary) -> void:
+	custom_proc_params = params.duplicate(true)
+	var mp = get_tree().get_multiplayer()
+	if mp != null and mp.is_server() and client_peer_id != 0:
+		rpc_id(client_peer_id, "rpc_set_custom_proc_params", custom_proc_params)
 
 @rpc("any_peer", "reliable")
 func rpc_state_snapshot(state: Dictionary) -> void:

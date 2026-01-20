@@ -24,6 +24,7 @@ enum Phase { UPKEEP, ORDERS, EXECUTION }
 @export var cavalry_scene: PackedScene
 
 const MineScene = preload("res://scenes/GemMine.tscn")
+const MapGenerator = preload("res://scripts/MapGenerator.gd")
 
 @export var map_data: Array[Resource] = []
 var terrain_overlay: TileMapLayer
@@ -51,16 +52,46 @@ func _map_size_for(md: MapData) -> String:
 		return size
 	return "normal"
 
+func _apply_custom_proc_params(md: MapData, params: Dictionary) -> void:
+	if md == null or params.is_empty():
+		return
+	if params.has("map_size"):
+		md.map_size = str(params["map_size"])
+	if params.has("proc_columns"):
+		md.proc_columns = int(params["proc_columns"])
+	if params.has("proc_rows"):
+		md.proc_rows = int(params["proc_rows"])
+	if params.has("proc_forest_ratio"):
+		md.proc_forest_ratio = float(params["proc_forest_ratio"])
+	if params.has("proc_mountain_ratio"):
+		md.proc_mountain_ratio = float(params["proc_mountain_ratio"])
+	if params.has("proc_river_ratio"):
+		md.proc_river_ratio = float(params["proc_river_ratio"])
+	if params.has("proc_lake_ratio"):
+		md.proc_lake_ratio = float(params["proc_lake_ratio"])
+	if params.has("proc_mine_count"):
+		md.proc_mine_count = int(params["proc_mine_count"])
+	if params.has("proc_camp_count"):
+		md.proc_camp_count = int(params["proc_camp_count"])
+	if params.has("proc_dragon_count"):
+		md.proc_dragon_count = int(params["proc_dragon_count"])
+
 func _pick_random_map_index(mode: String) -> int:
 	if map_data.size() == 0:
 		return -1
 	var normalized = str(mode).strip_edges().to_lower()
 	if normalized == "":
 		normalized = "random_normal"
+	if normalized == "procedural_custom":
+		normalized = "procedural"
 	var candidates := []
 	for i in range(map_data.size()):
 		var md = map_data[i] as MapData
 		if md == null:
+			continue
+		if md.procedural and normalized != "procedural":
+			continue
+		if normalized == "procedural" and not md.procedural:
 			continue
 		var cat = _map_category_for(md)
 		var size = _map_size_for(md)
@@ -957,6 +988,8 @@ func _load_map_by_index(map_index: int) -> void:
 	current_map_index = idx
 	var md = map_data[idx] as MapData
 	md = md.duplicate(true)
+	if md.procedural and NetworkManager.custom_proc_params.size() > 0:
+		_apply_custom_proc_params(md, NetworkManager.custom_proc_params)
 	print("loaded map: ", md.map_name)
 	var inst: Node = md.terrain_scene.instantiate()
 	var bounds_cells: Array = []
@@ -975,6 +1008,16 @@ func _load_map_by_index(map_index: int) -> void:
 		$GameBoardNode.terrain_overlay = tmap
 	if bounds_cells.is_empty() and tmap != null:
 		bounds_cells = tmap.get_used_cells()
+	var generated := {}
+	if md.procedural:
+		var gen_rng = RandomNumberGenerator.new()
+		var seed_val = NetworkManager.match_seed
+		if seed_val <= 0:
+			seed_val = rng.randi_range(1, 2147483646)
+		gen_rng.seed = seed_val + idx * 7919
+		generated = MapGenerator.generate(md, gen_rng)
+		if generated.has("bounds"):
+			bounds_cells = generated["bounds"]
 	if bounds_cells.size() > 0:
 		var hex = $GameBoardNode/HexTileMap
 		if hex != null and hex.has_method("apply_bounds"):
@@ -982,11 +1025,39 @@ func _load_map_by_index(map_index: int) -> void:
 			var fog = $GameBoardNode.get_node_or_null("FogOfWar")
 			if fog != null and fog.has_method("reset_fog"):
 				fog.reset_fog()
-	md.populate_from_terrain(terrain_overlay)
-	base_positions = md.base_positions
-	tower_positions = md.tower_positions
-	mines = md.mines
-	camps = md.camps
+	if md.procedural:
+		if tmap != null:
+			tmap.clear()
+			var forest_src = 1
+			var mountain_src = 2
+			var river_src = 3
+			var lake_src = 4
+			var terrain_cells = generated.get("terrain_cells", {})
+			for cell in terrain_cells.get("forest", []):
+				tmap.set_cell(cell, forest_src, Vector2i(0, 0))
+			for cell in terrain_cells.get("mountain", []):
+				tmap.set_cell(cell, mountain_src, Vector2i(0, 0))
+			for cell in terrain_cells.get("river", []):
+				tmap.set_cell(cell, river_src, Vector2i(0, 0))
+			for cell in terrain_cells.get("lake", []):
+				tmap.set_cell(cell, lake_src, Vector2i(0, 0))
+			tmap.update_internals()
+		base_positions = generated.get("base_positions", md.base_positions)
+		tower_positions = generated.get("tower_positions", md.tower_positions)
+		mines = generated.get("mines", md.mines)
+		camps = generated.get("camps", md.camps)
+	else:
+		md.populate_from_terrain(terrain_overlay)
+		base_positions = md.base_positions
+		tower_positions = md.tower_positions
+		mines = md.mines
+		camps = md.camps
+	var hex_map = $GameBoardNode/HexTileMap
+	if hex_map != null:
+		for tile in camps.get("basic", []):
+			hex_map.set_player_tile(tile, "camp")
+		for tile in camps.get("dragon", []):
+			hex_map.set_player_tile(tile, "dragon")
 	buildable_structures.clear()
 	spawn_tower_positions = { "player1": [], "player2": [] }
 	income_tower_positions = {
@@ -1643,6 +1714,7 @@ func reset_to_lobby() -> void:
 	if NetworkManager != null:
 		NetworkManager.selected_map_index = -1
 		NetworkManager.match_seed = -1
+		NetworkManager.custom_proc_params = {}
 		NetworkManager.player_orders = player_orders
 		NetworkManager._orders_submitted = { "player1": false, "player2": false }
 		NetworkManager._step_ready_counts = {}

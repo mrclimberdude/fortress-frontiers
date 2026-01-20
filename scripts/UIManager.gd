@@ -65,6 +65,19 @@ var _queue_preview_unit_id: int = -1
 @onready var finish_move_button = $Panel/FinishMoveButton
 @onready var map_select = $MapSelect as MenuButton
 @onready var map_label = $MapLabel as Label
+@onready var proc_custom_panel = $ProcCustomPanel as Panel
+@onready var proc_custom_size = $ProcCustomPanel/VBoxContainer/Grid/SizeOption as OptionButton
+@onready var proc_custom_columns = $ProcCustomPanel/VBoxContainer/Grid/ColumnsEdit as LineEdit
+@onready var proc_custom_rows = $ProcCustomPanel/VBoxContainer/Grid/RowsEdit as LineEdit
+@onready var proc_custom_forest = $ProcCustomPanel/VBoxContainer/Grid/ForestEdit as LineEdit
+@onready var proc_custom_mountain = $ProcCustomPanel/VBoxContainer/Grid/MountainEdit as LineEdit
+@onready var proc_custom_river = $ProcCustomPanel/VBoxContainer/Grid/RiverEdit as LineEdit
+@onready var proc_custom_lake = $ProcCustomPanel/VBoxContainer/Grid/LakeEdit as LineEdit
+@onready var proc_custom_mines = $ProcCustomPanel/VBoxContainer/Grid/MineEdit as LineEdit
+@onready var proc_custom_camps = $ProcCustomPanel/VBoxContainer/Grid/CampEdit as LineEdit
+@onready var proc_custom_dragons = $ProcCustomPanel/VBoxContainer/Grid/DragonEdit as LineEdit
+@onready var proc_custom_apply = $ProcCustomPanel/VBoxContainer/Buttons/ApplyButton as Button
+@onready var proc_custom_close = $ProcCustomPanel/VBoxContainer/Buttons/CloseButton as Button
 
 const ArrowScene = preload("res://scenes/Arrow.tscn")
 const AttackArrowScene = preload("res://scenes/AttackArrow.tscn")
@@ -90,6 +103,8 @@ const MAP_SELECT_RANDOM_ANY: int = 1000
 const MAP_SELECT_RANDOM_NORMAL: int = 1001
 const MAP_SELECT_RANDOM_THEMED: int = 1002
 const MAP_SELECT_RANDOM_SMALL: int = 1003
+const MAP_SELECT_PROCEDURAL: int = 1004
+const MAP_SELECT_PROCEDURAL_CUSTOM: int = 1005
 const MAP_SELECT_MAP_BASE: int = 2000
 
 const BUILD_OPTIONS = [
@@ -128,6 +143,7 @@ func _ready():
 	$CancelGameButton.connect("pressed",
 					Callable(self, "_on_cancel_game_pressed"))
 	_init_map_select()
+	_init_proc_custom_panel()
 	
 	# dev mode connections
 	dev_mode_toggle.connect("toggled",
@@ -337,6 +353,8 @@ func _init_map_select() -> void:
 	popup.add_item("Random Normal", MAP_SELECT_RANDOM_NORMAL)
 	popup.add_item("Random Themed", MAP_SELECT_RANDOM_THEMED)
 	popup.add_item("Random Small", MAP_SELECT_RANDOM_SMALL)
+	popup.add_item("Procedural Map", MAP_SELECT_PROCEDURAL)
+	popup.add_item("Procedural (Custom)", MAP_SELECT_PROCEDURAL_CUSTOM)
 	popup.add_separator()
 	var themed := []
 	var normal := []
@@ -344,6 +362,8 @@ func _init_map_select() -> void:
 	for i in range(turn_mgr.map_data.size()):
 		var md = turn_mgr.map_data[i] as MapData
 		if md == null:
+			continue
+		if md.procedural:
 			continue
 		var name = str(md.map_name)
 		var category = turn_mgr._map_category_for(md)
@@ -381,6 +401,176 @@ func _add_map_submenu(parent_menu: PopupMenu, label: String, node_name: String, 
 	if not submenu.is_connected("id_pressed", Callable(self, "_on_map_select_menu_pressed")):
 		submenu.connect("id_pressed", Callable(self, "_on_map_select_menu_pressed"))
 
+func _init_proc_custom_panel() -> void:
+	if proc_custom_panel == null:
+		return
+	if proc_custom_size != null and proc_custom_size.get_item_count() == 0:
+		proc_custom_size.add_item("Normal", 0)
+		proc_custom_size.add_item("Small", 1)
+	if proc_custom_columns != null:
+		proc_custom_columns.placeholder_text = "0"
+	if proc_custom_rows != null:
+		proc_custom_rows.placeholder_text = "0"
+	if proc_custom_forest != null:
+		proc_custom_forest.placeholder_text = "0.18"
+	if proc_custom_mountain != null:
+		proc_custom_mountain.placeholder_text = "0.06"
+	if proc_custom_river != null:
+		proc_custom_river.placeholder_text = "0.04"
+	if proc_custom_lake != null:
+		proc_custom_lake.placeholder_text = "0.03"
+	if proc_custom_mines != null:
+		proc_custom_mines.placeholder_text = "0"
+	if proc_custom_camps != null:
+		proc_custom_camps.placeholder_text = "0"
+	if proc_custom_dragons != null:
+		proc_custom_dragons.placeholder_text = "0"
+	if proc_custom_apply != null and not proc_custom_apply.is_connected("pressed", Callable(self, "_on_proc_custom_apply_pressed")):
+		proc_custom_apply.connect("pressed", Callable(self, "_on_proc_custom_apply_pressed"))
+	if proc_custom_close != null and not proc_custom_close.is_connected("pressed", Callable(self, "_on_proc_custom_close_pressed")):
+		proc_custom_close.connect("pressed", Callable(self, "_on_proc_custom_close_pressed"))
+
+func _get_procedural_map_data() -> MapData:
+	if turn_mgr == null:
+		return null
+	for i in range(turn_mgr.map_data.size()):
+		var md = turn_mgr.map_data[i] as MapData
+		if md != null and md.procedural:
+			return md
+	return null
+
+func _default_proc_custom_params() -> Dictionary:
+	var md = _get_procedural_map_data()
+	if md == null:
+		return {
+			"map_size": "normal",
+			"proc_columns": 0,
+			"proc_rows": 0,
+			"proc_forest_ratio": 0.18,
+			"proc_mountain_ratio": 0.06,
+			"proc_river_ratio": 0.04,
+			"proc_lake_ratio": 0.03,
+			"proc_mine_count": 0,
+			"proc_camp_count": 0,
+			"proc_dragon_count": 0
+		}
+	return {
+		"map_size": str(md.map_size),
+		"proc_columns": int(md.proc_columns),
+		"proc_rows": int(md.proc_rows),
+		"proc_forest_ratio": float(md.proc_forest_ratio),
+		"proc_mountain_ratio": float(md.proc_mountain_ratio),
+		"proc_river_ratio": float(md.proc_river_ratio),
+		"proc_lake_ratio": float(md.proc_lake_ratio),
+		"proc_mine_count": int(md.proc_mine_count),
+		"proc_camp_count": int(md.proc_camp_count),
+		"proc_dragon_count": int(md.proc_dragon_count)
+	}
+
+func _ensure_proc_custom_params() -> void:
+	if NetworkManager.custom_proc_params.size() > 0:
+		return
+	var defaults = _default_proc_custom_params()
+	if NetworkManager.has_method("set_custom_proc_params"):
+		NetworkManager.set_custom_proc_params(defaults)
+	else:
+		NetworkManager.custom_proc_params = defaults
+
+func _set_proc_custom_panel_visible(show: bool) -> void:
+	if proc_custom_panel == null:
+		return
+	if show:
+		_ensure_proc_custom_params()
+		_populate_proc_custom_fields(NetworkManager.custom_proc_params)
+	proc_custom_panel.visible = show
+
+func _populate_proc_custom_fields(params: Dictionary) -> void:
+	if params.is_empty():
+		return
+	var size = str(params.get("map_size", "normal"))
+	if proc_custom_size != null:
+		proc_custom_size.select(1 if size == "small" else 0)
+	if proc_custom_columns != null:
+		proc_custom_columns.text = str(int(params.get("proc_columns", 0)))
+	if proc_custom_rows != null:
+		proc_custom_rows.text = str(int(params.get("proc_rows", 0)))
+	if proc_custom_forest != null:
+		proc_custom_forest.text = str(float(params.get("proc_forest_ratio", 0.18)))
+	if proc_custom_mountain != null:
+		proc_custom_mountain.text = str(float(params.get("proc_mountain_ratio", 0.06)))
+	if proc_custom_river != null:
+		proc_custom_river.text = str(float(params.get("proc_river_ratio", 0.04)))
+	if proc_custom_lake != null:
+		proc_custom_lake.text = str(float(params.get("proc_lake_ratio", 0.03)))
+	if proc_custom_mines != null:
+		proc_custom_mines.text = str(int(params.get("proc_mine_count", 0)))
+	if proc_custom_camps != null:
+		proc_custom_camps.text = str(int(params.get("proc_camp_count", 0)))
+	if proc_custom_dragons != null:
+		proc_custom_dragons.text = str(int(params.get("proc_dragon_count", 0)))
+
+func _parse_int_edit(edit: LineEdit, fallback: int) -> int:
+	if edit == null:
+		return fallback
+	var text = edit.text.strip_edges()
+	if text == "":
+		return fallback
+	if text.is_valid_int():
+		return int(text)
+	if text.is_valid_float():
+		return int(round(float(text)))
+	return fallback
+
+func _parse_float_edit(edit: LineEdit, fallback: float) -> float:
+	if edit == null:
+		return fallback
+	var text = edit.text.strip_edges()
+	if text == "":
+		return fallback
+	if text.is_valid_float():
+		return float(text)
+	if text.is_valid_int():
+		return float(int(text))
+	return fallback
+
+func _collect_proc_custom_params() -> Dictionary:
+	var defaults = _default_proc_custom_params()
+	var size = "normal"
+	if proc_custom_size != null and proc_custom_size.selected == 1:
+		size = "small"
+	var columns = _parse_int_edit(proc_custom_columns, int(defaults.get("proc_columns", 0)))
+	var rows = _parse_int_edit(proc_custom_rows, int(defaults.get("proc_rows", 0)))
+	var forest_ratio = clamp(_parse_float_edit(proc_custom_forest, float(defaults.get("proc_forest_ratio", 0.18))), 0.0, 1.0)
+	var mountain_ratio = clamp(_parse_float_edit(proc_custom_mountain, float(defaults.get("proc_mountain_ratio", 0.06))), 0.0, 1.0)
+	var river_ratio = clamp(_parse_float_edit(proc_custom_river, float(defaults.get("proc_river_ratio", 0.04))), 0.0, 1.0)
+	var lake_ratio = clamp(_parse_float_edit(proc_custom_lake, float(defaults.get("proc_lake_ratio", 0.03))), 0.0, 1.0)
+	var mine_count = _parse_int_edit(proc_custom_mines, int(defaults.get("proc_mine_count", 0)))
+	var camp_count = _parse_int_edit(proc_custom_camps, int(defaults.get("proc_camp_count", 0)))
+	var dragon_count = _parse_int_edit(proc_custom_dragons, int(defaults.get("proc_dragon_count", 0)))
+	return {
+		"map_size": size,
+		"proc_columns": columns,
+		"proc_rows": rows,
+		"proc_forest_ratio": forest_ratio,
+		"proc_mountain_ratio": mountain_ratio,
+		"proc_river_ratio": river_ratio,
+		"proc_lake_ratio": lake_ratio,
+		"proc_mine_count": mine_count,
+		"proc_camp_count": camp_count,
+		"proc_dragon_count": dragon_count
+	}
+
+func _on_proc_custom_apply_pressed() -> void:
+	var params = _collect_proc_custom_params()
+	if NetworkManager.has_method("set_custom_proc_params"):
+		NetworkManager.set_custom_proc_params(params)
+	else:
+		NetworkManager.custom_proc_params = params
+	_populate_proc_custom_fields(params)
+
+func _on_proc_custom_close_pressed() -> void:
+	_set_proc_custom_panel_visible(false)
+
 func _sync_map_select_from_state() -> void:
 	if map_select == null:
 		return
@@ -397,6 +587,10 @@ func _sync_map_select_from_state() -> void:
 				id = MAP_SELECT_RANDOM_THEMED
 			"random_small":
 				id = MAP_SELECT_RANDOM_SMALL
+			"procedural":
+				id = MAP_SELECT_PROCEDURAL
+			"procedural_custom":
+				id = MAP_SELECT_PROCEDURAL_CUSTOM
 			"random_normal":
 				id = MAP_SELECT_RANDOM_NORMAL
 			_:
@@ -417,6 +611,10 @@ func _set_map_select_label(id: int) -> void:
 			label = "Random Themed"
 		MAP_SELECT_RANDOM_SMALL:
 			label = "Random Small"
+		MAP_SELECT_PROCEDURAL:
+			label = "Procedural Map"
+		MAP_SELECT_PROCEDURAL_CUSTOM:
+			label = "Procedural (Custom)"
 		_:
 			label = str(_map_select_names.get(id, "Map"))
 	map_select.text = label
@@ -429,6 +627,13 @@ func _on_map_select_menu_pressed(id: int) -> void:
 
 func _apply_map_selection(id: int) -> void:
 	_map_select_id = id
+	var show_custom = id == MAP_SELECT_PROCEDURAL_CUSTOM
+	_set_proc_custom_panel_visible(show_custom)
+	if not show_custom and NetworkManager.custom_proc_params.size() > 0:
+		if NetworkManager.has_method("set_custom_proc_params"):
+			NetworkManager.set_custom_proc_params({})
+		else:
+			NetworkManager.custom_proc_params = {}
 	if id == MAP_SELECT_RANDOM_ANY:
 		NetworkManager.selected_map_index = -1
 		NetworkManager.map_selection_mode = "random_any"
@@ -444,6 +649,14 @@ func _apply_map_selection(id: int) -> void:
 	if id == MAP_SELECT_RANDOM_SMALL:
 		NetworkManager.selected_map_index = -1
 		NetworkManager.map_selection_mode = "random_small"
+		return
+	if id == MAP_SELECT_PROCEDURAL:
+		NetworkManager.selected_map_index = -1
+		NetworkManager.map_selection_mode = "procedural"
+		return
+	if id == MAP_SELECT_PROCEDURAL_CUSTOM:
+		NetworkManager.selected_map_index = -1
+		NetworkManager.map_selection_mode = "procedural_custom"
 		return
 	if id >= MAP_SELECT_MAP_BASE:
 		var idx = id - MAP_SELECT_MAP_BASE
@@ -1076,6 +1289,8 @@ func _on_host_pressed():
 		map_select.visible = false
 	if map_label != null:
 		map_label.visible = false
+	if proc_custom_panel != null:
+		proc_custom_panel.visible = false
 	$CancelGameButton.visible = true
 
 func _on_join_pressed():
@@ -1092,6 +1307,8 @@ func _on_join_pressed():
 		map_select.visible = false
 	if map_label != null:
 		map_label.visible = false
+	if proc_custom_panel != null:
+		proc_custom_panel.visible = false
 	$CancelGameButton.visible = true
 
 func _on_cancel_game_pressed():
@@ -1103,6 +1320,8 @@ func _on_cancel_game_pressed():
 		map_select.visible = true
 	if map_label != null:
 		map_label.visible = true
+	if proc_custom_panel != null:
+		proc_custom_panel.visible = false
 	$CancelGameButton.visible = false
 	$Panel.visible = false
 	cancel_done_button.visible = false
