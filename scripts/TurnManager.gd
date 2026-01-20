@@ -52,12 +52,38 @@ func _map_size_for(md: MapData) -> String:
 		return size
 	return "normal"
 
+func _apply_custom_proc_params(md: MapData, params: Dictionary) -> void:
+	if md == null or params.is_empty():
+		return
+	if params.has("map_size"):
+		md.map_size = str(params["map_size"])
+	if params.has("proc_columns"):
+		md.proc_columns = int(params["proc_columns"])
+	if params.has("proc_rows"):
+		md.proc_rows = int(params["proc_rows"])
+	if params.has("proc_forest_ratio"):
+		md.proc_forest_ratio = float(params["proc_forest_ratio"])
+	if params.has("proc_mountain_ratio"):
+		md.proc_mountain_ratio = float(params["proc_mountain_ratio"])
+	if params.has("proc_river_ratio"):
+		md.proc_river_ratio = float(params["proc_river_ratio"])
+	if params.has("proc_lake_ratio"):
+		md.proc_lake_ratio = float(params["proc_lake_ratio"])
+	if params.has("proc_mine_count"):
+		md.proc_mine_count = int(params["proc_mine_count"])
+	if params.has("proc_camp_count"):
+		md.proc_camp_count = int(params["proc_camp_count"])
+	if params.has("proc_dragon_count"):
+		md.proc_dragon_count = int(params["proc_dragon_count"])
+
 func _pick_random_map_index(mode: String) -> int:
 	if map_data.size() == 0:
 		return -1
 	var normalized = str(mode).strip_edges().to_lower()
 	if normalized == "":
 		normalized = "random_normal"
+	if normalized == "procedural_custom":
+		normalized = "procedural"
 	var candidates := []
 	for i in range(map_data.size()):
 		var md = map_data[i] as MapData
@@ -962,6 +988,8 @@ func _load_map_by_index(map_index: int) -> void:
 	current_map_index = idx
 	var md = map_data[idx] as MapData
 	md = md.duplicate(true)
+	if md.procedural and NetworkManager.custom_proc_params.size() > 0:
+		_apply_custom_proc_params(md, NetworkManager.custom_proc_params)
 	print("loaded map: ", md.map_name)
 	var inst: Node = md.terrain_scene.instantiate()
 	var bounds_cells: Array = []
@@ -1686,6 +1714,7 @@ func reset_to_lobby() -> void:
 	if NetworkManager != null:
 		NetworkManager.selected_map_index = -1
 		NetworkManager.match_seed = -1
+		NetworkManager.custom_proc_params = {}
 		NetworkManager.player_orders = player_orders
 		NetworkManager._orders_submitted = { "player1": false, "player2": false }
 		NetworkManager._step_ready_counts = {}

@@ -209,6 +209,109 @@ offset_top = 270.0
 offset_right = 725.0
 offset_bottom = 300.0
 
+[node name="ProcCustomPanel" type="Panel" parent="UI"]
+visible = false
+offset_left = 740.0
+offset_top = 240.0
+offset_right = 1060.0
+offset_bottom = 650.0
+
+[node name="VBoxContainer" type="VBoxContainer" parent="UI/ProcCustomPanel"]
+layout_mode = 0
+offset_left = 8.0
+offset_top = 8.0
+offset_right = 312.0
+offset_bottom = 402.0
+
+[node name="TitleLabel" type="Label" parent="UI/ProcCustomPanel/VBoxContainer"]
+layout_mode = 2
+text = "Custom Procedural Map"
+
+[node name="Grid" type="GridContainer" parent="UI/ProcCustomPanel/VBoxContainer"]
+layout_mode = 2
+columns = 2
+
+[node name="SizeLabel" type="Label" parent="UI/ProcCustomPanel/VBoxContainer/Grid"]
+layout_mode = 2
+text = "Map Size"
+
+[node name="SizeOption" type="OptionButton" parent="UI/ProcCustomPanel/VBoxContainer/Grid"]
+layout_mode = 2
+
+[node name="ColumnsLabel" type="Label" parent="UI/ProcCustomPanel/VBoxContainer/Grid"]
+layout_mode = 2
+text = "Columns (0=auto)"
+
+[node name="ColumnsEdit" type="LineEdit" parent="UI/ProcCustomPanel/VBoxContainer/Grid"]
+layout_mode = 2
+
+[node name="RowsLabel" type="Label" parent="UI/ProcCustomPanel/VBoxContainer/Grid"]
+layout_mode = 2
+text = "Rows (0=auto)"
+
+[node name="RowsEdit" type="LineEdit" parent="UI/ProcCustomPanel/VBoxContainer/Grid"]
+layout_mode = 2
+
+[node name="ForestLabel" type="Label" parent="UI/ProcCustomPanel/VBoxContainer/Grid"]
+layout_mode = 2
+text = "Forest Ratio"
+
+[node name="ForestEdit" type="LineEdit" parent="UI/ProcCustomPanel/VBoxContainer/Grid"]
+layout_mode = 2
+
+[node name="MountainLabel" type="Label" parent="UI/ProcCustomPanel/VBoxContainer/Grid"]
+layout_mode = 2
+text = "Mountain Ratio"
+
+[node name="MountainEdit" type="LineEdit" parent="UI/ProcCustomPanel/VBoxContainer/Grid"]
+layout_mode = 2
+
+[node name="RiverLabel" type="Label" parent="UI/ProcCustomPanel/VBoxContainer/Grid"]
+layout_mode = 2
+text = "River Ratio"
+
+[node name="RiverEdit" type="LineEdit" parent="UI/ProcCustomPanel/VBoxContainer/Grid"]
+layout_mode = 2
+
+[node name="LakeLabel" type="Label" parent="UI/ProcCustomPanel/VBoxContainer/Grid"]
+layout_mode = 2
+text = "Lake Ratio"
+
+[node name="LakeEdit" type="LineEdit" parent="UI/ProcCustomPanel/VBoxContainer/Grid"]
+layout_mode = 2
+
+[node name="MineLabel" type="Label" parent="UI/ProcCustomPanel/VBoxContainer/Grid"]
+layout_mode = 2
+text = "Mine Count"
+
+[node name="MineEdit" type="LineEdit" parent="UI/ProcCustomPanel/VBoxContainer/Grid"]
+layout_mode = 2
+
+[node name="CampLabel" type="Label" parent="UI/ProcCustomPanel/VBoxContainer/Grid"]
+layout_mode = 2
+text = "Camp Count"
+
+[node name="CampEdit" type="LineEdit" parent="UI/ProcCustomPanel/VBoxContainer/Grid"]
+layout_mode = 2
+
+[node name="DragonLabel" type="Label" parent="UI/ProcCustomPanel/VBoxContainer/Grid"]
+layout_mode = 2
+text = "Dragon Count"
+
+[node name="DragonEdit" type="LineEdit" parent="UI/ProcCustomPanel/VBoxContainer/Grid"]
+layout_mode = 2
+
+[node name="Buttons" type="HBoxContainer" parent="UI/ProcCustomPanel/VBoxContainer"]
+layout_mode = 2
+
+[node name="ApplyButton" type="Button" parent="UI/ProcCustomPanel/VBoxContainer/Buttons"]
+layout_mode = 2
+text = "Apply"
+
+[node name="CloseButton" type="Button" parent="UI/ProcCustomPanel/VBoxContainer/Buttons"]
+layout_mode = 2
+text = "Close"
+
 [node name="HostButton" type="Button" parent="UI"]
 anchors_preset = -1
 anchor_left = 0.227
