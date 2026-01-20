@@ -67,6 +67,16 @@ func set_player_tile(pos: Vector2i, pid: String) -> void:
 	var src = tile_set.get_source_id(0)
 	var tint
 	structure_tiles = $"../..".structure_positions
+	var is_spawn_tower = false
+	for player in ["player1", "player2"]:
+		if $"../..".spawn_tower_positions.has(player) and pos in $"../..".spawn_tower_positions[player]:
+			is_spawn_tower = true
+			break
+	if is_spawn_tower:
+		set_cell(pos, src, ground_tile)
+		$"..".clear_highlights()
+		update_internals()
+		return
 	var is_camp = pos in $"../..".camps["basic"]
 	var is_dragon = pos in $"../..".camps["dragon"]
 	if is_camp or is_dragon:

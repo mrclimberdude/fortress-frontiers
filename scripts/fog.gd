@@ -42,6 +42,11 @@ func _set_base_tile_for_fog(cell: Vector2i, pid: String) -> void:
 	var tm = $"../.."
 	if hex_map == null or tm == null:
 		return
+	for player in ["player1", "player2"]:
+		if tm.spawn_tower_positions.has(player) and cell in tm.spawn_tower_positions[player]:
+			var src = hex_map.tile_set.get_source_id(0)
+			hex_map.set_cell(cell, src, hex_map.ground_tile)
+			return
 	var src = hex_map.tile_set.get_source_id(0)
 	var ground = hex_map.ground_tile
 	var tint = ground
@@ -62,6 +67,19 @@ func _set_base_tile_for_fog(cell: Vector2i, pid: String) -> void:
 	else:
 		tint = hex_map.player_atlas_tiles.get(pid, ground)
 	hex_map.set_cell(cell, src, tint)
+
+func _spawn_tower_cell_map(tm_root) -> Dictionary:
+	var cells := {}
+	if tm_root == null:
+		return cells
+	var positions = tm_root.spawn_tower_positions
+	if positions == null or not (positions is Dictionary):
+		return cells
+	for player_id in ["player1", "player2"]:
+		if positions.has(player_id):
+			for cell in positions[player_id]:
+				cells[cell] = true
+	return cells
 
 func _ready() -> void:
 	z_index = FOG_Z_INDEX
@@ -90,6 +108,7 @@ func _update_fog():
 	var hex_map = $"../HexTileMap"
 	var tm_root = $"../.."
 	var neutral_root = _get_neutral_memory_root()
+	var spawn_tower_cells := _spawn_tower_cell_map(tm_root)
 	if neutral_root != null:
 		for child in neutral_root.get_children():
 			child.queue_free()
@@ -139,6 +158,9 @@ func _update_fog():
 				if visiblity[player][cell] == 1:
 					tint = Vector2i(4,0)
 					set_cell(cell, tile_set.get_source_id(0), tint, 1)
+					if spawn_tower_cells.has(cell) and hex_map != null:
+						var base_src = hex_map.tile_set.get_source_id(0)
+						hex_map.set_cell(cell, base_src, hex_map.ground_tile)
 					if cell in $"../..".structure_positions:
 						var structure = $"..".get_structure_at(cell)
 						if structure != null and is_instance_valid(structure):
@@ -193,6 +215,9 @@ func _update_fog():
 				if visiblity[player][cell] == 2:
 					erase_cell(cell)
 					$"../ExploredFog".erase_cell(cell)
+					if spawn_tower_cells.has(cell) and hex_map != null:
+						var base_src = hex_map.tile_set.get_source_id(0)
+						hex_map.set_cell(cell, base_src, hex_map.ground_tile)
 					if cell in $"../..".structure_positions:
 						var structure = $"..".get_structure_at(cell)
 						if structure != null and is_instance_valid(structure):

@@ -552,6 +552,12 @@ func _get_neutral_tile_memory(player_id: String) -> Dictionary:
 		neutral_tile_memory[player_id] = {}
 	return neutral_tile_memory[player_id]
 
+func _spawn_tower_owner_at(cell: Vector2i) -> String:
+	for player_id in ["player1", "player2"]:
+		if spawn_tower_positions.has(player_id) and cell in spawn_tower_positions[player_id]:
+			return player_id
+	return ""
+
 func update_structure_memory_for(player_id: String, vis: Dictionary) -> void:
 	if player_id == "":
 		return
@@ -561,7 +567,15 @@ func update_structure_memory_for(player_id: String, vis: Dictionary) -> void:
 			continue
 		var state = buildable_structures.get(cell, {})
 		if state.is_empty():
-			memory.erase(cell)
+			var spawn_owner = _spawn_tower_owner_at(cell)
+			if spawn_owner != "":
+				memory[cell] = {
+					"type": STRUCT_SPAWN_TOWER,
+					"owner": spawn_owner,
+					"status": STRUCT_STATUS_INTACT
+				}
+			else:
+				memory.erase(cell)
 			continue
 		if _structure_is_visible_to_viewer(state, player_id):
 			memory[cell] = state.duplicate(true)
@@ -1399,6 +1413,11 @@ func _apply_units(units_data: Array) -> void:
 		unit.ordered = bool(data.get("ordered", false))
 		unit.last_damaged_by = data.get("last_damaged_by", "")
 		unit.set_health_bar()
+		if unit.is_tower and spawn_tower_positions.has(unit.player_id):
+			if unit.grid_pos in spawn_tower_positions[unit.player_id]:
+				unit.is_spawn_tower = true
+				if unit.has_method("_update_owner_overlay"):
+					unit._update_owner_overlay()
 		if str(unit.unit_type) == DRAGON_TYPE:
 			var reward = dragon_rewards.get(unit.grid_pos, "")
 			if reward == "" and dragon_spawn_counts.has(unit.grid_pos):
@@ -3344,7 +3363,11 @@ func _finish_structure_build(tile: Vector2i, state: Dictionary) -> void:
 		tower_positions[owner].append(tile)
 		spawn_tower_positions[owner].append(tile)
 		structure_positions.append(tile)
-		unit_manager.spawn_unit("tower", tile, owner, false)
+		var tower_unit = unit_manager.spawn_unit("tower", tile, owner, false)
+		if tower_unit != null:
+			tower_unit.is_spawn_tower = true
+			if tower_unit.has_method("_update_owner_overlay"):
+				tower_unit._update_owner_overlay()
 		return
 	state["status"] = STRUCT_STATUS_INTACT
 	buildable_structures[tile] = state

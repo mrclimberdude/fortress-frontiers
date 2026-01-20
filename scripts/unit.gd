@@ -44,6 +44,7 @@ extends Node2D
 @export var is_builder:      bool = false
 @export var is_phalanx:      bool = false
 @export var is_tower:        bool = false
+@export var is_spawn_tower:  bool = false
 @export var unit_type:       String = ""
 @export var special_skills:  String = ""
 @export var last_damaged_by: String = ""
@@ -83,7 +84,7 @@ func _update_owner_overlay() -> void:
 	if map_layer == null:
 		owner_overlay.visible = false
 		return
-	if player_id not in ["player1", "player2"] or is_base or is_tower:
+	if player_id not in ["player1", "player2"] or is_base or (is_tower and not is_spawn_tower):
 		owner_overlay.visible = false
 		return
 	var source_id = map_layer.tile_set.get_source_id(0)
