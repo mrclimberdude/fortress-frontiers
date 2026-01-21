@@ -243,11 +243,14 @@ func broadcast_state(state: Dictionary) -> void:
 		return
 	if not mp.is_server():
 		return
+	var force_apply = bool(state.get("force_apply", false))
 	if client_peer_id > 0:
 		var viewer = _peer_id_to_player_id(client_peer_id)
 		var snapshot = state
 		if viewer != "" and turn_mgr.has_method("get_state_snapshot_for"):
 			snapshot = turn_mgr.get_state_snapshot_for(viewer)
+			if force_apply:
+				snapshot["force_apply"] = true
 		rpc_id(client_peer_id, "rpc_state_snapshot", snapshot)
 
 func request_state() -> void:

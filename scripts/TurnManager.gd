@@ -1322,6 +1322,7 @@ func load_game(path: String = SAVE_DEFAULT_PATH) -> bool:
 	if typeof(state) != TYPE_DICTIONARY or state.is_empty():
 		push_error("Load failed: missing state data.")
 		return false
+	state["force_apply"] = true
 	var phase = int(state.get("current_phase", int(Phase.ORDERS)))
 	if phase != int(Phase.ORDERS):
 		push_error("Load failed: only orders-phase saves are supported.")
@@ -1337,8 +1338,8 @@ func load_game(path: String = SAVE_DEFAULT_PATH) -> bool:
 	call_deferred("_refresh_fog_after_load")
 	NetworkManager._orders_submitted = { "player1": false, "player2": false }
 	NetworkManager._step_ready_counts = {}
-	_broadcast_state()
-	call_deferred("_broadcast_state")
+	_broadcast_state(true)
+	call_deferred("_broadcast_state", true)
 	return true
 
 func load_game_slot(slot: int) -> bool:
@@ -1349,10 +1350,12 @@ func _refresh_fog_after_load() -> void:
 	if fog != null:
 		fog._update_fog()
 
-func _broadcast_state() -> void:
+func _broadcast_state(force_apply: bool = false) -> void:
 	if not _is_host():
 		return
 	var state = get_state_snapshot(true)
+	if force_apply:
+		state["force_apply"] = true
 	NetworkManager.broadcast_state(state)
 
 func _clear_units_only() -> void:
@@ -1455,8 +1458,9 @@ func apply_state(state: Dictionary, force_host: bool = false) -> void:
 	if state.is_empty():
 		return
 	var incoming_seq = int(state.get("state_seq", -1))
+	var force_apply = bool(state.get("force_apply", false))
 	if incoming_seq >= 0:
-		if incoming_seq <= last_state_seq_applied:
+		if not force_apply and incoming_seq <= last_state_seq_applied:
 			return
 		last_state_seq_applied = incoming_seq
 		state_seq = max(state_seq, incoming_seq)
@@ -1510,6 +1514,7 @@ func apply_state(state: Dictionary, force_host: bool = false) -> void:
 				player_orders[pid] = incoming_orders[pid]
 	NetworkManager.player_orders = player_orders
 	committed_orders = state.get("committed_orders", { "player1": {}, "player2": {} })
+	_prune_dead_units_after_apply()
 	if state.has("fog_visibility"):
 		var fog = $GameBoardNode.get_node_or_null("FogOfWar")
 		var fog_data = state["fog_visibility"]
@@ -3049,6 +3054,32 @@ func _cleanup_dead_unit(unit) -> void:
 	_refresh_tile_after_unit_change(unit.grid_pos)
 	unit_manager.unit_by_net_id.erase(unit.net_id)
 	unit.queue_free()
+
+func _remove_dead_unit_silent(unit) -> void:
+	if unit == null or not is_instance_valid(unit):
+		return
+	for player in ["player1", "player2"]:
+		player_orders[player].erase(unit.net_id)
+		NetworkManager.player_orders[player].erase(unit.net_id)
+		committed_orders[player].erase(unit.net_id)
+	$GameBoardNode.vacate(unit.grid_pos, unit)
+	_refresh_tile_after_unit_change(unit.grid_pos)
+	unit_manager.unit_by_net_id.erase(unit.net_id)
+	unit.queue_free()
+
+func _prune_dead_units_after_apply() -> void:
+	var to_remove: Array = []
+	for unit in unit_manager.get_children():
+		if unit == null or not is_instance_valid(unit):
+			continue
+		if unit.player_id not in ["player1", "player2"]:
+			continue
+		if unit.is_base or unit.is_tower:
+			continue
+		if unit.curr_health <= 0:
+			to_remove.append(unit)
+	for unit in to_remove:
+		_remove_dead_unit_silent(unit)
 
 func dealt_dmg_report(atkr, defr, atkr_in_dmg, defr_in_dmg, retaliate, atk_mode):
 	_append_damage_log(atkr, defr, atkr_in_dmg, defr_in_dmg, retaliate, atk_mode)

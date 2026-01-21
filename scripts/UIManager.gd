@@ -880,8 +880,20 @@ func _update_queue_preview() -> void:
 	elif unit.move_queue.size() >= 2:
 		path = unit.move_queue.duplicate()
 	else:
-		_clear_queue_preview()
-		return
+		var order := {}
+		if turn_mgr.current_phase == turn_mgr.Phase.EXECUTION:
+			if turn_mgr.committed_orders.has(turn_mgr.local_player_id):
+				order = turn_mgr.committed_orders[turn_mgr.local_player_id].get(unit.net_id, {})
+		else:
+			order = turn_mgr.get_order(turn_mgr.local_player_id, unit.net_id)
+		if order.is_empty() or str(order.get("type", "")) != "move":
+			_clear_queue_preview()
+			return
+		var order_path = order.get("path", [])
+		if not (order_path is Array) or order_path.size() < 2:
+			_clear_queue_preview()
+			return
+		path = order_path
 	if unit.net_id == _queue_preview_unit_id:
 		return
 	var idx = _queue_path_index(path, unit.grid_pos)
@@ -2290,6 +2302,13 @@ func _unhandled_input(ev):
 		while cur in prev:
 			path.insert(0, cur)
 			cur = prev[cur]
+		if path.is_empty():
+			var tiles = current_reachable.get("tiles", []).duplicate()
+			if tiles.has(currently_selected_unit.grid_pos):
+				tiles.erase(currently_selected_unit.grid_pos)
+			game_board.show_highlights(tiles)
+			finish_move_button.visible = false
+			return
 		current_path += path
 		_draw_partial_path()
 		var result = _get_build_road_reachable(cell)
@@ -2316,6 +2335,13 @@ func _unhandled_input(ev):
 		while cur in prev:
 			path.insert(0, cur)
 			cur = prev[cur]
+		if path.is_empty():
+			var tiles = current_reachable.get("tiles", []).duplicate()
+			if tiles.has(currently_selected_unit.grid_pos):
+				tiles.erase(currently_selected_unit.grid_pos)
+			game_board.show_highlights(tiles)
+			finish_move_button.visible = false
+			return
 		
 		current_path += path
 		var cost_used: float = 0.0
