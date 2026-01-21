@@ -38,6 +38,7 @@ var done_button_default_modulate: Color = Color(1, 1, 1)
 var _map_select_id: int = MAP_SELECT_RANDOM_NORMAL
 var _map_select_names: Dictionary = {}
 var _queue_preview_unit_id: int = -1
+var _default_camera_zoom: Vector2 = Vector2.ZERO
 
 @onready var turn_mgr = get_node(turn_manager_path) as Node
 @onready var unit_mgr = get_node(unit_manager_path) as Node
@@ -52,6 +53,7 @@ var _queue_preview_unit_id: int = -1
 @onready var next_button   : Button      = exec_panel.get_node("ExecutionBox/ControlsRow/NextButton")
 @onready var auto_pass_check = $ExecutionPanel/ExecutionBox/ControlsRow/AutoPassCheckButton as CheckButton
 @onready var done_button = $Panel/VBoxContainer/DoneButton as Button
+@onready var next_unordered_button = $Panel/VBoxContainer/NextUnorderedButton as Button
 @onready var cancel_done_button = $CancelDoneButton as Button
 @onready var dev_mode_toggle = get_node(dev_mode_toggle_path) as CheckButton
 @onready var dev_panel = $DevPanel
@@ -135,6 +137,9 @@ func _ready():
 	set_process(true)
 	if map_select != null:
 		map_select.flat = false
+	var cam = get_viewport().get_camera_2d()
+	if cam != null:
+		_default_camera_zoom = cam.zoom
 	
 	$HostButton.connect("pressed",
 					Callable(self, "_on_host_pressed"))
@@ -202,6 +207,9 @@ func _ready():
 					 Callable(self, "_on_cavalry_pressed"))
 	$Panel/VBoxContainer/DoneButton.connect("pressed",
 					 Callable(self, "_on_done_pressed"))
+	if next_unordered_button != null:
+		next_unordered_button.connect("pressed",
+					 Callable(self, "_on_next_unordered_pressed"))
 	$CancelDoneButton.connect("pressed",
 					 Callable(self, "_on_cancel_pressed"))
 	if done_button != null:
@@ -1378,6 +1386,79 @@ func _on_building_stats_close_pressed() -> void:
 	$BuildingStatsPanel.visible = false
 	$BuildingStatsCheckButton.button_pressed = false
 	_set_menu_checked(MENU_ID_BUILDING_STATS, false)
+
+func _get_next_unordered_unit() -> Node:
+	var units = game_board.get_all_units().get(current_player, [])
+	var best_unit: Node = null
+	var best_id: int = 0
+	for unit in units:
+		if unit == null or not is_instance_valid(unit):
+			continue
+		if unit.is_base or unit.is_tower:
+			continue
+		if unit.just_purchased:
+			continue
+		if unit.ordered:
+			continue
+		if best_unit == null or unit.net_id < best_id:
+			best_unit = unit
+			best_id = unit.net_id
+	return best_unit
+
+func _world_to_screen(world_pos: Vector2) -> Vector2:
+	var viewport = get_viewport()
+	if viewport == null:
+		return world_pos
+	return viewport.get_canvas_transform() * world_pos
+
+func _center_camera_on(cam: Camera2D, world_pos: Vector2) -> void:
+	if cam == null:
+		return
+	cam.global_position = world_pos
+
+func _show_action_menu_for_unit(unit: Node) -> void:
+	if unit == null or not is_instance_valid(unit):
+		return
+	var cam = get_viewport().get_camera_2d()
+	var world_pos = unit.global_position
+	if cam != null:
+		if _default_camera_zoom == Vector2.ZERO:
+			_default_camera_zoom = cam.zoom
+		cam.zoom = _default_camera_zoom
+		_center_camera_on(cam, world_pos)
+	call_deferred("_finish_show_action_menu_for_unit", unit)
+
+func _finish_show_action_menu_for_unit(unit: Node) -> void:
+	await get_tree().process_frame
+	await get_tree().process_frame
+	if unit == null or not is_instance_valid(unit):
+		return
+	_on_unit_selected(unit)
+	var world_pos = unit.global_position
+	var screen_pos = _world_to_screen(world_pos)
+	last_click_pos = screen_pos
+	var menu_size = Vector2(action_menu.size)
+	if menu_size == Vector2.ZERO:
+		menu_size = action_menu.get_minimum_size()
+	var viewport_size = get_viewport().get_visible_rect().size
+	var unit_half_width = hex.tile_size.x * 0.5
+	var screen_right = _world_to_screen(world_pos + Vector2(unit_half_width, 0.0))
+	var menu_pos = Vector2(screen_right.x, screen_pos.y - menu_size.y * 0.5)
+	menu_pos.x = clamp(menu_pos.x, 0.0, max(0.0, viewport_size.x - menu_size.x))
+	menu_pos.y = clamp(menu_pos.y, 0.0, max(0.0, viewport_size.y - menu_size.y))
+	action_menu.set_position(menu_pos)
+	action_menu.show()
+
+func _on_next_unordered_pressed() -> void:
+	if turn_mgr == null or turn_mgr.current_phase != turn_mgr.Phase.ORDERS:
+		return
+	if not $Panel.visible:
+		return
+	var unit = _get_next_unordered_unit()
+	if unit == null:
+		gold_lbl.text = "All units have orders"
+		return
+	_show_action_menu_for_unit(unit)
 
 func _on_unit_selected(unit: Node) -> void:
 	game_board.clear_highlights()

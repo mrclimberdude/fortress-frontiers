@@ -412,6 +412,11 @@ custom_minimum_size = Vector2(200, 30)
 layout_mode = 2
 text = "Done With Orders"
 
+[node name="NextUnorderedButton" type="Button" parent="UI/Panel/VBoxContainer"]
+custom_minimum_size = Vector2(200, 30)
+layout_mode = 2
+text = "Next Unordered Unit"
+
 [node name="ActionMenu" type="PopupMenu" parent="UI/Panel"]
 mouse_passthrough = true
 
