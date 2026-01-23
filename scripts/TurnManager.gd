@@ -380,6 +380,18 @@ func _unit_on_friendly_tower(unit) -> bool:
 		return false
 	return tower.is_tower and tower.player_id == unit.player_id
 
+func _friendly_structure_for_unit(unit) -> Node:
+	if unit == null or not is_instance_valid(unit):
+		return null
+	var structure = $GameBoardNode.get_structure_unit_at(unit.grid_pos)
+	if structure == null or not is_instance_valid(structure):
+		return null
+	if structure.player_id != unit.player_id:
+		return null
+	if not (structure.is_base or structure.is_tower):
+		return null
+	return structure
+
 func _get_retaliator_for_target(target):
 	if target == null:
 		return null
@@ -391,6 +403,16 @@ func _get_retaliator_for_target(target):
 	if garrison.player_id != target.player_id:
 		return null
 	return garrison
+
+func _retaliation_target_for_attacker(attacker, atk_mode: String) -> Node:
+	var structure = _friendly_structure_for_unit(attacker)
+	if structure == null:
+		return attacker
+	if attacker.is_moving:
+		return attacker
+	if atk_mode == "melee":
+		return structure
+	return structure
 
 func get_effective_ranged_range(unit) -> int:
 	var range = int(unit.ranged_range)
@@ -3248,11 +3270,14 @@ func _process_attacks():
 			var ret_dmg = dmg_result[0]
 			var retaliator = _get_retaliator_for_target(target)
 			var retaliate = _retaliator_can_hit(unit, retaliator)
-			if retaliate and retaliator != target:
-				ret_dmg = calculate_damage(unit, retaliator, "ranged", num_attackers)[0]
+			var ret_target = _retaliation_target_for_attacker(unit, "ranged")
 			if retaliate:
-				ranged_dmg[unit_net_id] = ranged_dmg.get(unit_net_id, 0) + ret_dmg
-				_accumulate_damage_by_player(ranged_sources, unit_net_id, retaliator.player_id, ret_dmg)
+				var ret_calc_target = ret_target if ret_target != null else unit
+				ret_dmg = calculate_damage(ret_calc_target, retaliator, "ranged", num_attackers)[0]
+			if retaliate:
+				var ret_target_id = (ret_target if ret_target != null else unit).net_id
+				ranged_dmg[ret_target_id] = ranged_dmg.get(ret_target_id, 0) + ret_dmg
+				_accumulate_damage_by_player(ranged_sources, ret_target_id, retaliator.player_id, ret_dmg)
 			ranged_dmg[target_net_id] = ranged_dmg.get(target_net_id, 0) + defr_in_dmg
 			_accumulate_damage_by_player(ranged_sources, target_net_id, unit.player_id, defr_in_dmg)
 			dealt_dmg_report(unit, target, ret_dmg, defr_in_dmg, retaliate, "ranged")
@@ -3276,11 +3301,14 @@ func _process_attacks():
 			var ret_dmg = dmg_result[0]
 			var retaliator = _get_retaliator_for_target(target)
 			var retaliate = _retaliator_can_hit(attacker, retaliator)
-			if retaliate and retaliator != target:
-				ret_dmg = calculate_damage(attacker, retaliator, "melee", num_attackers)[0]
+			var ret_target = _retaliation_target_for_attacker(attacker, "melee")
 			if retaliate:
-				melee_dmg[attacker.net_id] = melee_dmg.get(attacker.net_id, 0) + ret_dmg
-				_accumulate_damage_by_player(melee_sources, attacker.net_id, retaliator.player_id, ret_dmg)
+				var ret_calc_target = ret_target if ret_target != null else attacker
+				ret_dmg = calculate_damage(ret_calc_target, retaliator, "melee", num_attackers)[0]
+			if retaliate:
+				var ret_target_id = (ret_target if ret_target != null else attacker).net_id
+				melee_dmg[ret_target_id] = melee_dmg.get(ret_target_id, 0) + ret_dmg
+				_accumulate_damage_by_player(melee_sources, ret_target_id, retaliator.player_id, ret_dmg)
 			melee_dmg[target.net_id] = melee_dmg.get(target.net_id, 0) + defr_in_dmg
 			_accumulate_damage_by_player(melee_sources, target.net_id, attacker.player_id, defr_in_dmg)
 			dealt_dmg_report(attacker, target, ret_dmg, defr_in_dmg, retaliate, "melee")
