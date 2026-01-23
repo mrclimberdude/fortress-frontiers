@@ -835,6 +835,22 @@ func _positions_adjacent(a: Vector2i, b: Vector2i) -> bool:
 	var neighbors: Array = $GameBoardNode.get_offset_neighbors(a)
 	return b in neighbors
 
+func _retaliator_can_hit(attacker, retaliator) -> bool:
+	if attacker == null or retaliator == null:
+		return false
+	if not is_instance_valid(attacker) or not is_instance_valid(retaliator):
+		return false
+	if not retaliator.is_defending:
+		return false
+	var melee_tiles = $GameBoardNode.get_reachable_tiles(retaliator.grid_pos, 1, "move")["tiles"]
+	if attacker.grid_pos in melee_tiles:
+		return true
+	if retaliator.is_ranged:
+		var range = get_effective_ranged_range(retaliator)
+		var ranged_tiles = $GameBoardNode.get_reachable_tiles(retaliator.grid_pos, range, "ranged")["tiles"]
+		return attacker.grid_pos in ranged_tiles
+	return false
+
 func _units_in_range_los(origin: Vector2i, range: int) -> Array:
 	var result = $GameBoardNode.get_reachable_tiles(origin, range, "ranged")
 	var tiles = result.get("tiles", [])
@@ -888,16 +904,9 @@ func _queue_neutral_attack(attacker, target, atk_mode: String, dmg_map: Dictiona
 	var defr_in_dmg = dmg_result[1]
 	var ret_dmg = dmg_result[0]
 	var retaliator = _get_retaliator_for_target(target)
-	var retaliate = false
-	if retaliator != null and retaliator.is_defending:
-		if atk_mode == "ranged":
-			var result = $GameBoardNode.get_reachable_tiles(retaliator.grid_pos, 1, "move")
-			var melee_in_range = attacker.grid_pos in result["tiles"]
-			retaliate = retaliator.is_ranged or melee_in_range
-		else:
-			retaliate = true
-		if retaliate and retaliator != target:
-			ret_dmg = calculate_damage(attacker, retaliator, atk_mode, 1)[0]
+	var retaliate = _retaliator_can_hit(attacker, retaliator)
+	if retaliate and retaliator != target:
+		ret_dmg = calculate_damage(attacker, retaliator, atk_mode, 1)[0]
 	dmg_map[target.net_id] = dmg_map.get(target.net_id, 0) + defr_in_dmg
 	_accumulate_damage_by_player(src_map, target.net_id, attacker.player_id, defr_in_dmg)
 	if retaliate:
@@ -3238,14 +3247,9 @@ func _process_attacks():
 			var defr_in_dmg = dmg_result[1]
 			var ret_dmg = dmg_result[0]
 			var retaliator = _get_retaliator_for_target(target)
-			var retaliate = false
-			if retaliator != null and retaliator.is_defending:
-				var result = $GameBoardNode.get_reachable_tiles(retaliator.grid_pos, 1, "move")
-				var melee_in_range = unit.grid_pos in result["tiles"]
-				if retaliator.is_ranged or melee_in_range:
-					retaliate = true
-					if retaliator != target:
-						ret_dmg = calculate_damage(unit, retaliator, "ranged", num_attackers)[0]
+			var retaliate = _retaliator_can_hit(unit, retaliator)
+			if retaliate and retaliator != target:
+				ret_dmg = calculate_damage(unit, retaliator, "ranged", num_attackers)[0]
 			if retaliate:
 				ranged_dmg[unit_net_id] = ranged_dmg.get(unit_net_id, 0) + ret_dmg
 				_accumulate_damage_by_player(ranged_sources, unit_net_id, retaliator.player_id, ret_dmg)
@@ -3271,7 +3275,7 @@ func _process_attacks():
 			var defr_in_dmg = dmg_result[1]
 			var ret_dmg = dmg_result[0]
 			var retaliator = _get_retaliator_for_target(target)
-			var retaliate = retaliator != null and retaliator.is_defending
+			var retaliate = _retaliator_can_hit(attacker, retaliator)
 			if retaliate and retaliator != target:
 				ret_dmg = calculate_damage(attacker, retaliator, "melee", num_attackers)[0]
 			if retaliate:
