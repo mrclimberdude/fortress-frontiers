@@ -213,7 +213,7 @@ func get_offset_neighbors(tile: Vector2i) -> Array:
 		neighbors.append(tile + d)
 	return neighbors
 
-func get_reachable_tiles(start: Vector2i, range: float, mode: String, mover_override = null) -> Dictionary:
+func get_reachable_tiles(start: Vector2i, range: float, mode: String, mover_override = null, place_unit_type: String = "") -> Dictionary:
 	var reachable: Array = []
 	var prev: Dictionary = {}
 	var visited: Dictionary = {}
@@ -221,6 +221,7 @@ func get_reachable_tiles(start: Vector2i, range: float, mode: String, mover_over
 	var spawns = [start]
 	var mover_player: String = ""
 	var mover = null
+	var place_player: String = ""
 	
 	if mode == "dev_place":
 		return {"tiles": hex_map.used_cells, "prev": start}
@@ -228,6 +229,7 @@ func get_reachable_tiles(start: Vector2i, range: float, mode: String, mover_over
 	if mode == "place":
 		var start_unit = get_any_unit_at(start)
 		var player = start_unit.player_id if start_unit != null else ""
+		place_player = player
 		var spawn_points = []
 		if $"..".has_method("get_spawn_points"):
 			spawn_points = $"..".get_spawn_points(player)
@@ -284,6 +286,14 @@ func get_reachable_tiles(start: Vector2i, range: float, mode: String, mover_over
 					visited[neighbor] = dist + 1
 					prev[neighbor] = current
 					queue.append(neighbor)
+	if mode == "place" and place_unit_type != "":
+		var tm = $".."
+		if tm != null and tm.has_method("can_spawn_unit_at"):
+			var filtered := []
+			for tile in reachable:
+				if tm.can_spawn_unit_at(place_player, place_unit_type, tile):
+					filtered.append(tile)
+			reachable = filtered
 	if mode == "move":
 		# Re-run a weighted search for movement cost
 		reachable.clear()

@@ -987,7 +987,7 @@ func _find_placeable():
 		action_mode = "dev_place"
 	else:
 		action_mode = "place"
-	var result = game_board.get_reachable_tiles(base.grid_pos, 1, action_mode)
+	var result = game_board.get_reachable_tiles(base.grid_pos, 1, action_mode, null, placing_unit)
 	var tiles = result["tiles"]
 	game_board.show_highlights(tiles)
 	current_reachable = result

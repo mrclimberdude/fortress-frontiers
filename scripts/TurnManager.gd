@@ -198,6 +198,7 @@ const STRUCT_ROAD: String = "road"
 const STRUCT_RAIL: String = "rail"
 const STRUCT_TRAP: String = "trap"
 const STRUCT_SPAWN_TOWER: String = "spawn_tower"
+const SPAWN_TOWER_ROAD_UNITS := ["scout", "builder", "miner", "soldier"]
 
 const STRUCT_STATUS_BUILDING: String = "building"
 const STRUCT_STATUS_INTACT: String = "intact"
@@ -388,6 +389,52 @@ func _spawn_tower_has_connected_road(tile: Vector2i, player_id: String) -> bool:
 		if connected.has(neighbor):
 			return true
 	return false
+
+func _tile_in_spawn_range(tile: Vector2i, origin: Vector2i) -> bool:
+	if tile == origin:
+		return true
+	return tile in $GameBoardNode.get_offset_neighbors(origin)
+
+func _spawn_limit_for_tile(player_id: String, tile: Vector2i) -> String:
+	if player_id == "":
+		return ""
+	var base_pos = base_positions.get(player_id, Vector2i(-9999, -9999))
+	if _tile_in_spawn_range(tile, base_pos):
+		return "full"
+	for tower_pos in tower_positions.get(player_id, []):
+		if spawn_tower_positions.has(player_id) and tower_pos in spawn_tower_positions[player_id]:
+			continue
+		if _tile_in_spawn_range(tile, tower_pos):
+			return "full"
+	var connected_roads = _connected_road_tiles(player_id)
+	var connected_rails = _connected_rail_tiles(player_id)
+	var limit = ""
+	for spawn_pos in spawn_tower_positions.get(player_id, []):
+		if not _tile_in_spawn_range(tile, spawn_pos):
+			continue
+		var has_rail = false
+		for neighbor in $GameBoardNode.get_offset_neighbors(spawn_pos):
+			if connected_rails.has(neighbor):
+				has_rail = true
+				break
+		if has_rail:
+			return "full"
+		var has_road = false
+		for neighbor in $GameBoardNode.get_offset_neighbors(spawn_pos):
+			if connected_roads.has(neighbor):
+				has_road = true
+				break
+		if has_road:
+			limit = "road"
+	return limit
+
+func can_spawn_unit_at(player_id: String, unit_type: String, tile: Vector2i) -> bool:
+	var limit = _spawn_limit_for_tile(player_id, tile)
+	if limit == "":
+		return false
+	if limit == "road":
+		return unit_type.to_lower() in SPAWN_TOWER_ROAD_UNITS
+	return true
 
 func _friendly_structure_for_unit(unit) -> Node:
 	if unit == null or not is_instance_valid(unit):
@@ -4460,6 +4507,10 @@ func buy_unit(player: String, unit_type: String, grid_pos: Vector2i) -> Dictiona
 		push_error("Unit scene for '%s' not assigned in Inspector" % unit_type)
 		print("Unit scene for '%s' not assigned in Inspector" % unit_type)
 		result["reason"] = "unknown_unit"
+		return result
+	var spawn_limit = _spawn_limit_for_tile(player, grid_pos)
+	if spawn_limit == "road" and unit_type.to_lower() not in SPAWN_TOWER_ROAD_UNITS:
+		result["reason"] = "invalid_tile"
 		return result
 
 	# check cost
