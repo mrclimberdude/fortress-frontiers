@@ -380,6 +380,15 @@ func _unit_on_friendly_tower(unit) -> bool:
 		return false
 	return tower.is_tower and tower.player_id == unit.player_id
 
+func _spawn_tower_has_connected_road(tile: Vector2i, player_id: String) -> bool:
+	var connected = _connected_road_tiles(player_id)
+	if connected.has(tile):
+		return true
+	for neighbor in $GameBoardNode.get_offset_neighbors(tile):
+		if connected.has(neighbor):
+			return true
+	return false
+
 func _friendly_structure_for_unit(unit) -> Node:
 	if unit == null or not is_instance_valid(unit):
 		return null
@@ -2758,6 +2767,9 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 					elif not _is_open_terrain(target_tile) or $GameBoardNode._terrain_is_impassable(target_tile):
 						result["reason"] = "invalid_tile"
 						return result
+				if struct_type == STRUCT_SPAWN_TOWER and not _spawn_tower_has_connected_road(target_tile, player_id):
+					result["reason"] = "invalid_structure"
+					return result
 			else:
 				var existing_type = str(state.get("type", ""))
 				var existing_status = str(state.get("status", ""))
