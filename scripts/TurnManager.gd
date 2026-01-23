@@ -2144,11 +2144,7 @@ func _build_queue_last_step_ok(unit, player_id: String) -> bool:
 		var status = str(state.get("status", ""))
 		if status == STRUCT_STATUS_DISABLED:
 			return false
-		var prev_left = int(unit.build_queue_last_build_left)
-		var current_left = int(state.get("build_left", -1))
-		if prev_left < 0 or current_left < 0:
-			return false
-		return current_left < prev_left
+		return true
 	return true
 
 func _build_queue_next_order(unit, player_id: String) -> Dictionary:
@@ -2740,6 +2736,10 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 					result["reason"] = "invalid_path"
 					return result
 				if $GameBoardNode.is_enemy_structure_tile(step, player_id):
+					result["reason"] = "invalid_path"
+					return result
+				var status = _road_queue_tile_status(step, player_id, i == 0)
+				if status == "invalid":
 					result["reason"] = "invalid_path"
 					return result
 			_clear_build_queue(unit)
