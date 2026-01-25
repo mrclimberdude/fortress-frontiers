@@ -185,6 +185,7 @@ const DRAGON_TYPE: String = "dragon"
 const DRAGON_REWARD_GOLD: String = "gold"
 const DRAGON_REWARD_MELEE: String = "melee_bonus"
 const DRAGON_REWARD_RANGED: String = "ranged_bonus"
+const DRAGON_REWARD_MANA: String = "mana_income"
 const CAMP_RESPAWN_DISPLAY_TURNS: int = 3
 const DRAGON_RESPAWN_DISPLAY_TURNS: int = 5
 
@@ -197,6 +198,7 @@ const DRAGON_RESPAWN_DISPLAY_TURNS: int = 5
 @export var dragon_gold_bonus: int = 1000
 @export var dragon_melee_bonus: int = 3
 @export var dragon_ranged_bonus: int = 3
+@export var dragon_mana_bonus: int = 10
 @export var camp_archer_range: int = 2
 @export var dragon_fire_range: int = 3
 @export var dragon_cleave_targets: int = 3
@@ -218,13 +220,13 @@ const ENGINEERING_PHASE_NAME: String = "Engineering"
 const TRAP_DAMAGE: int = 30
 const REPAIR_AMOUNT: int = 30
 const BUILD_TURNS_SHORT: int = 2
-const BUILD_TURNS_TOWER: int = 4
+const BUILD_TURNS_TOWER: int = 6
 const BUILD_TURNS_MANA_POOL: int = 3
 const ROAD_COST_PER_TURN: int = 5
 const RAIL_COST_PER_TURN: int = 10
 const FORT_COST_PER_TURN: int = 15
 const TRAP_COST_PER_TURN: int = 15
-const TOWER_COST_PER_TURN: int = 10
+const TOWER_COST_PER_TURN: int = 25
 const MANA_POOL_COST_PER_TURN: int = 10
 const WARD_COST_PER_TURN: int = 10
 const WARD_VISION_RANGE: int = 2
@@ -279,6 +281,7 @@ var dragon_spawn_counts := {}
 var show_respawn_timers_override: bool = false
 var player_melee_bonus := { "player1": 0, "player2": 0 }
 var player_ranged_bonus := { "player1": 0, "player2": 0 }
+var player_mana_bonus := { "player1": 0, "player2": 0 }
 var damage_log := { "player1": [], "player2": [] }
 
 var buildable_structures := {}
@@ -1263,7 +1266,7 @@ func _reward_report(player_id: String, text: String) -> void:
 	dmg_report.add_child(report_label)
 
 func _dragon_reward_for_pos(pos: Vector2i, spawn_count: int) -> String:
-	var rewards = [DRAGON_REWARD_GOLD, DRAGON_REWARD_MELEE, DRAGON_REWARD_RANGED]
+	var rewards = [DRAGON_REWARD_GOLD, DRAGON_REWARD_MELEE, DRAGON_REWARD_RANGED, DRAGON_REWARD_MANA]
 	var seed = int(pos.x * 1259) + int(pos.y * 1931) + int(spawn_count * 83492791) + int(current_map_index + 1) * 104729 + int(NetworkManager.match_seed) * 32452843
 	var idx = abs(seed) % rewards.size()
 	return rewards[idx]
@@ -1276,6 +1279,8 @@ func _apply_dragon_reward_color(unit, reward: String) -> void:
 			unit.modulate = Color(0.9, 0.35, 0.25)
 		DRAGON_REWARD_RANGED:
 			unit.modulate = Color(0.35, 0.6, 1)
+		DRAGON_REWARD_MANA:
+			unit.modulate = Color(0.35, 0.85, 0.35)
 		_:
 			unit.modulate = Color(1, 1, 1)
 
@@ -1550,6 +1555,7 @@ func _collect_state() -> Dictionary:
 		"player_mana_cap": player_mana_cap,
 		"player_melee_bonus": player_melee_bonus,
 		"player_ranged_bonus": player_ranged_bonus,
+		"player_mana_bonus": player_mana_bonus,
 		"camp_respawns": camp_respawns,
 		"dragon_respawns": dragon_respawns,
 		"camp_respawn_counts": camp_respawn_counts,
@@ -1855,6 +1861,7 @@ func apply_state(state: Dictionary, force_host: bool = false) -> void:
 	player_mana = state.get("player_mana", player_mana)
 	player_mana_income = state.get("player_mana_income", player_mana_income)
 	player_mana_cap = state.get("player_mana_cap", player_mana_cap)
+	player_mana_bonus = state.get("player_mana_bonus", player_mana_bonus)
 	player_melee_bonus = state.get("player_melee_bonus", player_melee_bonus)
 	player_ranged_bonus = state.get("player_ranged_bonus", player_ranged_bonus)
 	camp_respawns = state.get("camp_respawns", camp_respawns)
@@ -2094,6 +2101,7 @@ func reset_to_lobby() -> void:
 	player_mana_cap = { "player1": BASE_MANA_CAP, "player2": BASE_MANA_CAP }
 	player_melee_bonus = { "player1": 0, "player2": 0 }
 	player_ranged_bonus = { "player1": 0, "player2": 0 }
+	player_mana_bonus = { "player1": 0, "player2": 0 }
 	damage_log = { "player1": [], "player2": [] }
 	player_orders = { "player1": {}, "player2": {} }
 	committed_orders = { "player1": {}, "player2": {} }
@@ -2177,6 +2185,7 @@ func _do_upkeep() -> void:
 					income += mine_road_bonus
 		player_gold[player] += income
 		player_income[player] = income
+		mana_income += player_mana_bonus.get(player, 0)
 		player_mana[player] = min(player_mana_cap[player], player_mana[player] + mana_income)
 		player_mana_income[player] = mana_income
 		print("%s income: %d  → total gold: %d" % [player.capitalize(), income, player_gold[player]])
@@ -3532,6 +3541,8 @@ func _grant_dragon_reward(player_id: String, pos: Vector2i) -> void:
 			player_melee_bonus[player_id] += dragon_melee_bonus
 		DRAGON_REWARD_RANGED:
 			player_ranged_bonus[player_id] += dragon_ranged_bonus
+		DRAGON_REWARD_MANA:
+			player_mana_bonus[player_id] += dragon_mana_bonus
 
 func _handle_neutral_death(unit) -> void:
 	if unit == null:
@@ -3564,6 +3575,8 @@ func _handle_neutral_death(unit) -> void:
 					_reward_report(killer, "Dragon defeated: +%d melee strength" % dragon_melee_bonus)
 				DRAGON_REWARD_RANGED:
 					_reward_report(killer, "Dragon defeated: +%d ranged strength" % dragon_ranged_bonus)
+				DRAGON_REWARD_MANA:
+					_reward_report(killer, "Dragon defeated: +%d mana/turn" % dragon_mana_bonus)
 	update_neutral_markers()
 
 func _cleanup_dead_unit(unit) -> void:
