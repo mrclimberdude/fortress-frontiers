@@ -22,6 +22,9 @@ var action_mode:       String   = ""     # "move", "move_to", "ranged", "melee",
 var move_priority: int = 0
 var allow_clicks: bool = true
 var last_click_pos: Vector2 = Vector2.ZERO
+var current_spell_type: String = ""
+var spell_tiles: Array = []
+var spell_caster: Node = null
 var _build_hover_root: Node2D = null
 var _build_hover_label: Label = null
 var _build_hover_cell: Vector2i = Vector2i(-99999, -99999)
@@ -46,8 +49,10 @@ var _default_camera_zoom: Vector2 = Vector2.ZERO
 @onready var hex = $"../GameBoardNode/HexTileMap"
 @onready var gold_lbl = $Panel/VBoxContainer/GoldLabel as Label
 @onready var income_lbl = $Panel/VBoxContainer/IncomeLabel as Label
+@onready var mana_lbl = $Panel/VBoxContainer/ManaLabel as Label
 @onready var action_menu: PopupMenu      = $Panel/ActionMenu as PopupMenu
 @onready var build_menu: PopupMenu = PopupMenu.new()
+@onready var spell_menu: PopupMenu = PopupMenu.new()
 @onready var exec_panel: PanelContainer  = $ExecutionPanel
 @onready var phase_label   : Label       = exec_panel.get_node("ExecutionBox/PhaseLabel")
 @onready var next_button   : Button      = exec_panel.get_node("ExecutionBox/ControlsRow/NextButton")
@@ -114,18 +119,29 @@ const BUILD_OPTIONS = [
 	{"id": 1, "label": "Road", "type": "road"},
 	{"id": 2, "label": "Railroad", "type": "rail"},
 	{"id": 3, "label": "Spawn Tower", "type": "spawn_tower"},
-	{"id": 4, "label": "Trap", "type": "trap"}
+	{"id": 4, "label": "Trap", "type": "trap"},
+	{"id": 5, "label": "Mana Pool", "type": "mana_pool"}
 ]
 const BUILD_MENU_ROAD_TO_ID: int = 100
 const BUILD_MENU_RAIL_TO_ID: int = 101
+const ACTION_SPELL_ID: int = 13
+const ACTION_SPELL_STRUCTURE_ID: int = 14
+
+const SPELL_OPTIONS = [
+	{"id": 0, "label": "Heal", "type": "heal"},
+	{"id": 1, "label": "Fireball", "type": "fireball"},
+	{"id": 2, "label": "Combat Buff", "type": "buff"}
+]
 
 const ArcherScene = preload("res://scenes/Archer.tscn")
 const SoldierScene = preload("res://scenes/Soldier.tscn")
 const ScoutScene = preload("res://scenes/Scout.tscn")
 const MinerScene = preload("res://scenes/Miner.tscn")
+const CrystalMinerScene = preload("res://scenes/CrystalMiner.tscn")
 const PhalanxScene = preload("res://scenes/Tank.tscn")
 const CavalryScene = preload("res://scenes/Cavalry.tscn")
 const BuilderScene = preload("res://scenes/Builder.tscn")
+const WizardScene = preload("res://scenes/Wizard.tscn")
 const CampArcherScene = preload("res://scenes/CampArcher.tscn")
 const DragonScene = preload("res://scenes/Dragon.tscn")
 
@@ -193,12 +209,16 @@ func _ready():
 	# order button connections
 	$Panel/VBoxContainer/ArcherButton.connect("pressed",
 					 Callable(self, "_on_archer_pressed"))
+	$Panel/VBoxContainer/WizardButton.connect("pressed",
+					 Callable(self, "_on_wizard_pressed"))
 	$Panel/VBoxContainer/SoldierButton.connect("pressed",
 					 Callable(self, "_on_soldier_pressed"))
 	$Panel/VBoxContainer/ScoutButton.connect("pressed",
 					 Callable(self, "_on_scout_pressed"))
 	$Panel/VBoxContainer/MinerButton.connect("pressed",
 					 Callable(self, "_on_miner_pressed"))
+	$Panel/VBoxContainer/CrystalMinerButton.connect("pressed",
+					 Callable(self, "_on_crystal_miner_pressed"))
 	$Panel/VBoxContainer/BuilderButton.connect("pressed",
 					 Callable(self, "_on_builder_pressed"))
 	$Panel/VBoxContainer/PhalanxButton.connect("pressed",
@@ -227,22 +247,26 @@ func _ready():
 	
 	# setting gold labels and stats for units
 	var base_font: FontFile = load("res://fonts/JetBrainsMono-Medium.ttf")
-	var unit_scenes = [ScoutScene, SoldierScene, MinerScene, BuilderScene, ArcherScene, PhalanxScene, CavalryScene]
-	var unit_names = ["Scout", "Soldier", "Miner", "Builder", "Archer", "Phalanx", "Cavalry"]
+	var unit_scenes = [ScoutScene, MinerScene, CrystalMinerScene, BuilderScene, SoldierScene, ArcherScene, WizardScene, PhalanxScene, CavalryScene]
+	var unit_names = ["Scout", "Miner", "Crystal\nMiner", "Builder", "Soldier", "Archer", "Wizard", "Phalanx", "Cavalry"]
 	var unit_specials = [
 		"Sight 3; lookout; forest cost 1",
-		"None",
 		"Mine bonus +15 on mine",
+		"Mine bonus +5 mana on mine",
 		"Build/repair/sabotage; queue roads/rails",
+		"None",
 		"Ranged range 2",
+		"Cast spells (range 3)",
 		"Defend: +20 melee, no multi-def penalty; adjacent allies +2",
 		"Sight 3"
 	]
 	var unit_buy_buttons = [$Panel/VBoxContainer/ScoutButton,
-							$Panel/VBoxContainer/SoldierButton,
 							$Panel/VBoxContainer/MinerButton,
+							$Panel/VBoxContainer/CrystalMinerButton,
 							$Panel/VBoxContainer/BuilderButton,
+							$Panel/VBoxContainer/SoldierButton,
 							$Panel/VBoxContainer/ArcherButton,
+							$Panel/VBoxContainer/WizardButton,
 							$Panel/VBoxContainer/PhalanxButton,
 							$Panel/VBoxContainer/CavalryButton]
 	var unit_container = $StatsPanel/VBoxContainer
@@ -287,11 +311,13 @@ func _ready():
 	_add_build_stats_row(build_container, ["Building", "Cost", "Turns", "Effect"], build_col_widths, base_font, true, true)
 	var short_turns = int(turn_mgr.BUILD_TURNS_SHORT)
 	var tower_turns = int(turn_mgr.BUILD_TURNS_TOWER)
+	var mana_turns = int(turn_mgr.BUILD_TURNS_MANA_POOL)
 	var fort_bonus = "%d/%d" % [turn_mgr.fort_melee_bonus, turn_mgr.fort_ranged_bonus]
 	var build_rows = [
 		{"name": "Fortification", "cost": turn_mgr.get_build_turn_cost("fortification"), "turns": short_turns, "effect": "+%s melee/ranged (atk/def)" % fort_bonus},
 		{"name": "Road", "cost": turn_mgr.get_build_turn_cost("road"), "turns": short_turns, "effect": "Move x0.5; +1 turn on river; mines +10 if connected"},
 		{"name": "Railroad", "cost": turn_mgr.get_build_turn_cost("rail"), "turns": short_turns, "effect": "Move x0.25; upgrade intact road; rail build counts as road; +1 turn on river; mines +20 if connected"},
+		{"name": "Mana Pool", "cost": turn_mgr.get_build_turn_cost("mana_pool"), "turns": mana_turns, "effect": "Adjacent to mine; +100 mana cap; one per mine"},
 		{"name": "Spawn Tower", "cost": turn_mgr.get_build_turn_cost("spawn_tower"), "turns": tower_turns, "effect": "Spawn point; tower bonuses; no income; needs road/rail link"},
 		{"name": "Trap", "cost": turn_mgr.get_build_turn_cost("trap"), "turns": short_turns, "effect": "Hidden from enemies; triggers to disable, stop movement, deal 30 dmg"}
 	]
@@ -319,6 +345,12 @@ func _ready():
 	build_menu.add_separator()
 	build_menu.add_item("Build Road To", BUILD_MENU_ROAD_TO_ID)
 	build_menu.add_item("Build Railroad To", BUILD_MENU_RAIL_TO_ID)
+	spell_menu.name = "SpellMenu"
+	add_child(spell_menu)
+	spell_menu.connect("id_pressed", Callable(self, "_on_spell_selected"))
+	spell_menu.hide()
+	for entry in SPELL_OPTIONS:
+		spell_menu.add_item(entry["label"], entry["id"])
 	_init_build_hover()
 	_init_menu()
 
@@ -926,13 +958,71 @@ func _refresh_build_menu_labels() -> void:
 				break
 		if idx >= 0:
 			build_menu.set_item_text(idx, label)
+
+func _refresh_spell_menu_labels() -> void:
+	var mana_cost = int(turn_mgr.SPELL_COST)
+	for entry in SPELL_OPTIONS:
+		var label = entry["label"]
+		if mana_cost > 0:
+			label = "%s (%d mana)" % [label, mana_cost]
+		var idx = -1
+		for i in range(spell_menu.get_item_count()):
+			if spell_menu.get_item_id(i) == entry["id"]:
+				idx = i
+				break
+		if idx >= 0:
+			spell_menu.set_item_text(idx, label)
+
+func _get_spell_target_tiles(caster: Node, spell_type: String) -> Array:
+	var tiles := []
+	if caster == null or not is_instance_valid(caster):
+		return tiles
+	var seen := {}
+	var all_units = game_board.get_all_units_flat()
+	for unit in all_units:
+		if unit == null:
+			continue
+		var is_enemy = unit.player_id != current_player
+		if spell_type == "fireball":
+			if not is_enemy:
+				continue
+		else:
+			if unit.player_id != current_player:
+				continue
+		if turn_mgr.is_unit_hidden_for_viewer(unit, current_player):
+			continue
+		if not turn_mgr._player_can_see_tile(current_player, unit.grid_pos):
+			continue
+		if turn_mgr._hex_distance(caster.grid_pos, unit.grid_pos) > turn_mgr.SPELL_RANGE:
+			continue
+		if seen.has(unit.grid_pos):
+			continue
+		seen[unit.grid_pos] = true
+		tiles.append(unit.grid_pos)
+	return tiles
+
+func _spell_target_for_tile(tile: Vector2i, spell_type: String) -> Node:
+	if spell_type == "fireball":
+		var struct = game_board.get_structure_unit_at(tile)
+		if struct != null and struct.player_id != current_player:
+			return struct
+		var unit = game_board.get_unit_at(tile)
+		if unit != null and unit.player_id != current_player and not turn_mgr.is_unit_hidden_for_viewer(unit, current_player):
+			return unit
+		return null
+	var unit = game_board.get_unit_at(tile)
+	if unit != null and unit.player_id == current_player:
+		return unit
+	var struct = game_board.get_structure_unit_at(tile)
+	if struct != null and struct.player_id == current_player:
+		return struct
+	return null
 	
 
 func _on_orders_phase_begin(player: String) -> void:
 	# show the UI and reset state
 	current_player = player
-	gold_lbl.text = "Current Gold: %d" % [turn_mgr.player_gold[current_player]]
-	income_lbl.text = "Income: %d per turn" % turn_mgr.player_income[current_player]
+	_refresh_resource_labels()
 	placing_unit  = ""
 	$Panel.visible = true
 	allow_clicks = true
@@ -951,6 +1041,11 @@ func _on_archer_pressed():
 	gold_lbl.text = "Click map to place Archer\nGold: %d" % turn_mgr.player_gold[current_player]
 	_find_placeable()
 
+func _on_wizard_pressed():
+	placing_unit = "wizard"
+	gold_lbl.text = "Click map to place Wizard\nGold: %d" % turn_mgr.player_gold[current_player]
+	_find_placeable()
+
 func _on_soldier_pressed():
 	placing_unit = "soldier"
 	gold_lbl.text = "Click map to place Soldier\nGold: %d" % turn_mgr.player_gold[current_player]
@@ -964,6 +1059,11 @@ func _on_scout_pressed():
 func _on_miner_pressed():
 	placing_unit = "miner"
 	gold_lbl.text = "Click map to place Miner\nGold: %d" % turn_mgr.player_gold[current_player]
+	_find_placeable()
+
+func _on_crystal_miner_pressed():
+	placing_unit = "crystal_miner"
+	gold_lbl.text = "Click map to place Crystal Miner\nGold: %d" % turn_mgr.player_gold[current_player]
 	_find_placeable()
 
 func _on_builder_pressed():
@@ -1214,6 +1314,10 @@ func _order_error_message(reason: String) -> String:
 			msg = "[Order failed: unit not ready]"
 		"not_enough_gold":
 			msg = "[Order failed: not enough gold]"
+		"not_enough_mana":
+			msg = "[Order failed: not enough mana]"
+		"no_vision":
+			msg = "[Order failed: no vision]"
 		_:
 			msg = "[Order failed]"
 	return _format_error_with_gold(msg)
@@ -1222,7 +1326,20 @@ func _format_error_with_gold(message: String) -> String:
 	if turn_mgr == null or current_player == "":
 		return message
 	var gold = turn_mgr.player_gold.get(current_player, 0)
-	return "%s\nGold: %d" % [message, gold]
+	var mana = turn_mgr.player_mana.get(current_player, 0)
+	var cap = turn_mgr.player_mana_cap.get(current_player, 0)
+	return "%s\nGold: %d  Mana: %d/%d" % [message, gold, mana, cap]
+
+func _refresh_resource_labels() -> void:
+	if turn_mgr == null or current_player == "":
+		return
+	gold_lbl.text = "Current Gold: %d" % turn_mgr.player_gold.get(current_player, 0)
+	income_lbl.text = "Income: %d per turn" % turn_mgr.player_income.get(current_player, 0)
+	if mana_lbl != null:
+		var mana = turn_mgr.player_mana.get(current_player, 0)
+		var cap = turn_mgr.player_mana_cap.get(current_player, 0)
+		var income = turn_mgr.player_mana_income.get(current_player, 0)
+		mana_lbl.text = "Mana: %d/%d (+%d)" % [mana, cap, income]
 
 func _on_buy_result(player_id: String, unit_type: String, grid_pos: Vector2i, ok: bool, reason: String, cost: int) -> void:
 	if player_id != turn_mgr.local_player_id:
@@ -1230,7 +1347,7 @@ func _on_buy_result(player_id: String, unit_type: String, grid_pos: Vector2i, ok
 	if turn_mgr.is_host():
 		return
 	if ok:
-		gold_lbl.text = "%s Gold: %d" % [current_player, turn_mgr.player_gold[current_player]]
+		_refresh_resource_labels()
 	else:
 		gold_lbl.text = _buy_error_message(reason, cost)
 		_cancel_purchase_mode()
@@ -1241,7 +1358,7 @@ func _on_undo_result(player_id: String, unit_net_id: int, ok: bool, reason: Stri
 	if turn_mgr.is_host():
 		return
 	if ok:
-		gold_lbl.text = "%s Gold: %d" % [current_player, turn_mgr.player_gold[current_player]]
+		_refresh_resource_labels()
 	else:
 		gold_lbl.text = _undo_error_message(reason)
 
@@ -1465,6 +1582,9 @@ func _on_unit_selected(unit: Node) -> void:
 	currently_selected_unit = unit
 	# Show action selection menu
 	action_menu.clear()
+	if unit.is_base or unit.is_tower:
+		action_menu.add_item("Cast Spell", ACTION_SPELL_ID)
+		return
 	if unit.just_purchased:
 		action_menu.add_item("Undo Buy", 0)
 		if unit.first_turn_move:
@@ -1487,6 +1607,11 @@ func _on_unit_selected(unit: Node) -> void:
 	if unit.is_builder:
 		action_menu.add_item("Build", 7)
 		action_menu.add_item("Repair", 8)
+	if unit.is_wizard:
+		action_menu.add_item("Cast Spell", ACTION_SPELL_ID)
+	var struct = game_board.get_structure_unit_at(unit.grid_pos)
+	if struct != null and struct.player_id == current_player and (struct.is_base or struct.is_tower):
+		action_menu.add_item("Cast Spell (Structure)", ACTION_SPELL_STRUCTURE_ID)
 
 func _on_action_selected(id: int) -> void:
 	if currently_selected_unit == null or not is_instance_valid(currently_selected_unit):
@@ -1498,7 +1623,7 @@ func _on_action_selected(id: int) -> void:
 			var unit_id = currently_selected_unit.net_id
 			if turn_mgr.is_host():
 				if NetworkManager.request_undo_buy(player_id, unit_id):
-					gold_lbl.text = "%s Gold: %d" % [current_player, turn_mgr.player_gold[current_player]]
+					_refresh_resource_labels()
 			else:
 				NetworkManager.request_undo_buy(player_id, unit_id)
 			currently_selected_unit = null
@@ -1603,6 +1728,20 @@ func _on_action_selected(id: int) -> void:
 				"target_tile": currently_selected_unit.grid_pos
 			})
 			action_mode = ""
+		ACTION_SPELL_ID:
+			spell_caster = currently_selected_unit
+			_refresh_spell_menu_labels()
+			spell_menu.set_position(last_click_pos)
+			spell_menu.popup()
+		ACTION_SPELL_STRUCTURE_ID:
+			var struct = game_board.get_structure_unit_at(currently_selected_unit.grid_pos)
+			if struct == null or struct.player_id != current_player:
+				action_menu.hide()
+				return
+			spell_caster = struct
+			_refresh_spell_menu_labels()
+			spell_menu.set_position(last_click_pos)
+			spell_menu.popup()
 	action_menu.hide()
 
 func _clear_all_drawings():
@@ -1641,6 +1780,7 @@ func _clear_all_drawings():
 func _reset_ui_for_snapshot() -> void:
 	action_menu.hide()
 	build_menu.hide()
+	spell_menu.hide()
 	finish_move_button.visible = false
 	_clear_queue_preview()
 	placing_unit = ""
@@ -1651,6 +1791,9 @@ func _reset_ui_for_snapshot() -> void:
 	enemy_tiles = []
 	support_tiles = []
 	repair_tiles = []
+	current_spell_type = ""
+	spell_tiles = []
+	spell_caster = null
 	remaining_moves = 0.0
 	game_board.clear_highlights()
 	_clear_all_drawings()
@@ -1673,6 +1816,9 @@ func _on_cancel_pressed():
 	currently_selected_unit = null
 	action_mode = ""
 	current_path = []
+	current_spell_type = ""
+	spell_tiles = []
+	spell_caster = null
 	remaining_moves = 0
 	finish_move_button.visible = false
 	game_board.clear_highlights()
@@ -1683,7 +1829,7 @@ func _on_cancel_pressed():
 func _on_execution_paused(phase_idx):
 	_current_exec_step_idx = phase_idx
 	exec_panel.visible = true
-	var phase_names = ["Unit Spawns", "Attacks", "Engineering", "Movement"]
+	var phase_names = ["Unit Spawns", "Spells", "Attacks", "Engineering", "Movement"]
 	if phase_idx == turn_mgr.neutral_step_index:
 		phase_label.text = "Processed: Neutral Attacks\n(Click here to continue)"
 		_update_auto_pass_for_damage()
@@ -1859,7 +2005,9 @@ func _draw_attacks():
 	for player in players:
 		var all_orders = turn_mgr.get_all_orders_for_phase(player)
 		for order in all_orders:
-			if order["type"] == "ranged" or order["type"] == "melee":
+			var is_attack = order["type"] == "ranged" or order["type"] == "melee"
+			var is_fireball = order["type"] == "spell" and str(order.get("spell_type", "")) == turn_mgr.SPELL_FIREBALL
+			if is_attack or is_fireball:
 				var root = Node2D.new()
 				attack_arrows_node.add_child(root)
 				
@@ -1868,7 +2016,6 @@ func _draw_attacks():
 				var target = unit_mgr.get_unit_by_net_id(order["target_unit_net_id"])
 				if not _should_draw_unit(attacker) or target == null:
 					continue
-				var dmg = $"..".calculate_damage(attacker, target, order["type"], 1)
 				var p1 = hex.map_to_world(attacker.grid_pos) + hex.tile_size * 0.5
 				var p2 = hex.map_to_world(order["target_tile"]) + hex.tile_size * 0.5
 				var arrow = AttackArrowScene.instantiate() as Sprite2D
@@ -1883,13 +2030,15 @@ func _draw_attacks():
 				arrow.rotation = (p2 - p1).angle()
 				arrow.z_index = 10
 				root.add_child(arrow)
-				var dmg_label = Label.new()
-				dmg_label.text = "%d (%d)" % [dmg[1], dmg[0]]
-				dmg_label.add_theme_color_override("font_color", Color(0.96, 0.96, 0.08))
-				var normal := Vector2(-dir.y, dir.x)
-				dmg_label.position = p1 + normal * 8.0 + dir * 6.0
-				dmg_label.z_index = 11
-				root.add_child(dmg_label)
+				if is_attack:
+					var dmg = $"..".calculate_damage(attacker, target, order["type"], 1)
+					var dmg_label = Label.new()
+					dmg_label.text = "%d (%d)" % [dmg[1], dmg[0]]
+					dmg_label.add_theme_color_override("font_color", Color(0.96, 0.96, 0.08))
+					var normal := Vector2(-dir.y, dir.x)
+					dmg_label.position = p1 + normal * 8.0 + dir * 6.0
+					dmg_label.z_index = 11
+					root.add_child(dmg_label)
 
 func _draw_supports():
 	var support_arrows_node = hex.get_node("SupportArrows")
@@ -1920,6 +2069,26 @@ func _draw_supports():
 				var scale_x: float = distance / tex_size.x
 				arrow.scale = Vector2(scale_x, 1)
 				# set position to center of tile
+				var half_length = tex_size.x * scale_x * 0.5
+				arrow.position = p1 + dir * half_length
+				arrow.rotation = (p2 - p1).angle()
+				arrow.z_index = 10
+				root.add_child(arrow)
+			elif order["type"] == "spell" and str(order.get("spell_type", "")) in [turn_mgr.SPELL_HEAL, turn_mgr.SPELL_BUFF]:
+				var root = Node2D.new()
+				support_arrows_node.add_child(root)
+				var caster = unit_mgr.get_unit_by_net_id(order["unit_net_id"])
+				var target = unit_mgr.get_unit_by_net_id(order["target_unit_net_id"])
+				if not _should_draw_unit(caster) or target == null:
+					continue
+				var p1 = hex.map_to_world(caster.grid_pos) + hex.tile_size * 0.5
+				var p2 = hex.map_to_world(order["target_tile"]) + hex.tile_size * 0.5
+				var arrow = SupportArrowScene.instantiate() as Sprite2D
+				var dir = (p2 - p1).normalized()
+				var tex_size = arrow.texture.get_size()
+				var distance: float = (p2 - p1).length()
+				var scale_x: float = distance / tex_size.x
+				arrow.scale = Vector2(scale_x, 1)
 				var half_length = tex_size.x * scale_x * 0.5
 				arrow.position = p1 + dir * half_length
 				arrow.rotation = (p2 - p1).angle()
@@ -2198,6 +2367,31 @@ func _on_build_selected(id: int) -> void:
 	action_mode = ""
 	build_menu.hide()
 
+func _on_spell_selected(id: int) -> void:
+	if spell_caster == null or not is_instance_valid(spell_caster):
+		spell_menu.hide()
+		return
+	var spell_type = ""
+	for entry in SPELL_OPTIONS:
+		if entry["id"] == id:
+			spell_type = entry["type"]
+			break
+	if spell_type == "":
+		spell_menu.hide()
+		return
+	action_mode = "spell"
+	current_spell_type = spell_type
+	spell_tiles = _get_spell_target_tiles(spell_caster, spell_type)
+	if spell_tiles.is_empty():
+		gold_lbl.text = "[No valid spell targets]"
+		action_mode = ""
+		current_spell_type = ""
+		spell_caster = null
+		spell_menu.hide()
+		return
+	game_board.show_highlights(spell_tiles)
+	spell_menu.hide()
+
 func _get_build_road_reachable(start: Vector2i) -> Dictionary:
 	if currently_selected_unit == null:
 		return {"tiles": [], "prev": {}}
@@ -2324,8 +2518,7 @@ func _on_state_applied() -> void:
 	_reset_ui_for_snapshot()
 	if turn_mgr.current_phase == turn_mgr.Phase.ORDERS:
 		current_player = turn_mgr.local_player_id
-		gold_lbl.text = "Current Gold: %d" % [turn_mgr.player_gold.get(current_player, 0)]
-		income_lbl.text = "Income: %d per turn" % turn_mgr.player_income.get(current_player, 0)
+		_refresh_resource_labels()
 		$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
 		_update_done_button_state()
 	_draw_all()
@@ -2350,7 +2543,7 @@ func _unhandled_input(ev):
 		if cell in current_reachable["tiles"]:
 			if turn_mgr.is_host():
 				if NetworkManager.request_buy_unit(current_player, placing_unit, cell):
-					gold_lbl.text = "%s Gold: %d" % [current_player, turn_mgr.player_gold[current_player]]
+					_refresh_resource_labels()
 					placing_unit = ""
 					$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
 					_update_done_button_state()
@@ -2464,16 +2657,31 @@ func _unhandled_input(ev):
 			})
 		action_mode = ""
 		return
+
+	if action_mode == "spell" and spell_caster != null:
+		if cell in spell_tiles:
+			var target_unit = _spell_target_for_tile(cell, current_spell_type)
+			if target_unit == null:
+				action_mode = ""
+				return
+			NetworkManager.request_order(current_player, {
+				"unit_net_id": spell_caster.net_id,
+				"type": "spell",
+				"spell_type": current_spell_type,
+				"target_tile": cell,
+				"target_unit_net_id": target_unit.net_id
+			})
+		action_mode = ""
+		current_spell_type = ""
+		spell_tiles = []
+		spell_caster = null
+		return
 	
 	if turn_mgr.current_phase == turn_mgr.Phase.ORDERS:
 		# Unit selection in orders phase
 		var unit = game_board.get_unit_at(cell)
 		if unit:
 			if unit.player_id == current_player:
-				if unit.is_base:
-					return
-				if unit.is_tower:
-					return
 				_on_unit_selected(unit)
 				last_click_pos = ev.position
 				var menu_pos = ev.position
@@ -2483,3 +2691,15 @@ func _unhandled_input(ev):
 					menu_pos.y = max(0.0, menu_pos.y - menu_size.y)
 				action_menu.set_position(menu_pos)
 				action_menu.show()
+				return
+		var structure = game_board.get_structure_unit_at(cell)
+		if structure != null and structure.player_id == current_player:
+			_on_unit_selected(structure)
+			last_click_pos = ev.position
+			var menu_pos = ev.position
+			var menu_size = action_menu.size
+			var viewport_size = get_viewport().get_visible_rect().size
+			if menu_pos.y + menu_size.y > viewport_size.y:
+				menu_pos.y = max(0.0, menu_pos.y - menu_size.y)
+			action_menu.set_position(menu_pos)
+			action_menu.show()

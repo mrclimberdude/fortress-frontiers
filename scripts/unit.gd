@@ -41,13 +41,18 @@ extends Node2D
 
 @export var is_base:         bool = false
 @export var is_miner:        bool = false
+@export var is_crystal_miner: bool = false
 @export var is_builder:      bool = false
 @export var is_phalanx:      bool = false
 @export var is_tower:        bool = false
 @export var is_spawn_tower:  bool = false
+@export var is_wizard:       bool = false
 @export var unit_type:       String = ""
 @export var special_skills:  String = ""
 @export var last_damaged_by: String = ""
+@export var spell_buff_melee: int = 0
+@export var spell_buff_ranged: int = 0
+@export var spell_buff_turns: int = 0
 
 # -- grid positioning and reference to the TileMapLayer
 var grid_pos: Vector2i
