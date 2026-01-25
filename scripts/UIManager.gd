@@ -962,9 +962,9 @@ func _refresh_build_menu_labels() -> void:
 			build_menu.set_item_text(idx, label)
 
 func _refresh_spell_menu_labels() -> void:
-	var mana_cost = int(turn_mgr.SPELL_COST)
 	for entry in SPELL_OPTIONS:
 		var label = entry["label"]
+		var mana_cost = int(turn_mgr.get_spell_cost(entry["type"]))
 		if mana_cost > 0:
 			label = "%s (%d mana)" % [label, mana_cost]
 		var idx = -1

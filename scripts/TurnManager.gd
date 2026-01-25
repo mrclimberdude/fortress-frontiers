@@ -243,15 +243,25 @@ const TOWER_MELEE_BONUS: int = 3
 const TOWER_RANGED_BONUS: int = 3
 const TOWER_RANGE_BONUS: int = 1
 const SPELL_RANGE: int = 3
-const SPELL_COST: int = 30
+const SPELL_COST_HEAL: int = 15
+const SPELL_COST_FIREBALL: int = 30
+const SPELL_COST_BUFF: int = 25
 const SPELL_HEAL_AMOUNT: int = 25
-const SPELL_FIREBALL_DAMAGE: int = 30
+const SPELL_FIREBALL_DAMAGE: int = 50
 const SPELL_FIREBALL_STRUCT_DAMAGE: int = 10
 const SPELL_BUFF_AMOUNT: int = 5
 const SPELL_BUFF_TURNS: int = 1
 const SPELL_HEAL: String = "heal"
 const SPELL_FIREBALL: String = "fireball"
 const SPELL_BUFF: String = "buff"
+
+func get_spell_cost(spell_type: String) -> int:
+	var spell = str(spell_type).to_lower()
+	if spell == SPELL_HEAL:
+		return SPELL_COST_HEAL
+	if spell == SPELL_BUFF:
+		return SPELL_COST_BUFF
+	return SPELL_COST_FIREBALL
 
 var camp_units := {}
 var dragon_units := {}
@@ -2841,7 +2851,8 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 			if _hex_distance(unit.grid_pos, target_tile) > SPELL_RANGE:
 				result["reason"] = "out_of_range"
 				return result
-			if player_mana.get(player_id, 0) < SPELL_COST:
+			var spell_cost = get_spell_cost(spell_type)
+			if player_mana.get(player_id, 0) < spell_cost:
 				result["reason"] = "not_enough_mana"
 				return result
 			sanitized["spell_type"] = spell_type
@@ -3526,10 +3537,11 @@ func _process_spells() -> void:
 		if target == null or target.curr_health <= 0:
 			_remove_player_order(player_id, entry["unit_net_id"])
 			continue
-		if player_mana.get(player_id, 0) < SPELL_COST:
+		var spell_cost = get_spell_cost(spell_type)
+		if player_mana.get(player_id, 0) < spell_cost:
 			_remove_player_order(player_id, entry["unit_net_id"])
 			continue
-		player_mana[player_id] -= SPELL_COST
+		player_mana[player_id] -= spell_cost
 		var spell_type = str(order.get("spell_type", ""))
 		if spell_type == SPELL_HEAL:
 			target.curr_health = min(target.max_health, target.curr_health + SPELL_HEAL_AMOUNT)
@@ -3590,10 +3602,11 @@ func _process_attacks():
 				if target.player_id == caster.player_id:
 					player_orders[player].erase(unit_net_id)
 					continue
-				if player_mana.get(player, 0) < SPELL_COST:
+				var spell_cost = get_spell_cost(SPELL_FIREBALL)
+				if player_mana.get(player, 0) < spell_cost:
 					player_orders[player].erase(unit_net_id)
 					continue
-				player_mana[player] -= SPELL_COST
+				player_mana[player] -= spell_cost
 				var dmg = SPELL_FIREBALL_STRUCT_DAMAGE if target.is_base or target.is_tower else SPELL_FIREBALL_DAMAGE
 				spell_dmg[target.net_id] = spell_dmg.get(target.net_id, 0) + dmg
 				_accumulate_damage_by_player(ranged_sources, target.net_id, caster.player_id, dmg)
