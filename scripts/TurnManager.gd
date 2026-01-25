@@ -248,6 +248,7 @@ const SPELL_COST_FIREBALL: int = 30
 const SPELL_COST_BUFF: int = 25
 const SPELL_HEAL_AMOUNT: int = 25
 const SPELL_FIREBALL_DAMAGE: int = 50
+const SPELL_FIREBALL_DRAGON_DAMAGE: int = 15
 const SPELL_FIREBALL_STRUCT_DAMAGE: int = 10
 const SPELL_BUFF_AMOUNT: int = 5
 const SPELL_BUFF_TURNS: int = 1
@@ -3609,6 +3610,8 @@ func _process_attacks():
 					continue
 				player_mana[player] -= spell_cost
 				var dmg = SPELL_FIREBALL_STRUCT_DAMAGE if target.is_base or target.is_tower else SPELL_FIREBALL_DAMAGE
+				if str(target.unit_type) == DRAGON_TYPE:
+					dmg = SPELL_FIREBALL_DRAGON_DAMAGE
 				spell_dmg[target.net_id] = spell_dmg.get(target.net_id, 0) + dmg
 				_accumulate_damage_by_player(ranged_sources, target.net_id, caster.player_id, dmg)
 				player_orders[player].erase(unit_net_id)
