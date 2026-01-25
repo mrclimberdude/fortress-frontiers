@@ -3537,12 +3537,13 @@ func _process_spells() -> void:
 		if target == null or target.curr_health <= 0:
 			_remove_player_order(player_id, entry["unit_net_id"])
 			continue
+		var spell_type = str(order.get("spell_type", ""))
 		var spell_cost = get_spell_cost(spell_type)
 		if player_mana.get(player_id, 0) < spell_cost:
 			_remove_player_order(player_id, entry["unit_net_id"])
 			continue
 		player_mana[player_id] -= spell_cost
-		var spell_type = str(order.get("spell_type", ""))
+		
 		if spell_type == SPELL_HEAL:
 			target.curr_health = min(target.max_health, target.curr_health + SPELL_HEAL_AMOUNT)
 			target.set_health_bar()

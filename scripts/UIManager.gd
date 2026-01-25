@@ -105,8 +105,9 @@ const MENU_ID_LOAD: int = 2
 const MENU_ID_LOAD_AUTOSAVE: int = 3
 const MENU_ID_UNIT_STATS: int = 10
 const MENU_ID_BUILDING_STATS: int = 11
-const MENU_ID_DEV_MODE: int = 12
-const MENU_ID_QUIT: int = 13
+const MENU_ID_SPELL_STATS: int = 12
+const MENU_ID_DEV_MODE: int = 13
+const MENU_ID_QUIT: int = 14
 const MENU_ID_SLOT_BASE: int = 100
 const MAP_SELECT_RANDOM_ANY: int = 1000
 const MAP_SELECT_RANDOM_NORMAL: int = 1001
@@ -240,10 +241,14 @@ func _ready():
 					Callable(self, "_on_stats_toggled"))
 	$BuildingStatsCheckButton.connect("toggled",
 					Callable(self, "_on_building_stats_toggled"))
+	$SpellStatsCheckButton.connect("toggled",
+					Callable(self, "_on_spell_stats_toggled"))
 	$StatsPanel/CloseButton.connect("pressed",
 					Callable(self, "_on_unit_stats_close_pressed"))
 	$BuildingStatsPanel/CloseButton.connect("pressed",
 					Callable(self, "_on_building_stats_close_pressed"))
+	$SpellStatsPanel/CloseButton.connect("pressed",
+					Callable(self, "_on_spell_stats_close_pressed"))
 	$Panel/FinishMoveButton.connect("pressed",
 					Callable(self, "_on_finish_move_button_pressed"))
 	
@@ -335,6 +340,26 @@ func _ready():
 			add_sep
 		)
 	
+	var spell_container = $SpellStatsPanel/VBoxContainer
+	var spell_col_widths = [120.0, 80.0, 80.0]
+	_add_build_stats_row(spell_container, ["Spell", "Cost", "Phase", "Effect"], spell_col_widths, base_font, true, true)
+	var spell_rows = [
+		{"name": "Heal", "cost": turn_mgr.get_spell_cost("heal"), "phase": "Spells", "effect": "Heal 25; range 3; requires vision"},
+		{"name": "Fireball", "cost": turn_mgr.get_spell_cost("fireball"), "phase": "Attacks", "effect": "30 dmg units; 10 dmg tower/base; range 3; requires vision"},
+		{"name": "Combat Buff", "cost": turn_mgr.get_spell_cost("buff"), "phase": "Spells", "effect": "+5 melee/ranged for 1 turn; range 3; requires vision"}
+	]
+	for i in range(spell_rows.size()):
+		var row = spell_rows[i]
+		var add_sep = i < spell_rows.size() - 1
+		_add_build_stats_row(
+			spell_container,
+			[row["name"], "%d mana" % int(row["cost"]), row["phase"], row["effect"]],
+			spell_col_widths,
+			base_font,
+			true,
+			add_sep
+		)
+	
 	# unit order menu
 	action_menu.connect("id_pressed", Callable(self, "_on_action_selected"))
 	action_menu.hide()
@@ -367,6 +392,7 @@ func _init_menu() -> void:
 	menu_popup.add_separator()
 	menu_popup.add_check_item("Unit Stats", MENU_ID_UNIT_STATS)
 	menu_popup.add_check_item("Building Stats", MENU_ID_BUILDING_STATS)
+	menu_popup.add_check_item("Spell Stats", MENU_ID_SPELL_STATS)
 	menu_popup.add_check_item("Dev Mode", MENU_ID_DEV_MODE)
 	menu_popup.add_separator()
 	for i in range(SAVE_SLOT_COUNT_UI):
@@ -711,6 +737,7 @@ func _sync_menu_checks() -> void:
 		return
 	_set_menu_checked(MENU_ID_UNIT_STATS, $StatsPanel.visible)
 	_set_menu_checked(MENU_ID_BUILDING_STATS, $BuildingStatsPanel.visible)
+	_set_menu_checked(MENU_ID_SPELL_STATS, $SpellStatsPanel.visible)
 	_set_menu_checked(MENU_ID_DEV_MODE, dev_mode_toggle.button_pressed)
 	for i in range(SAVE_SLOT_COUNT_UI):
 		_set_menu_checked(MENU_ID_SLOT_BASE + i, i == save_slot_index)
@@ -754,6 +781,14 @@ func _on_menu_id_pressed(id: int) -> void:
 		else:
 			$BuildingStatsCheckButton.button_pressed = next
 		_on_building_stats_toggled(next)
+		return
+	if id == MENU_ID_SPELL_STATS:
+		var next = not $SpellStatsPanel.visible
+		if $SpellStatsCheckButton.has_method("set_pressed_no_signal"):
+			$SpellStatsCheckButton.set_pressed_no_signal(next)
+		else:
+			$SpellStatsCheckButton.button_pressed = next
+		_on_spell_stats_toggled(next)
 		return
 	if id == MENU_ID_DEV_MODE:
 		var next = not dev_mode_toggle.button_pressed
@@ -1469,6 +1504,7 @@ func _on_cancel_game_pressed():
 	_reset_ui_for_snapshot()
 	_on_stats_toggled(false)
 	_on_building_stats_toggled(false)
+	_on_spell_stats_toggled(false)
 	_update_done_button_state()
 	NetworkManager.close_connection()
 
@@ -1484,6 +1520,7 @@ func _on_finish_move_button_pressed():
 
 func _on_stats_toggled(toggled):
 	if toggled:
+		_close_other_stats_panels("unit")
 		$StatsPanel.visible = true
 	else:
 		$StatsPanel.visible = false
@@ -1491,10 +1528,19 @@ func _on_stats_toggled(toggled):
 
 func _on_building_stats_toggled(toggled):
 	if toggled:
+		_close_other_stats_panels("building")
 		$BuildingStatsPanel.visible = true
 	else:
 		$BuildingStatsPanel.visible = false
 	_set_menu_checked(MENU_ID_BUILDING_STATS, toggled)
+
+func _on_spell_stats_toggled(toggled):
+	if toggled:
+		_close_other_stats_panels("spell")
+		$SpellStatsPanel.visible = true
+	else:
+		$SpellStatsPanel.visible = false
+	_set_menu_checked(MENU_ID_SPELL_STATS, toggled)
 
 func _on_unit_stats_close_pressed() -> void:
 	$StatsPanel.visible = false
@@ -1505,6 +1551,34 @@ func _on_building_stats_close_pressed() -> void:
 	$BuildingStatsPanel.visible = false
 	$BuildingStatsCheckButton.button_pressed = false
 	_set_menu_checked(MENU_ID_BUILDING_STATS, false)
+
+func _on_spell_stats_close_pressed() -> void:
+	$SpellStatsPanel.visible = false
+	$SpellStatsCheckButton.button_pressed = false
+	_set_menu_checked(MENU_ID_SPELL_STATS, false)
+
+func _close_other_stats_panels(active_panel: String) -> void:
+	if active_panel != "unit" and $StatsPanel.visible:
+		$StatsPanel.visible = false
+		if $UnitStatsCheckButton.has_method("set_pressed_no_signal"):
+			$UnitStatsCheckButton.set_pressed_no_signal(false)
+		else:
+			$UnitStatsCheckButton.button_pressed = false
+		_set_menu_checked(MENU_ID_UNIT_STATS, false)
+	if active_panel != "building" and $BuildingStatsPanel.visible:
+		$BuildingStatsPanel.visible = false
+		if $BuildingStatsCheckButton.has_method("set_pressed_no_signal"):
+			$BuildingStatsCheckButton.set_pressed_no_signal(false)
+		else:
+			$BuildingStatsCheckButton.button_pressed = false
+		_set_menu_checked(MENU_ID_BUILDING_STATS, false)
+	if active_panel != "spell" and $SpellStatsPanel.visible:
+		$SpellStatsPanel.visible = false
+		if $SpellStatsCheckButton.has_method("set_pressed_no_signal"):
+			$SpellStatsCheckButton.set_pressed_no_signal(false)
+		else:
+			$SpellStatsCheckButton.button_pressed = false
+		_set_menu_checked(MENU_ID_SPELL_STATS, false)
 
 func _get_next_unordered_unit() -> Node:
 	var units = game_board.get_all_units().get(current_player, [])

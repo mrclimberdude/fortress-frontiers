@@ -461,6 +461,14 @@ offset_right = 520.0
 offset_bottom = 32.0
 text = "Building Stats"
 
+[node name="SpellStatsCheckButton" type="CheckButton" parent="UI"]
+visible = false
+offset_left = 526.0
+offset_top = 1.0
+offset_right = 684.0
+offset_bottom = 32.0
+text = "Spell Stats"
+
 [node name="MenuButton" type="MenuButton" parent="UI"]
 anchors_preset = 1
 anchor_left = 1.0
@@ -498,10 +506,10 @@ text = "X"
 
 [node name="BuildingStatsPanel" type="Panel" parent="UI"]
 visible = false
-offset_left = 354.0
-offset_top = 36.0
-offset_right = 1041.0
-offset_bottom = 299.0
+offset_left = 213.0
+offset_top = 27.0
+offset_right = 900.0
+offset_bottom = 290.0
 
 [node name="VBoxContainer" type="VBoxContainer" parent="UI/BuildingStatsPanel"]
 layout_mode = 0
@@ -511,6 +519,31 @@ offset_right = 683.0
 offset_bottom = 250.0
 
 [node name="CloseButton" type="Button" parent="UI/BuildingStatsPanel"]
+z_index = 1
+layout_mode = 0
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -26.0
+offset_top = 4.0
+offset_right = -4.0
+offset_bottom = 24.0
+text = "X"
+
+[node name="SpellStatsPanel" type="Panel" parent="UI"]
+visible = false
+offset_left = 213.0
+offset_top = 27.0
+offset_right = 900.0
+offset_bottom = 290.0
+
+[node name="VBoxContainer" type="VBoxContainer" parent="UI/SpellStatsPanel"]
+layout_mode = 0
+offset_left = -2.0
+offset_top = 1.0
+offset_right = 683.0
+offset_bottom = 250.0
+
+[node name="CloseButton" type="Button" parent="UI/SpellStatsPanel"]
 z_index = 1
 layout_mode = 0
 anchor_left = 1.0
