@@ -25,6 +25,8 @@ var last_click_pos: Vector2 = Vector2.ZERO
 var current_spell_type: String = ""
 var spell_tiles: Array = []
 var spell_caster: Node = null
+var selected_structure_tile: Vector2i = Vector2i(-9999, -9999)
+var selected_structure_type: String = ""
 var _build_hover_root: Node2D = null
 var _build_hover_label: Label = null
 var _build_hover_cell: Vector2i = Vector2i(-99999, -99999)
@@ -123,12 +125,15 @@ const BUILD_OPTIONS = [
 	{"id": 2, "label": "Railroad", "type": "rail"},
 	{"id": 3, "label": "Spawn Tower", "type": "spawn_tower"},
 	{"id": 4, "label": "Trap", "type": "trap"},
-	{"id": 5, "label": "Mana Pool", "type": "mana_pool"}
+	{"id": 5, "label": "Mana Pool", "type": "mana_pool"},
+	{"id": 6, "label": "Ward", "type": "ward"}
 ]
 const BUILD_MENU_ROAD_TO_ID: int = 100
 const BUILD_MENU_RAIL_TO_ID: int = 101
 const ACTION_SPELL_ID: int = 13
 const ACTION_SPELL_STRUCTURE_ID: int = 14
+const ACTION_WARD_VISION_ID: int = 15
+const ACTION_WARD_VISION_ALWAYS_ID: int = 16
 
 const SPELL_OPTIONS = [
 	{"id": 0, "label": "Heal", "type": "heal"},
@@ -325,6 +330,7 @@ func _ready():
 		{"name": "Road", "cost": turn_mgr.get_build_turn_cost("road"), "turns": short_turns, "effect": "Move x0.5; +1 turn on river; mines +10 if connected"},
 		{"name": "Railroad", "cost": turn_mgr.get_build_turn_cost("rail"), "turns": short_turns, "effect": "Move x0.25; upgrade intact road; rail build counts as road; +1 turn on river; mines +20 if connected"},
 		{"name": "Mana Pool", "cost": turn_mgr.get_build_turn_cost("mana_pool"), "turns": mana_turns, "effect": "Adjacent to mine; +100 mana cap; one per mine"},
+		{"name": "Ward", "cost": turn_mgr.get_build_turn_cost("ward"), "turns": short_turns, "effect": "Hidden from enemies except wizards; spend 5 mana for vision radius 2"},
 		{"name": "Spawn Tower", "cost": turn_mgr.get_build_turn_cost("spawn_tower"), "turns": tower_turns, "effect": "Spawn point; tower bonuses; no income; needs road/rail link"},
 		{"name": "Trap", "cost": turn_mgr.get_build_turn_cost("trap"), "turns": short_turns, "effect": "Hidden from enemies; triggers to disable, stop movement, deal 30 dmg"}
 	]
@@ -1656,6 +1662,8 @@ func _on_next_unordered_pressed() -> void:
 func _on_unit_selected(unit: Node) -> void:
 	game_board.clear_highlights()
 	currently_selected_unit = unit
+	selected_structure_tile = Vector2i(-9999, -9999)
+	selected_structure_type = ""
 	# Show action selection menu
 	action_menu.clear()
 	if unit.is_base or unit.is_tower:
@@ -1688,8 +1696,39 @@ func _on_unit_selected(unit: Node) -> void:
 	var struct = game_board.get_structure_unit_at(unit.grid_pos)
 	if struct != null and struct.player_id == current_player and (struct.is_base or struct.is_tower):
 		action_menu.add_item("Cast Spell (Structure)", ACTION_SPELL_STRUCTURE_ID)
+	var ward_state = turn_mgr.buildable_structures.get(unit.grid_pos, {})
+	if not ward_state.is_empty():
+		if str(ward_state.get("type", "")) == turn_mgr.STRUCT_WARD and str(ward_state.get("owner", "")) == current_player and str(ward_state.get("status", "")) == turn_mgr.STRUCT_STATUS_INTACT:
+			selected_structure_tile = unit.grid_pos
+			selected_structure_type = "ward"
+			action_menu.add_item("Ward Vision", ACTION_WARD_VISION_ID)
+			action_menu.add_item("Always Vision", ACTION_WARD_VISION_ALWAYS_ID)
 
 func _on_action_selected(id: int) -> void:
+	if id == ACTION_WARD_VISION_ID:
+		if selected_structure_type != "ward" or selected_structure_tile == Vector2i(-9999, -9999):
+			action_menu.hide()
+			return
+		NetworkManager.request_order(current_player, {
+			"type": "ward_vision",
+			"ward_tile": selected_structure_tile
+		})
+		selected_structure_tile = Vector2i(-9999, -9999)
+		selected_structure_type = ""
+		action_menu.hide()
+		return
+	if id == ACTION_WARD_VISION_ALWAYS_ID:
+		if selected_structure_type != "ward" or selected_structure_tile == Vector2i(-9999, -9999):
+			action_menu.hide()
+			return
+		NetworkManager.request_order(current_player, {
+			"type": "ward_vision_always",
+			"ward_tile": selected_structure_tile
+		})
+		selected_structure_tile = Vector2i(-9999, -9999)
+		selected_structure_type = ""
+		action_menu.hide()
+		return
 	if currently_selected_unit == null or not is_instance_valid(currently_selected_unit):
 		action_menu.hide()
 		return
@@ -1851,6 +1890,10 @@ func _clear_all_drawings():
 	if sabotage_node != null:
 		for child in sabotage_node.get_children():
 			child.queue_free()
+	var ward_node = hex.get_node_or_null("WardSprites")
+	if ward_node != null:
+		for child in ward_node.get_children():
+			child.queue_free()
 	_queue_preview_unit_id = -1
 
 func _reset_ui_for_snapshot() -> void:
@@ -1870,6 +1913,10 @@ func _reset_ui_for_snapshot() -> void:
 	current_spell_type = ""
 	spell_tiles = []
 	spell_caster = null
+	selected_structure_tile = Vector2i(-9999, -9999)
+	selected_structure_type = ""
+	selected_structure_tile = Vector2i(-9999, -9999)
+	selected_structure_type = ""
 	remaining_moves = 0.0
 	game_board.clear_highlights()
 	_clear_all_drawings()
@@ -2298,6 +2345,14 @@ func _get_sabotage_sprites_root() -> Node2D:
 		hex.add_child(root)
 	return root
 
+func _get_ward_sprites_root() -> Node2D:
+	var root = hex.get_node_or_null("WardSprites")
+	if root == null:
+		root = Node2D.new()
+		root.name = "WardSprites"
+		hex.add_child(root)
+	return root
+
 func _draw_builds():
 	var build_node = _get_building_sprites_root()
 	for child in build_node.get_children():
@@ -2408,6 +2463,42 @@ func _draw_sabotages():
 				sabotage_icon.z_index = ORDER_ICON_Z
 				root.add_child(sabotage_icon)
 
+func _draw_ward_orders():
+	var ward_node = _get_ward_sprites_root()
+	for child in ward_node.get_children():
+		child.queue_free()
+	var players = []
+	if turn_mgr.current_phase == turn_mgr.Phase.ORDERS:
+		players.append(current_player)
+	else:
+		players = ["player1", "player2"]
+	for player in players:
+		var all_orders = turn_mgr.get_all_orders_for_phase(player)
+		for order in all_orders:
+			if order.get("type", "") == "ward_vision":
+				var ward_tile = order.get("ward_tile", Vector2i(-9999, -9999))
+				if typeof(ward_tile) != TYPE_VECTOR2I:
+					continue
+				var ward_state = turn_mgr.buildable_structures.get(ward_tile, {})
+				if ward_state.is_empty() or str(ward_state.get("type", "")) != turn_mgr.STRUCT_WARD:
+					continue
+				if not turn_mgr._structure_is_visible_to_viewer(ward_state, turn_mgr.local_player_id, ward_tile):
+					continue
+				var root = Node2D.new()
+				ward_node.add_child(root)
+				var dot = Polygon2D.new()
+				var points := PackedVector2Array()
+				var segments = 12
+				var radius = hex.tile_size.x * 0.06
+				for i in range(segments):
+					var ang = TAU * float(i) / float(segments)
+					points.append(Vector2(cos(ang), sin(ang)) * radius)
+				dot.polygon = points
+				dot.color = Color(1, 0.92, 0.2, 0.9)
+				dot.position = hex.map_to_world(ward_tile) + hex.tile_size * 0.5
+				dot.z_index = ORDER_ICON_Z
+				root.add_child(dot)
+
 func _draw_all():
 	_draw_attacks()
 	_draw_heals()
@@ -2418,6 +2509,7 @@ func _draw_all():
 	_draw_builds()
 	_draw_repairs()
 	_draw_sabotages()
+	_draw_ward_orders()
 
 func _get_repair_targets(unit: Node) -> Array:
 	var targets := []
@@ -2800,3 +2892,22 @@ func _unhandled_input(ev):
 				menu_pos.y = max(0.0, menu_pos.y - menu_size.y)
 			action_menu.set_position(menu_pos)
 			action_menu.show()
+			return
+		var ward_state = turn_mgr.buildable_structures.get(cell, {})
+		if not ward_state.is_empty():
+			if str(ward_state.get("type", "")) == turn_mgr.STRUCT_WARD and str(ward_state.get("owner", "")) == current_player and str(ward_state.get("status", "")) == turn_mgr.STRUCT_STATUS_INTACT:
+				currently_selected_unit = null
+				selected_structure_tile = cell
+				selected_structure_type = "ward"
+				action_menu.clear()
+				action_menu.add_item("Ward Vision", ACTION_WARD_VISION_ID)
+				action_menu.add_item("Always Vision", ACTION_WARD_VISION_ALWAYS_ID)
+				last_click_pos = ev.position
+				var menu_pos = ev.position
+				var menu_size = action_menu.size
+				var viewport_size = get_viewport().get_visible_rect().size
+				if menu_pos.y + menu_size.y > viewport_size.y:
+					menu_pos.y = max(0.0, menu_pos.y - menu_size.y)
+				action_menu.set_position(menu_pos)
+				action_menu.show()
+				return

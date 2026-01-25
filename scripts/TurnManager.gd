@@ -205,6 +205,7 @@ const STRUCT_FORTIFICATION: String = "fortification"
 const STRUCT_ROAD: String = "road"
 const STRUCT_RAIL: String = "rail"
 const STRUCT_TRAP: String = "trap"
+const STRUCT_WARD: String = "ward"
 const STRUCT_MANA_POOL: String = "mana_pool"
 const STRUCT_SPAWN_TOWER: String = "spawn_tower"
 const SPAWN_TOWER_ROAD_UNITS := ["scout", "builder", "miner", "crystal_miner", "soldier", "wizard"]
@@ -225,6 +226,9 @@ const FORT_COST_PER_TURN: int = 15
 const TRAP_COST_PER_TURN: int = 15
 const TOWER_COST_PER_TURN: int = 10
 const MANA_POOL_COST_PER_TURN: int = 10
+const WARD_COST_PER_TURN: int = 10
+const WARD_VISION_RANGE: int = 2
+const WARD_VISION_MANA_COST: int = 5
 @export var mine_road_bonus: int = 10
 @export var mine_rail_bonus: int = 20
 
@@ -232,6 +236,7 @@ const MANA_POOL_COST_PER_TURN: int = 10
 @export var road_sprite: Texture2D
 @export var rail_sprite: Texture2D
 @export var trap_sprite: Texture2D
+@export var ward_sprite: Texture2D
 @export var mana_pool_sprite: Texture2D
 @export var spawn_tower_sprite: Texture2D
 @export var structure_sprite_scale: float = 1.35
@@ -278,6 +283,8 @@ var damage_log := { "player1": [], "player2": [] }
 
 var buildable_structures := {}
 var mana_pool_mines := {}
+var ward_vision_active := { "player1": {}, "player2": {} }
+var _next_ward_id: int = -1
 var spawn_tower_positions := { "player1": [], "player2": [] }
 var income_tower_positions := { "player1": [], "player2": [] }
 var structure_markers := {}
@@ -314,6 +321,76 @@ func _is_open_terrain(cell: Vector2i) -> bool:
 
 func _structure_state(cell: Vector2i) -> Dictionary:
 	return buildable_structures.get(cell, {})
+
+func _ensure_ward_id(state: Dictionary, cell: Vector2i) -> int:
+	var ward_id = int(state.get("ward_id", 0))
+	if ward_id != 0:
+		return ward_id
+	ward_id = _next_ward_id
+	_next_ward_id -= 1
+	state["ward_id"] = ward_id
+	buildable_structures[cell] = state
+	return ward_id
+
+func _viewer_has_wizard_sight(viewer_id: String, cell: Vector2i) -> bool:
+	if viewer_id == "":
+		return false
+	var units = $GameBoardNode.get_all_units().get(viewer_id, [])
+	for unit in units:
+		if unit == null or not is_instance_valid(unit):
+			continue
+		if not unit.is_wizard:
+			continue
+		var in_sight
+		if unit.just_purchased and not unit.is_base and not unit.is_tower:
+			in_sight = $GameBoardNode.get_reachable_tiles(unit.grid_pos, 0, "visibility")
+		else:
+			var mode = "visibility_over_trees" if unit.is_looking_out else "visibility"
+			in_sight = $GameBoardNode.get_reachable_tiles(unit.grid_pos, unit.sight_range, mode)
+		if cell in in_sight["tiles"]:
+			return true
+	return false
+
+func _prune_ward_visions() -> void:
+	for player in ["player1", "player2"]:
+		if not ward_vision_active.has(player):
+			continue
+		var active = ward_vision_active[player]
+		for cell in active.keys():
+			if int(active.get(cell, 0)) <= turn_number:
+				active.erase(cell)
+
+func _clear_ward_vision(tile: Vector2i) -> void:
+	for player in ["player1", "player2"]:
+		if not ward_vision_active.has(player):
+			continue
+		var active = ward_vision_active[player]
+		if active.has(tile):
+			active.erase(tile)
+
+func get_ward_vision_tiles(player_id: String) -> Array:
+	var tiles := []
+	if player_id == "":
+		return tiles
+	var active = ward_vision_active.get(player_id, {})
+	if active.is_empty():
+		return tiles
+	var seen := {}
+	for cell in active.keys():
+		var state = _structure_state(cell)
+		if state.is_empty() or str(state.get("type", "")) != STRUCT_WARD:
+			active.erase(cell)
+			continue
+		if str(state.get("status", "")) != STRUCT_STATUS_INTACT:
+			active.erase(cell)
+			continue
+		var in_range = $GameBoardNode.get_reachable_tiles(cell, WARD_VISION_RANGE, "visibility_over_trees")
+		for tile in in_range["tiles"]:
+			if seen.has(tile):
+				continue
+			seen[tile] = true
+			tiles.append(tile)
+	return tiles
 
 func _adjacent_mines(cell: Vector2i) -> Array:
 	var all_mines: Array = []
@@ -380,6 +457,22 @@ func _rebuild_mana_pool_assignments() -> void:
 			mana_pool_mines[cell] = mine
 			state["mana_mine"] = mine
 			buildable_structures[cell] = state
+
+func _rebuild_ward_ids() -> void:
+	var next_id = _next_ward_id
+	for cell in buildable_structures.keys():
+		var state = buildable_structures[cell]
+		if str(state.get("type", "")) != STRUCT_WARD:
+			continue
+		var ward_id = int(state.get("ward_id", 0))
+		if ward_id == 0:
+			ward_id = next_id
+			next_id -= 1
+			state["ward_id"] = ward_id
+			buildable_structures[cell] = state
+		if ward_id <= next_id:
+			next_id = ward_id - 1
+	_next_ward_id = next_id
 
 func _recalculate_mana_caps() -> void:
 	for player in ["player1", "player2"]:
@@ -473,6 +566,8 @@ func _structure_build_turns(struct_type: String, cell: Vector2i) -> int:
 		turns = BUILD_TURNS_TOWER
 	if struct_type == STRUCT_MANA_POOL:
 		turns = BUILD_TURNS_MANA_POOL
+	if struct_type == STRUCT_WARD:
+		turns = BUILD_TURNS_SHORT
 	if struct_type in [STRUCT_ROAD, STRUCT_RAIL] and _terrain_type(cell) == "river":
 		turns += 1
 	return turns
@@ -490,6 +585,8 @@ func _structure_turn_cost(struct_type: String) -> int:
 		return TOWER_COST_PER_TURN
 	if struct_type == STRUCT_MANA_POOL:
 		return MANA_POOL_COST_PER_TURN
+	if struct_type == STRUCT_WARD:
+		return WARD_COST_PER_TURN
 	return 0
 
 func _unit_on_friendly_tower(unit) -> bool:
@@ -595,17 +692,23 @@ func get_effective_ranged_range(unit) -> int:
 		range += TOWER_RANGE_BONUS
 	return range
 
-func _structure_is_visible_to_viewer(state: Dictionary, viewer_id: String) -> bool:
+func _structure_is_visible_to_viewer(state: Dictionary, viewer_id: String, cell: Vector2i) -> bool:
 	if state.is_empty():
 		return false
 	var stype = str(state.get("type", ""))
 	var status = str(state.get("status", ""))
 	if stype == STRUCT_TRAP and status == STRUCT_STATUS_INTACT:
 		return str(state.get("owner", "")) == viewer_id
+	if stype == STRUCT_WARD:
+		if status == STRUCT_STATUS_DISABLED:
+			return true
+		if str(state.get("owner", "")) == viewer_id:
+			return true
+		return _viewer_has_wizard_sight(viewer_id, cell)
 	return true
 
-func _structure_is_visible_to_local(state: Dictionary) -> bool:
-	return _structure_is_visible_to_viewer(state, local_player_id)
+func _structure_is_visible_to_local(state: Dictionary, cell: Vector2i) -> bool:
+	return _structure_is_visible_to_viewer(state, local_player_id, cell)
 
 func _structure_marker_color(state: Dictionary) -> Color:
 	var stype = str(state.get("type", ""))
@@ -620,6 +723,8 @@ func _structure_marker_color(state: Dictionary) -> Color:
 			color = Color(0.35, 0.35, 0.35, 0.8)
 		STRUCT_TRAP:
 			color = Color(0.7, 0.2, 0.7, 0.8)
+		STRUCT_WARD:
+			color = Color(0.4, 0.35, 0.85, 0.8)
 		STRUCT_MANA_POOL:
 			color = Color(0.2, 0.75, 0.85, 0.8)
 		STRUCT_SPAWN_TOWER:
@@ -642,6 +747,8 @@ func _structure_sprite_for_state(state: Dictionary) -> Texture2D:
 			return rail_sprite
 		STRUCT_TRAP:
 			return trap_sprite
+		STRUCT_WARD:
+			return ward_sprite
 		STRUCT_MANA_POOL:
 			return mana_pool_sprite
 		STRUCT_SPAWN_TOWER:
@@ -693,7 +800,7 @@ func get_build_hover_text(cell: Vector2i) -> String:
 		return ""
 	if str(state.get("status", "")) != STRUCT_STATUS_BUILDING:
 		return ""
-	if not _structure_is_visible_to_local(state):
+	if not _structure_is_visible_to_local(state, cell):
 		return ""
 	var fog = $GameBoardNode/FogOfWar
 	if fog != null and fog.visiblity.has(local_player_id):
@@ -788,8 +895,12 @@ func update_structure_memory_for(player_id: String, vis: Dictionary) -> void:
 			else:
 				memory.erase(cell)
 			continue
-		if _structure_is_visible_to_viewer(state, player_id):
-			memory[cell] = state.duplicate(true)
+		if _structure_is_visible_to_viewer(state, player_id, cell):
+			var stype = str(state.get("type", ""))
+			if stype == STRUCT_WARD and str(state.get("owner", "")) != player_id:
+				memory.erase(cell)
+			else:
+				memory[cell] = state.duplicate(true)
 		else:
 			memory.erase(cell)
 
@@ -843,7 +954,7 @@ func refresh_structure_markers() -> void:
 			if vis_state == 0:
 				continue
 		if vis_state == 2:
-			if _structure_is_visible_to_local(state):
+			if _structure_is_visible_to_local(state, cell):
 				draw_states[cell] = state
 		else:
 			if memory.has(cell):
@@ -1293,6 +1404,8 @@ func _load_map_by_index(map_index: int) -> void:
 		for tile in camps.get("dragon", []):
 			hex_map.set_player_tile(tile, "dragon")
 	buildable_structures.clear()
+	ward_vision_active = { "player1": {}, "player2": {} }
+	_next_ward_id = -1
 	mana_pool_mines.clear()
 	spawn_tower_positions = { "player1": [], "player2": [] }
 	income_tower_positions = {
@@ -1447,6 +1560,8 @@ func _collect_state() -> Dictionary:
 		"structure_positions": structure_positions,
 		"buildable_structures": buildable_structures,
 		"mana_pool_mines": mana_pool_mines,
+		"ward_vision_active": ward_vision_active,
+		"next_ward_id": _next_ward_id,
 		"structure_memory": structure_memory,
 		"neutral_tile_memory": neutral_tile_memory,
 		"spawn_tower_positions": spawn_tower_positions,
@@ -1714,6 +1829,12 @@ func apply_state(state: Dictionary, force_host: bool = false) -> void:
 		mana_pool_mines = state["mana_pool_mines"]
 	else:
 		_rebuild_mana_pool_assignments()
+	if state.has("ward_vision_active"):
+		ward_vision_active = state["ward_vision_active"]
+	else:
+		ward_vision_active = { "player1": {}, "player2": {} }
+	_next_ward_id = int(state.get("next_ward_id", _next_ward_id))
+	_rebuild_ward_ids()
 	if state.has("structure_memory"):
 		structure_memory = state["structure_memory"]
 	if state.has("neutral_tile_memory"):
@@ -2090,6 +2211,7 @@ func _do_upkeep() -> void:
 	_apply_auto_heal_orders(all_units)
 	_apply_auto_defend_orders(all_units)
 	_apply_auto_build_orders(all_units)
+	_apply_auto_ward_orders()
 	_apply_build_queue_orders(all_units)
 	_apply_move_queue_orders(all_units)
 	_tick_neutral_respawns()
@@ -2204,6 +2326,37 @@ func _apply_auto_build_orders(all_units: Dictionary) -> void:
 			orders[unit.net_id] = order
 			NetworkManager.player_orders[player][unit.net_id] = order
 			_apply_order_flags(unit, order)
+		player_orders[player] = orders
+
+func _apply_auto_ward_orders() -> void:
+	for player in ["player1", "player2"]:
+		var orders = player_orders.get(player, {})
+		if not NetworkManager.player_orders.has(player):
+			NetworkManager.player_orders[player] = orders
+		for cell in buildable_structures.keys():
+			var state = buildable_structures[cell]
+			if state.is_empty() or str(state.get("type", "")) != STRUCT_WARD:
+				continue
+			if str(state.get("owner", "")) != player:
+				continue
+			if not bool(state.get("auto_ward", false)):
+				continue
+			if str(state.get("status", "")) != STRUCT_STATUS_INTACT:
+				continue
+			if player_mana.get(player, 0) < WARD_VISION_MANA_COST:
+				state["auto_ward"] = false
+				continue
+			var ward_id = _ensure_ward_id(state, cell)
+			if orders.has(ward_id):
+				continue
+			var order = {
+				"unit_net_id": ward_id,
+				"type": "ward_vision",
+				"ward_tile": cell,
+				"auto_ward": true
+			}
+			orders[ward_id] = order
+			NetworkManager.player_orders[player][ward_id] = order
 		player_orders[player] = orders
 
 func _clear_build_queue(unit) -> void:
@@ -2654,7 +2807,50 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 	if current_phase != Phase.ORDERS:
 		result["reason"] = "wrong_phase"
 		return result
-	if not order.has("type") or not order.has("unit_net_id"):
+	if not order.has("type"):
+		result["reason"] = "invalid_order"
+		return result
+	var order_type = str(order.get("type", ""))
+	if order_type == "ward_vision" or order_type == "ward_vision_always":
+		var ward_raw = order.get("ward_tile", Vector2i(-9999, -9999))
+		var ward_tile: Vector2i
+		if typeof(ward_raw) == TYPE_VECTOR2I:
+			ward_tile = ward_raw
+		elif typeof(ward_raw) == TYPE_VECTOR2:
+			ward_tile = Vector2i(int(round(ward_raw.x)), int(round(ward_raw.y)))
+		else:
+			result["reason"] = "invalid_target"
+			return result
+		var ward_state = _structure_state(ward_tile)
+		if ward_state.is_empty() or str(ward_state.get("type", "")) != STRUCT_WARD:
+			result["reason"] = "invalid_structure"
+			return result
+		if str(ward_state.get("owner", "")) != player_id:
+			result["reason"] = "not_owner"
+			return result
+		if str(ward_state.get("status", "")) != STRUCT_STATUS_INTACT:
+			result["reason"] = "invalid_structure"
+			return result
+		var ward_id = _ensure_ward_id(ward_state, ward_tile)
+		if player_mana.get(player_id, 0) < WARD_VISION_MANA_COST:
+			result["reason"] = "not_enough_mana"
+			return result
+		if order_type == "ward_vision_always":
+			ward_state["auto_ward"] = true
+		var sanitized := {
+			"unit_net_id": ward_id,
+			"type": "ward_vision",
+			"ward_tile": ward_tile
+		}
+		if order_type == "ward_vision_always":
+			sanitized["auto_ward"] = true
+		player_orders[player_id][ward_id] = sanitized
+		NetworkManager.player_orders[player_id][ward_id] = sanitized
+		result["ok"] = true
+		result["order"] = sanitized
+		result["unit_net_id"] = ward_id
+		return result
+	if not order.has("unit_net_id"):
 		result["reason"] = "invalid_order"
 		return result
 	var unit_net_id = int(order.get("unit_net_id", -1))
@@ -2669,7 +2865,6 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 	if unit.player_id != player_id:
 		result["reason"] = "not_owner"
 		return result
-	var order_type = str(order.get("type", ""))
 	if unit.is_base or unit.is_tower:
 		if order_type != "spell":
 			result["reason"] = "invalid_unit"
@@ -2998,7 +3193,7 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 			if struct_type == "":
 				result["reason"] = "invalid_structure"
 				return result
-			if struct_type not in [STRUCT_FORTIFICATION, STRUCT_ROAD, STRUCT_RAIL, STRUCT_TRAP, STRUCT_MANA_POOL, STRUCT_SPAWN_TOWER]:
+			if struct_type not in [STRUCT_FORTIFICATION, STRUCT_ROAD, STRUCT_RAIL, STRUCT_TRAP, STRUCT_WARD, STRUCT_MANA_POOL, STRUCT_SPAWN_TOWER]:
 				result["reason"] = "invalid_structure"
 				return result
 			var state = _structure_state(target_tile)
@@ -3027,6 +3222,13 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 					var terrain = _terrain_type(target_tile)
 					if struct_type == STRUCT_TRAP:
 						if terrain in ["mountain", "lake"] or $GameBoardNode._terrain_is_impassable(target_tile):
+							result["reason"] = "invalid_tile"
+							return result
+					elif struct_type == STRUCT_WARD:
+						if terrain in ["mountain", "river"]:
+							result["reason"] = "invalid_tile"
+							return result
+						if $GameBoardNode._terrain_is_impassable(target_tile) and terrain != "lake":
 							result["reason"] = "invalid_tile"
 							return result
 					elif not _is_open_terrain(target_tile) or $GameBoardNode._terrain_is_impassable(target_tile):
@@ -3467,11 +3669,18 @@ func _render_damage_log_for_local() -> void:
 
 func _process_spawns():
 	var spawn_orders = []
+	var ward_orders := []
 	var orders_source = committed_orders
 	for player_id in orders_source.keys():
 		for order in orders_source[player_id].values():
 			if order["type"] == "spawn":
 				spawn_orders.append(order)
+			elif str(order.get("type", "")) == "ward_vision":
+				ward_orders.append({
+					"player": player_id,
+					"unit_net_id": int(order.get("unit_net_id", -1)),
+					"order": order
+				})
 	spawn_orders.sort_custom(func(order1, order2): order1["unit_net_id"] < order2["unit_net_id"])
 	for order in spawn_orders:
 		if unit_manager.get_unit_by_net_id(order["unit_net_id"]) != null:
@@ -3482,6 +3691,40 @@ func _process_spawns():
 		for order in orders_source[player_id].keys():
 			if orders_source[player_id][order]["type"] == "spawn":
 				orders_source[player_id].erase(order)
+	for entry in ward_orders:
+		var player_id = entry["player"]
+		var unit_net_id = int(entry.get("unit_net_id", -1))
+		var order = entry["order"]
+		var ward_tile = order.get("ward_tile", Vector2i(-9999, -9999))
+		if typeof(ward_tile) != TYPE_VECTOR2I:
+			orders_source[player_id].erase(unit_net_id)
+			_remove_player_order(player_id, unit_net_id)
+			continue
+		var ward_state = _structure_state(ward_tile)
+		if ward_state.is_empty() or str(ward_state.get("type", "")) != STRUCT_WARD:
+			orders_source[player_id].erase(unit_net_id)
+			_remove_player_order(player_id, unit_net_id)
+			continue
+		if str(ward_state.get("owner", "")) != player_id:
+			orders_source[player_id].erase(unit_net_id)
+			_remove_player_order(player_id, unit_net_id)
+			continue
+		if str(ward_state.get("status", "")) != STRUCT_STATUS_INTACT:
+			orders_source[player_id].erase(unit_net_id)
+			_remove_player_order(player_id, unit_net_id)
+			continue
+		if player_mana.get(player_id, 0) < WARD_VISION_MANA_COST:
+			if bool(order.get("auto_ward", false)):
+				ward_state["auto_ward"] = false
+			orders_source[player_id].erase(unit_net_id)
+			_remove_player_order(player_id, unit_net_id)
+			continue
+		player_mana[player_id] -= WARD_VISION_MANA_COST
+		if not ward_vision_active.has(player_id):
+			ward_vision_active[player_id] = {}
+		ward_vision_active[player_id][ward_tile] = turn_number + 1
+		orders_source[player_id].erase(unit_net_id)
+		_remove_player_order(player_id, unit_net_id)
 	
 	for player in ["player1", "player2"]:
 		var unit_ids = orders_source[player].keys()
@@ -3553,6 +3796,7 @@ func _process_spells() -> void:
 			target.spell_buff_ranged = SPELL_BUFF_AMOUNT
 			target.spell_buff_turns = SPELL_BUFF_TURNS
 		_remove_player_order(player_id, entry["unit_net_id"])
+	$GameBoardNode/FogOfWar._update_fog()
 
 func _process_attacks():
 	var ranged_attacks: Dictionary = {} # key: target.net_id, value: [attacker.net_id]
@@ -3737,6 +3981,8 @@ func _apply_sabotage_at(tile: Vector2i) -> bool:
 	var stype = str(state.get("type", ""))
 	if status == STRUCT_STATUS_BUILDING:
 		buildable_structures.erase(tile)
+		if stype == STRUCT_WARD:
+			_clear_ward_vision(tile)
 		if stype == STRUCT_MANA_POOL:
 			_clear_mana_pool_assignment(tile)
 			_recalculate_mana_caps()
@@ -3744,11 +3990,15 @@ func _apply_sabotage_at(tile: Vector2i) -> bool:
 	if status == STRUCT_STATUS_INTACT:
 		state["status"] = STRUCT_STATUS_DISABLED
 		buildable_structures[tile] = state
+		if stype == STRUCT_WARD:
+			_clear_ward_vision(tile)
 		if stype == STRUCT_MANA_POOL:
 			_recalculate_mana_caps()
 		return false
 	if status == STRUCT_STATUS_DISABLED:
 		buildable_structures.erase(tile)
+		if stype == STRUCT_WARD:
+			_clear_ward_vision(tile)
 		if stype == STRUCT_MANA_POOL:
 			_clear_mana_pool_assignment(tile)
 			_recalculate_mana_caps()
@@ -3852,6 +4102,8 @@ func _apply_build_at(player_id: String, unit, order: Dictionary) -> void:
 			state["mana_mine"] = mine_choice
 			mana_pool_mines[tile] = mine_choice
 			assigned_pool = true
+		if struct_type == STRUCT_WARD:
+			_ensure_ward_id(state, tile)
 	elif str(state.get("type", "")) == STRUCT_ROAD and str(state.get("status", "")) == STRUCT_STATUS_INTACT and struct_type == STRUCT_RAIL:
 		var rail_turns = _structure_build_turns(STRUCT_RAIL, tile)
 		state = {
@@ -3871,6 +4123,8 @@ func _apply_build_at(player_id: String, unit, order: Dictionary) -> void:
 			var existing_mine = state.get("mana_mine", Vector2i(-9999, -9999))
 			if typeof(existing_mine) == TYPE_VECTOR2I and existing_mine != Vector2i(-9999, -9999):
 				mana_pool_mines[tile] = existing_mine
+		if struct_type == STRUCT_WARD:
+			_ensure_ward_id(state, tile)
 	var turn_cost = int(state.get("turn_cost", _structure_turn_cost(struct_type)))
 	if turn_cost > 0:
 		if player_gold[player_id] < turn_cost:
@@ -4734,6 +4988,7 @@ func _process_move():
 func _do_execution() -> void:
 	current_phase = Phase.EXECUTION
 	print("Executing orders...")
+	_prune_ward_visions()
 	for unit in $GameBoardNode.get_all_units_flat():
 		if unit != null:
 			unit.is_looking_out = false

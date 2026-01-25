@@ -140,6 +140,10 @@ func _update_fog():
 					in_sight = $"..".get_reachable_tiles(unit.grid_pos, unit.sight_range, "visibility")
 			for cell in in_sight["tiles"]:
 				visiblity[player][cell] = 2
+		if tm_root != null and tm_root.has_method("get_ward_vision_tiles"):
+			var ward_tiles = tm_root.get_ward_vision_tiles(player)
+			for cell in ward_tiles:
+				visiblity[player][cell] = 2
 		if tm_root != null and tm_root.has_method("update_structure_memory_for"):
 			tm_root.update_structure_memory_for(player, visiblity[player])
 		if tm_root != null and tm_root.has_method("update_neutral_tile_memory_for"):
