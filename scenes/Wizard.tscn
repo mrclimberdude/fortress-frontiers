@@ -1,7 +1,7 @@
 [gd_scene load_steps=6 format=3 uid="uid://b5t2v0pg5x0n1"]
 
 [ext_resource type="PackedScene" uid="uid://c62dn8sldq572" path="res://scenes/Unit.tscn" id="1_5x8xv"]
-[ext_resource type="Texture2D" uid="uid://c70cdq1wmwyam" path="res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Objects Light/HSI_icon_150l.png" id="2_5x8xv"]
+[ext_resource type="Texture2D" uid="uid://brce5nganwin1" path="res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Objects Light/HSI_icon_151l.png" id="2_5x8xv"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_tqf8n"]
 bg_color = Color(0.988235, 0.227451, 0.152941, 0.603922)

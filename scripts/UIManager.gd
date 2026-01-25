@@ -95,6 +95,8 @@ const BuildIcon = preload("res://assets/HK-Heightend Sensory Input v2/HSI - Icon
 const RepairIcon = preload("res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Objects/HSI_icon_141.png")
 const SabotageIcon = preload("res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Objects/HSI_icon_180.png")
 const LookoutIcon = preload("res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Objects/HSI_icon_134.png")
+const FireballIcon = preload("res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Geometric/HSI_icon_108.png")
+const BuffIcon = preload("res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Objects/HSI_icon_139.png")
 const SAVE_SLOT_COUNT_UI: int = 3
 const ORDER_ICON_Z: int = 12
 
@@ -2039,6 +2041,14 @@ func _draw_attacks():
 					dmg_label.position = p1 + normal * 8.0 + dir * 6.0
 					dmg_label.z_index = 11
 					root.add_child(dmg_label)
+				elif is_fireball:
+					var fireball_icon = Sprite2D.new()
+					fireball_icon.texture = FireballIcon
+					fireball_icon.scale = Vector2(0.3, 0.3)
+					var icon_offset = distance * 0.1
+					fireball_icon.position = p2 - dir * icon_offset
+					fireball_icon.z_index = ORDER_ICON_Z
+					root.add_child(fireball_icon)
 
 func _draw_supports():
 	var support_arrows_node = hex.get_node("SupportArrows")
@@ -2094,6 +2104,19 @@ func _draw_supports():
 				arrow.rotation = (p2 - p1).angle()
 				arrow.z_index = 10
 				root.add_child(arrow)
+				var icon_offset = distance * 0.1
+				if str(order.get("spell_type", "")) == turn_mgr.SPELL_HEAL:
+					var heart = HealScene.instantiate() as Sprite2D
+					heart.position = p2 - dir * icon_offset
+					heart.z_index = ORDER_ICON_Z
+					root.add_child(heart)
+				else:
+					var buff_icon = Sprite2D.new()
+					buff_icon.texture = BuffIcon
+					buff_icon.scale = Vector2(0.3, 0.3)
+					buff_icon.position = p2 - dir * icon_offset
+					buff_icon.z_index = ORDER_ICON_Z
+					root.add_child(buff_icon)
 
 func _draw_heals():
 	var heal_node = hex.get_node("HealingSprites")

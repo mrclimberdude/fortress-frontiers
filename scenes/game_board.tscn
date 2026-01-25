@@ -27,7 +27,7 @@
 [ext_resource type="Resource" uid="uid://dby32tf7drbn5" path="res://maps/megaforest.tres" id="12_faqeg"]
 [ext_resource type="Texture2D" uid="uid://dtk36b2qk71x2" path="res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Objects/HSI_icon_180.png" id="13_54ie0"]
 [ext_resource type="Resource" uid="uid://jnancdhi2toj" path="res://maps/River Clearings.tres" id="13_840ua"]
-[ext_resource type="Texture2D" uid="uid://dunadvokfu5xl" path="res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Crystals Light/HSI_icon_062l.png" id="13_mana"]
+[ext_resource type="Texture2D" uid="uid://dacvsl30egv7k" path="res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Objects/HSI_icon_133.png" id="13_mana"]
 [ext_resource type="Resource" uid="uid://bo6ykrlgtajb5" path="res://maps/The Wheel.tres" id="14_nupcc"]
 [ext_resource type="Resource" uid="uid://cpfvqc03ry00h" path="res://maps/map_8.tres" id="15_faqeg"]
 [ext_resource type="Resource" uid="uid://4s0jemucwhrh" path="res://maps/map_9.tres" id="16_nev5x"]
