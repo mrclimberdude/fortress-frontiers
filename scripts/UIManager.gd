@@ -250,7 +250,7 @@ func _ready():
 	# setting gold labels and stats for units
 	var base_font: FontFile = load("res://fonts/JetBrainsMono-Medium.ttf")
 	var unit_scenes = [ScoutScene, MinerScene, CrystalMinerScene, BuilderScene, SoldierScene, ArcherScene, WizardScene, PhalanxScene, CavalryScene]
-	var unit_names = ["Scout", "Miner", "Crystal\nMiner", "Builder", "Soldier", "Archer", "Wizard", "Phalanx", "Cavalry"]
+	var unit_names = ["Scout", "Miner", "Crystal Miner", "Builder", "Soldier", "Archer", "Wizard", "Phalanx", "Cavalry"]
 	var unit_specials = [
 		"Sight 3; lookout; forest cost 1",
 		"Mine bonus +15 on mine",
