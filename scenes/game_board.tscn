@@ -1,4 +1,4 @@
-[gd_scene load_steps=39 format=4 uid="uid://dnx0cxl4a46lg"]
+[gd_scene load_steps=43 format=4 uid="uid://dnx0cxl4a46lg"]
 
 [ext_resource type="Script" uid="uid://daaph63aiv3vd" path="res://scripts/TurnManager.gd" id="1_xh13x"]
 [ext_resource type="Texture2D" uid="uid://ciitwnd7hxyra" path="res://assets/spritesheet.png" id="2_17g6i"]
@@ -9,10 +9,12 @@
 [ext_resource type="Script" uid="uid://dbjcmu0pwdism" path="res://scripts/game_board_node.gd" id="4_6lofv"]
 [ext_resource type="Script" uid="uid://cf8rb1kdlfa5q" path="res://scripts/UnitManager.gd" id="4_30eli"]
 [ext_resource type="PackedScene" uid="uid://cjq2ma40uud72" path="res://scenes/Miner.tscn" id="5_c1to4"]
+[ext_resource type="PackedScene" uid="uid://b2kav6l7p30h3" path="res://scenes/CrystalMiner.tscn" id="5_xc1to"]
 [ext_resource type="Script" uid="uid://cpvudcuvy1hxc" path="res://scripts/UIManager.gd" id="6_qxawf"]
 [ext_resource type="PackedScene" uid="uid://y3gcjhi3ho0o" path="res://scenes/Tank.tscn" id="6_w5uqb"]
 [ext_resource type="PackedScene" uid="uid://bj1f1demforgr" path="res://scenes/Cavalry.tscn" id="7_hl2y5"]
 [ext_resource type="Script" uid="uid://srlpr2fln13a" path="res://scripts/camera.gd" id="7_rs5it"]
+[ext_resource type="PackedScene" uid="uid://b5t2v0pg5x0n1" path="res://scenes/Wizard.tscn" id="7_wizrd"]
 [ext_resource type="Resource" uid="uid://dc55lgc5pbse6" path="res://maps/map_1.tres" id="8_54ie0"]
 [ext_resource type="Resource" uid="uid://x6d0njhmctsc" path="res://maps/map_2.tres" id="9_hrnlr"]
 [ext_resource type="Resource" uid="uid://ci4tioylp3lfn" path="res://maps/map_3.tres" id="10_840ua"]
@@ -25,7 +27,9 @@
 [ext_resource type="Resource" uid="uid://dby32tf7drbn5" path="res://maps/megaforest.tres" id="12_faqeg"]
 [ext_resource type="Texture2D" uid="uid://dtk36b2qk71x2" path="res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Objects/HSI_icon_180.png" id="13_54ie0"]
 [ext_resource type="Resource" uid="uid://jnancdhi2toj" path="res://maps/River Clearings.tres" id="13_840ua"]
+[ext_resource type="Texture2D" uid="uid://dacvsl30egv7k" path="res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Objects/HSI_icon_133.png" id="13_mana"]
 [ext_resource type="Resource" uid="uid://bo6ykrlgtajb5" path="res://maps/The Wheel.tres" id="14_nupcc"]
+[ext_resource type="Texture2D" uid="uid://d2a8xrrqtlpaw" path="res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Objects/HSI_icon_177.png" id="14_ward"]
 [ext_resource type="Resource" uid="uid://cpfvqc03ry00h" path="res://maps/map_8.tres" id="15_faqeg"]
 [ext_resource type="Resource" uid="uid://4s0jemucwhrh" path="res://maps/map_9.tres" id="16_nev5x"]
 [ext_resource type="Resource" uid="uid://dcns625ngygxv" path="res://maps/oops_all_dragons.tres" id="17_y3qg2"]
@@ -83,13 +87,17 @@ archer_scene = ExtResource("2_qkkkq")
 soldier_scene = ExtResource("2_i37i2")
 scout_scene = ExtResource("4_04ve2")
 miner_scene = ExtResource("5_c1to4")
+crystal_miner_scene = ExtResource("5_xc1to")
 phalanx_scene = ExtResource("6_w5uqb")
 cavalry_scene = ExtResource("7_hl2y5")
+wizard_scene = ExtResource("7_wizrd")
 map_data = Array[Resource]([ExtResource("8_54ie0"), ExtResource("9_hrnlr"), ExtResource("10_840ua"), ExtResource("11_nupcc"), ExtResource("12_faqeg"), ExtResource("13_840ua"), ExtResource("14_nupcc"), ExtResource("15_faqeg"), ExtResource("16_nev5x"), ExtResource("17_y3qg2"), ExtResource("18_o083x"), ExtResource("19_t7svm"), ExtResource("20_wvnob"), ExtResource("21_wvnob"), ExtResource("22_0eiui"), ExtResource("23_5e6fo"), ExtResource("24_proc")])
 fort_sprite = ExtResource("10_o2enx")
 road_sprite = ExtResource("11_eerdt")
 rail_sprite = ExtResource("12_2sbk6")
 trap_sprite = ExtResource("13_54ie0")
+ward_sprite = ExtResource("14_ward")
+mana_pool_sprite = ExtResource("13_mana")
 structure_sprite_scale = 1.0
 
 [node name="GameBoardNode" type="Node2D" parent="."]
@@ -362,18 +370,21 @@ text = "Cancel Host/Join"
 [node name="Panel" type="Panel" parent="UI"]
 visible = false
 custom_minimum_size = Vector2(200, 200)
-offset_right = 206.0
-offset_bottom = 297.0
+offset_right = 230.0
+offset_bottom = 393.0
 
 [node name="VBoxContainer" type="VBoxContainer" parent="UI/Panel"]
 layout_mode = 0
-offset_right = 40.0
-offset_bottom = 40.0
+offset_right = 228.0
+offset_bottom = 462.0
 
 [node name="IncomeLabel" type="Label" parent="UI/Panel/VBoxContainer"]
 layout_mode = 2
 
 [node name="GoldLabel" type="Label" parent="UI/Panel/VBoxContainer"]
+layout_mode = 2
+
+[node name="ManaLabel" type="Label" parent="UI/Panel/VBoxContainer"]
 layout_mode = 2
 
 [node name="ScoutButton" type="Button" parent="UI/Panel/VBoxContainer"]
@@ -383,6 +394,10 @@ text = "Buy Scout"
 [node name="MinerButton" type="Button" parent="UI/Panel/VBoxContainer"]
 layout_mode = 2
 text = "Buy Miner"
+
+[node name="CrystalMinerButton" type="Button" parent="UI/Panel/VBoxContainer"]
+layout_mode = 2
+text = "Buy Crystal Miner"
 
 [node name="BuilderButton" type="Button" parent="UI/Panel/VBoxContainer"]
 layout_mode = 2
@@ -397,6 +412,11 @@ text = "Buy Soldier (3g)"
 custom_minimum_size = Vector2(200, 30)
 layout_mode = 2
 text = "Buy Archer (5g)"
+
+[node name="WizardButton" type="Button" parent="UI/Panel/VBoxContainer"]
+custom_minimum_size = Vector2(200, 30)
+layout_mode = 2
+text = "Buy Wizard"
 
 [node name="PhalanxButton" type="Button" parent="UI/Panel/VBoxContainer"]
 custom_minimum_size = Vector2(200, 30)
@@ -443,6 +463,14 @@ offset_right = 520.0
 offset_bottom = 32.0
 text = "Building Stats"
 
+[node name="SpellStatsCheckButton" type="CheckButton" parent="UI"]
+visible = false
+offset_left = 526.0
+offset_top = 1.0
+offset_right = 684.0
+offset_bottom = 32.0
+text = "Spell Stats"
+
 [node name="MenuButton" type="MenuButton" parent="UI"]
 anchors_preset = 1
 anchor_left = 1.0
@@ -480,10 +508,10 @@ text = "X"
 
 [node name="BuildingStatsPanel" type="Panel" parent="UI"]
 visible = false
-offset_left = 354.0
-offset_top = 36.0
-offset_right = 1041.0
-offset_bottom = 299.0
+offset_left = 213.0
+offset_top = 27.0
+offset_right = 900.0
+offset_bottom = 290.0
 
 [node name="VBoxContainer" type="VBoxContainer" parent="UI/BuildingStatsPanel"]
 layout_mode = 0
@@ -493,6 +521,31 @@ offset_right = 683.0
 offset_bottom = 250.0
 
 [node name="CloseButton" type="Button" parent="UI/BuildingStatsPanel"]
+z_index = 1
+layout_mode = 0
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -26.0
+offset_top = 4.0
+offset_right = -4.0
+offset_bottom = 24.0
+text = "X"
+
+[node name="SpellStatsPanel" type="Panel" parent="UI"]
+visible = false
+offset_left = 213.0
+offset_top = 27.0
+offset_right = 900.0
+offset_bottom = 290.0
+
+[node name="VBoxContainer" type="VBoxContainer" parent="UI/SpellStatsPanel"]
+layout_mode = 0
+offset_left = -2.0
+offset_top = 1.0
+offset_right = 683.0
+offset_bottom = 250.0
+
+[node name="CloseButton" type="Button" parent="UI/SpellStatsPanel"]
 z_index = 1
 layout_mode = 0
 anchor_left = 1.0

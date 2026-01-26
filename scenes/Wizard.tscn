@@ -1,0 +1,42 @@
+[gd_scene load_steps=6 format=3 uid="uid://b5t2v0pg5x0n1"]
+
+[ext_resource type="PackedScene" uid="uid://c62dn8sldq572" path="res://scenes/Unit.tscn" id="1_5x8xv"]
+[ext_resource type="Texture2D" uid="uid://brce5nganwin1" path="res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Objects Light/HSI_icon_151l.png" id="2_5x8xv"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_tqf8n"]
+bg_color = Color(0.988235, 0.227451, 0.152941, 0.603922)
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_qtvpb"]
+bg_color = Color(0, 0.843137, 0.0941176, 0.92549)
+
+[sub_resource type="LabelSettings" id="LabelSettings_5x8xv"]
+font_size = 30
+font_color = Color(0.989583, 0.989583, 0, 1)
+
+[node name="Wizard" instance=ExtResource("1_5x8xv")]
+cost = 150
+melee_strength = 4
+is_wizard = true
+special_skills = "Spellcaster"
+
+[node name="Sprite2D" parent="." index="0"]
+texture = ExtResource("2_5x8xv")
+
+[node name="HealthBar" type="ProgressBar" parent="." index="1"]
+offset_left = 34.0
+offset_top = -53.0
+offset_right = 73.0
+offset_bottom = 42.0
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+theme_override_styles/background = SubResource("StyleBoxFlat_tqf8n")
+theme_override_styles/fill = SubResource("StyleBoxFlat_qtvpb")
+step = 1.0
+fill_mode = 3
+
+[node name="NetIDLabel" type="Label" parent="." index="2"]
+offset_left = -20.0
+offset_top = -67.0
+offset_right = 20.0
+offset_bottom = -44.0
+label_settings = SubResource("LabelSettings_5x8xv")
+horizontal_alignment = 1

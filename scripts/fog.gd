@@ -13,6 +13,7 @@ const DRAGON_GHOST_Z: int = 99
 const DRAGON_REWARD_GOLD: String = "gold"
 const DRAGON_REWARD_MELEE: String = "melee_bonus"
 const DRAGON_REWARD_RANGED: String = "ranged_bonus"
+const DRAGON_REWARD_MANA: String = "mana_income"
 const DRAGON_GHOST_ALPHA: float = 0.75
 
 func _dragon_reward_color(reward: String) -> Color:
@@ -23,6 +24,8 @@ func _dragon_reward_color(reward: String) -> Color:
 			return Color(0.9, 0.35, 0.25, DRAGON_GHOST_ALPHA)
 		DRAGON_REWARD_RANGED:
 			return Color(0.35, 0.6, 1, DRAGON_GHOST_ALPHA)
+		DRAGON_REWARD_MANA:
+			return Color(0.35, 0.85, 0.35, DRAGON_GHOST_ALPHA)
 		_:
 			return Color(1, 1, 1, DRAGON_GHOST_ALPHA)
 
@@ -139,6 +142,10 @@ func _update_fog():
 				else:
 					in_sight = $"..".get_reachable_tiles(unit.grid_pos, unit.sight_range, "visibility")
 			for cell in in_sight["tiles"]:
+				visiblity[player][cell] = 2
+		if tm_root != null and tm_root.has_method("get_ward_vision_tiles"):
+			var ward_tiles = tm_root.get_ward_vision_tiles(player)
+			for cell in ward_tiles:
 				visiblity[player][cell] = 2
 		if tm_root != null and tm_root.has_method("update_structure_memory_for"):
 			tm_root.update_structure_memory_for(player, visiblity[player])
