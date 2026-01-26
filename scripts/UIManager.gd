@@ -99,6 +99,7 @@ const SabotageIcon = preload("res://assets/HK-Heightend Sensory Input v2/HSI - I
 const LookoutIcon = preload("res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Objects/HSI_icon_134.png")
 const FireballIcon = preload("res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Geometric/HSI_icon_108.png")
 const BuffIcon = preload("res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Objects/HSI_icon_139.png")
+const LightningIcon = preload("res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Objects/HSI_icon_174.png")
 const SAVE_SLOT_COUNT_UI: int = 3
 const ORDER_ICON_Z: int = 12
 
@@ -138,7 +139,8 @@ const ACTION_WARD_VISION_ALWAYS_ID: int = 16
 const SPELL_OPTIONS = [
 	{"id": 0, "label": "Heal", "type": "heal"},
 	{"id": 1, "label": "Fireball", "type": "fireball"},
-	{"id": 2, "label": "Combat Buff", "type": "buff"}
+	{"id": 2, "label": "Combat Buff", "type": "buff"},
+	{"id": 3, "label": "Lightning", "type": "lightning"}
 ]
 
 const ArcherScene = preload("res://scenes/Archer.tscn")
@@ -351,8 +353,9 @@ func _ready():
 	_add_build_stats_row(spell_container, ["Spell", "Cost", "Phase", "Effect"], spell_col_widths, base_font, true, true)
 	var spell_rows = [
 		{"name": "Heal", "cost": turn_mgr.get_spell_cost("heal"), "phase": "Spells", "effect": "Heal 25; range 3; requires vision"},
-		{"name": "Fireball", "cost": turn_mgr.get_spell_cost("fireball"), "phase": "Attacks", "effect": "30 dmg units; 10 dmg tower/base; range 3; requires vision"},
-		{"name": "Combat Buff", "cost": turn_mgr.get_spell_cost("buff"), "phase": "Spells", "effect": "+5 melee/ranged for 1 turn; range 3; requires vision"}
+		{"name": "Fireball", "cost": turn_mgr.get_spell_cost("fireball"), "phase": "Attacks", "effect": "50 dmg units; 10 dmg tower/base; range 3; requires vision"},
+		{"name": "Combat Buff", "cost": turn_mgr.get_spell_cost("buff"), "phase": "Spells", "effect": "+5 melee/ranged for 1 turn; range 3; requires vision"},
+		{"name": "Lightning", "cost": turn_mgr.get_spell_cost("lightning"), "phase": "Attacks", "effect": "32 dmg + chain halving to adjacent enemies; range 3; requires vision"}
 	]
 	for i in range(spell_rows.size()):
 		var row = spell_rows[i]
@@ -1020,13 +1023,16 @@ func _get_spell_target_tiles(caster: Node, spell_type: String) -> Array:
 	var tiles := []
 	if caster == null or not is_instance_valid(caster):
 		return tiles
+	var spell_range = int(turn_mgr.SPELL_RANGE)
+	if turn_mgr.has_method("get_spell_range"):
+		spell_range = int(turn_mgr.get_spell_range(caster))
 	var seen := {}
 	var all_units = game_board.get_all_units_flat()
 	for unit in all_units:
 		if unit == null:
 			continue
 		var is_enemy = unit.player_id != current_player
-		if spell_type == "fireball":
+		if spell_type == "fireball" or spell_type == "lightning":
 			if not is_enemy:
 				continue
 		else:
@@ -1036,7 +1042,7 @@ func _get_spell_target_tiles(caster: Node, spell_type: String) -> Array:
 			continue
 		if not turn_mgr._player_can_see_tile(current_player, unit.grid_pos):
 			continue
-		if turn_mgr._hex_distance(caster.grid_pos, unit.grid_pos) > turn_mgr.SPELL_RANGE:
+		if turn_mgr._hex_distance(caster.grid_pos, unit.grid_pos) > spell_range:
 			continue
 		if seen.has(unit.grid_pos):
 			continue
@@ -1049,6 +1055,11 @@ func _spell_target_for_tile(tile: Vector2i, spell_type: String) -> Node:
 		var struct = game_board.get_structure_unit_at(tile)
 		if struct != null and struct.player_id != current_player:
 			return struct
+		var unit = game_board.get_unit_at(tile)
+		if unit != null and unit.player_id != current_player and not turn_mgr.is_unit_hidden_for_viewer(unit, current_player):
+			return unit
+		return null
+	if spell_type == "lightning":
 		var unit = game_board.get_unit_at(tile)
 		if unit != null and unit.player_id != current_player and not turn_mgr.is_unit_hidden_for_viewer(unit, current_player):
 			return unit
@@ -2130,7 +2141,8 @@ func _draw_attacks():
 		for order in all_orders:
 			var is_attack = order["type"] == "ranged" or order["type"] == "melee"
 			var is_fireball = order["type"] == "spell" and str(order.get("spell_type", "")) == turn_mgr.SPELL_FIREBALL
-			if is_attack or is_fireball:
+			var is_lightning = order["type"] == "spell" and str(order.get("spell_type", "")) == turn_mgr.SPELL_LIGHTNING
+			if is_attack or is_fireball or is_lightning:
 				var root = Node2D.new()
 				attack_arrows_node.add_child(root)
 				
@@ -2170,6 +2182,14 @@ func _draw_attacks():
 					fireball_icon.position = p2 - dir * icon_offset
 					fireball_icon.z_index = ORDER_ICON_Z
 					root.add_child(fireball_icon)
+				elif is_lightning:
+					var lightning_icon = Sprite2D.new()
+					lightning_icon.texture = LightningIcon
+					lightning_icon.scale = Vector2(0.3, 0.3)
+					var icon_offset = distance * 0.1
+					lightning_icon.position = p2 - dir * icon_offset
+					lightning_icon.z_index = ORDER_ICON_Z
+					root.add_child(lightning_icon)
 
 func _draw_supports():
 	var support_arrows_node = hex.get_node("SupportArrows")

@@ -253,15 +253,18 @@ const SPELL_RANGE: int = 3
 const SPELL_COST_HEAL: int = 15
 const SPELL_COST_FIREBALL: int = 30
 const SPELL_COST_BUFF: int = 25
+const SPELL_COST_LIGHTNING: int = 40
 const SPELL_HEAL_AMOUNT: int = 25
 const SPELL_FIREBALL_DAMAGE: int = 50
 const SPELL_FIREBALL_DRAGON_DAMAGE: int = 15
 const SPELL_FIREBALL_STRUCT_DAMAGE: int = 10
 const SPELL_BUFF_AMOUNT: int = 5
 const SPELL_BUFF_TURNS: int = 1
+const SPELL_LIGHTNING_DAMAGE: int = 32
 const SPELL_HEAL: String = "heal"
 const SPELL_FIREBALL: String = "fireball"
 const SPELL_BUFF: String = "buff"
+const SPELL_LIGHTNING: String = "lightning"
 
 func get_spell_cost(spell_type: String) -> int:
 	var spell = str(spell_type).to_lower()
@@ -269,6 +272,8 @@ func get_spell_cost(spell_type: String) -> int:
 		return SPELL_COST_HEAL
 	if spell == SPELL_BUFF:
 		return SPELL_COST_BUFF
+	if spell == SPELL_LIGHTNING:
+		return SPELL_COST_LIGHTNING
 	return SPELL_COST_FIREBALL
 
 var camp_units := {}
@@ -693,6 +698,12 @@ func get_effective_ranged_range(unit) -> int:
 	var range = int(unit.ranged_range)
 	if _unit_on_friendly_tower(unit):
 		range += TOWER_RANGE_BONUS
+	return range
+
+func get_spell_range(caster) -> int:
+	var range = SPELL_RANGE
+	if caster != null and caster.is_wizard and _unit_on_friendly_tower(caster):
+		range += 1
 	return range
 
 func _structure_is_visible_to_viewer(state: Dictionary, viewer_id: String, cell: Vector2i) -> bool:
@@ -3021,7 +3032,7 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 				result["reason"] = "invalid_target"
 				return result
 			var spell_type = str(order.get("spell_type", "")).to_lower()
-			if spell_type not in [SPELL_HEAL, SPELL_FIREBALL, SPELL_BUFF]:
+			if spell_type not in [SPELL_HEAL, SPELL_FIREBALL, SPELL_BUFF, SPELL_LIGHTNING]:
 				result["reason"] = "invalid_action"
 				return result
 			var target_tile = order.get("target_tile")
@@ -3042,10 +3053,11 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 				result["reason"] = "no_vision"
 				return result
 			var struct = $GameBoardNode.get_structure_unit_at(target_tile)
-			if spell_type == SPELL_FIREBALL:
+			if spell_type == SPELL_FIREBALL or spell_type == SPELL_LIGHTNING:
 				if struct != null and struct.player_id != player_id:
-					target = struct
-					target_id = struct.net_id
+					if spell_type == SPELL_FIREBALL:
+						target = struct
+						target_id = struct.net_id
 				if target.player_id == player_id:
 					result["reason"] = "invalid_target"
 					return result
@@ -3053,7 +3065,7 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 				if target.player_id != player_id:
 					result["reason"] = "invalid_target"
 					return result
-			if _hex_distance(unit.grid_pos, target_tile) > SPELL_RANGE:
+			if _hex_distance(unit.grid_pos, target_tile) > get_spell_range(unit):
 				result["reason"] = "out_of_range"
 				return result
 			var spell_cost = get_spell_cost(spell_type)
@@ -3779,7 +3791,7 @@ func _process_spells() -> void:
 			var order = player_orders[player][unit_net_id]
 			if str(order.get("type", "")) != "spell":
 				continue
-			if str(order.get("spell_type", "")) == SPELL_FIREBALL:
+			if str(order.get("spell_type", "")) in [SPELL_FIREBALL, SPELL_LIGHTNING]:
 				continue
 			spell_orders.append({"player": player, "unit_net_id": unit_net_id, "order": order})
 	for entry in spell_orders:
@@ -3844,7 +3856,8 @@ func _process_attacks():
 					melee_attacks[order["target_unit_net_id"]].append([unit.net_id, order["priority"]])
 				player_orders[player].erase(unit.net_id)
 			elif order["type"] == "spell":
-				if str(order.get("spell_type", "")) != SPELL_FIREBALL:
+				var spell_type = str(order.get("spell_type", ""))
+				if spell_type not in [SPELL_FIREBALL, SPELL_LIGHTNING]:
 					continue
 				var caster = unit_manager.get_unit_by_net_id(unit_net_id)
 				if caster == null or caster.curr_health <= 0:
@@ -3854,23 +3867,62 @@ func _process_attacks():
 				if target == null:
 					player_orders[player].erase(unit_net_id)
 					continue
-				var target_tile = target.grid_pos
-				var struct = $GameBoardNode.get_structure_unit_at(target_tile)
-				if struct != null and struct.player_id != caster.player_id:
-					target = struct
 				if target.player_id == caster.player_id:
 					player_orders[player].erase(unit_net_id)
 					continue
-				var spell_cost = get_spell_cost(SPELL_FIREBALL)
+				var spell_cost = get_spell_cost(spell_type)
 				if player_mana.get(player, 0) < spell_cost:
 					player_orders[player].erase(unit_net_id)
 					continue
 				player_mana[player] -= spell_cost
-				var dmg = SPELL_FIREBALL_STRUCT_DAMAGE if target.is_base or target.is_tower else SPELL_FIREBALL_DAMAGE
-				if str(target.unit_type) == DRAGON_TYPE:
-					dmg = SPELL_FIREBALL_DRAGON_DAMAGE
-				spell_dmg[target.net_id] = spell_dmg.get(target.net_id, 0) + dmg
-				_accumulate_damage_by_player(ranged_sources, target.net_id, caster.player_id, dmg)
+				if spell_type == SPELL_FIREBALL:
+					var target_tile = target.grid_pos
+					var struct = $GameBoardNode.get_structure_unit_at(target_tile)
+					if struct != null and struct.player_id != caster.player_id:
+						target = struct
+					if target.player_id == caster.player_id:
+						player_orders[player].erase(unit_net_id)
+						continue
+					var dmg = SPELL_FIREBALL_STRUCT_DAMAGE if target.is_base or target.is_tower else SPELL_FIREBALL_DAMAGE
+					if str(target.unit_type) == DRAGON_TYPE:
+						dmg = SPELL_FIREBALL_DRAGON_DAMAGE
+					spell_dmg[target.net_id] = spell_dmg.get(target.net_id, 0) + dmg
+					_accumulate_damage_by_player(ranged_sources, target.net_id, caster.player_id, dmg)
+					dealt_dmg_report(caster, target, 0, dmg, false, "fireball")
+				else:
+					var chain := {}
+					var current := [target]
+					var damage = SPELL_LIGHTNING_DAMAGE
+					while current.size() > 0 and damage > 0:
+						var next := []
+						for unit in current:
+							if unit == null or not is_instance_valid(unit):
+								continue
+							if unit.player_id == caster.player_id:
+								continue
+							if chain.has(unit.net_id):
+								continue
+							chain[unit.net_id] = damage
+							for neighbor in $GameBoardNode.get_offset_neighbors(unit.grid_pos):
+								var neighbor_unit = $GameBoardNode.get_unit_at(neighbor)
+								if neighbor_unit == null or not is_instance_valid(neighbor_unit):
+									continue
+								if neighbor_unit.player_id == caster.player_id:
+									continue
+								if chain.has(neighbor_unit.net_id):
+									continue
+								if next.has(neighbor_unit):
+									continue
+								next.append(neighbor_unit)
+						damage = int(floor(float(damage) * 0.5))
+						current = next
+					for unit_id in chain.keys():
+						var dmg = int(chain[unit_id])
+						spell_dmg[unit_id] = spell_dmg.get(unit_id, 0) + dmg
+						_accumulate_damage_by_player(ranged_sources, unit_id, caster.player_id, dmg)
+						var hit_unit = unit_manager.get_unit_by_net_id(int(unit_id))
+						if hit_unit != null:
+							dealt_dmg_report(caster, hit_unit, 0, dmg, false, "lightning")
 				player_orders[player].erase(unit_net_id)
 	
 	# calculate all ranged attack damages done
