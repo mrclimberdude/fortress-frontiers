@@ -210,7 +210,7 @@ const STRUCT_TRAP: String = "trap"
 const STRUCT_WARD: String = "ward"
 const STRUCT_MANA_POOL: String = "mana_pool"
 const STRUCT_SPAWN_TOWER: String = "spawn_tower"
-const SPAWN_TOWER_ROAD_UNITS := ["scout", "builder", "miner", "crystal_miner", "soldier", "wizard"]
+const SPAWN_TOWER_ROAD_UNITS := ["scout", "builder", "miner", "crystal_miner", "soldier"]
 
 const STRUCT_STATUS_BUILDING: String = "building"
 const STRUCT_STATUS_INTACT: String = "intact"
@@ -528,6 +528,9 @@ func _tile_is_road_or_rail(tile: Vector2i) -> bool:
 func _tile_counts_as_road(tile: Vector2i, player_id: String) -> bool:
 	if _structure_counts_as_road(_structure_state(tile)):
 		return true
+	for owner in ["unclaimed", "player1", "player2"]:
+		if tile in mines.get(owner, []):
+			return true
 	if player_id == "":
 		return false
 	if base_positions.get(player_id, Vector2i(-9999, -9999)) == tile:
@@ -539,6 +542,9 @@ func _tile_counts_as_road(tile: Vector2i, player_id: String) -> bool:
 func _tile_counts_as_rail(tile: Vector2i, player_id: String) -> bool:
 	if _structure_counts_as_rail(_structure_state(tile)):
 		return true
+	for owner in ["unclaimed", "player1", "player2"]:
+		if tile in mines.get(owner, []):
+			return true
 	if player_id == "":
 		return false
 	if base_positions.get(player_id, Vector2i(-9999, -9999)) == tile:
