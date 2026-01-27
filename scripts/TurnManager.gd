@@ -521,9 +521,28 @@ func _structure_counts_as_rail(state: Dictionary) -> bool:
 		return status == STRUCT_STATUS_INTACT
 	return false
 
-func _tile_is_road_or_rail(tile: Vector2i) -> bool:
+func _tile_is_road_or_rail(tile: Vector2i, player_id: String = "") -> bool:
 	var state = _structure_state(tile)
-	return _structure_counts_as_road(state) or _structure_counts_as_rail(state)
+	if _structure_counts_as_road(state) or _structure_counts_as_rail(state):
+		return true
+	if player_id == "":
+		return false
+	if _tile_is_owned_mine(tile, player_id):
+		return true
+	if base_positions.get(player_id, Vector2i(-9999, -9999)) == tile:
+		return true
+	return tile in tower_positions.get(player_id, [])
+
+func _tile_is_mine(tile: Vector2i) -> bool:
+	for owner in ["unclaimed", "player1", "player2"]:
+		if tile in mines.get(owner, []):
+			return true
+	return false
+
+func _tile_is_owned_mine(tile: Vector2i, player_id: String) -> bool:
+	if player_id == "":
+		return false
+	return tile in mines.get(player_id, [])
 
 func _tile_counts_as_road(tile: Vector2i, player_id: String) -> bool:
 	if _structure_counts_as_road(_structure_state(tile)):
@@ -4613,16 +4632,14 @@ func _mg_tile_fifo_commit(t: Vector2i, entrants: Array, stationary_defender: Nod
 func _can_hop_over_builder(mover, blocker_tile: Vector2i, landing_tile: Vector2i) -> bool:
 	if mover == null:
 		return false
-	if not _tile_is_road_or_rail(mover.grid_pos):
+	if not _tile_is_road_or_rail(mover.grid_pos, mover.player_id):
 		return false
-	if not _tile_is_road_or_rail(blocker_tile):
+	if not _tile_is_road_or_rail(landing_tile, mover.player_id):
 		return false
-	if not _tile_is_road_or_rail(landing_tile):
+	if not _tile_is_road_or_rail(blocker_tile, mover.player_id):
 		return false
 	var blocker = $GameBoardNode.get_unit_at(blocker_tile)
 	if blocker == null:
-		return false
-	if not blocker.is_builder:
 		return false
 	if blocker.player_id != mover.player_id:
 		return false
@@ -4630,7 +4647,11 @@ func _can_hop_over_builder(mover, blocker_tile: Vector2i, landing_tile: Vector2i
 		return false
 	if $GameBoardNode.get_unit_at(landing_tile) != null:
 		return false
-	return true
+	if blocker.is_builder:
+		return true
+	if (blocker.is_miner or blocker.is_crystal_miner) and _tile_is_mine(blocker_tile):
+		return true
+	return false
 
 
 # Helper: split entrant items by specific side id
