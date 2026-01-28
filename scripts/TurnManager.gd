@@ -1738,10 +1738,27 @@ func _refresh_fog_after_load() -> void:
 func _broadcast_state(force_apply: bool = false) -> void:
 	if not _is_host():
 		return
+	_clamp_unit_healths()
 	var state = get_state_snapshot(true)
 	if force_apply:
 		state["force_apply"] = true
 	NetworkManager.broadcast_state(state)
+
+func _clamp_unit_healths() -> void:
+	var all_units = $GameBoardNode.get_all_units()
+	for player in ["player1", "player2"]:
+		for unit in all_units.get(player, []):
+			if unit == null:
+				continue
+			if unit.curr_health > unit.max_health:
+				unit.curr_health = unit.max_health
+				unit.set_health_bar()
+	for unit in all_units.get("neutral", []):
+		if unit == null:
+			continue
+		if unit.curr_health > unit.max_health:
+			unit.curr_health = unit.max_health
+			unit.set_health_bar()
 
 func _clear_units_only() -> void:
 	var hex = $GameBoardNode/HexTileMap
@@ -2245,7 +2262,7 @@ func _do_upkeep() -> void:
 					unit.spell_buff_melee = 0
 					unit.spell_buff_ranged = 0
 			if unit.is_healing:
-				unit.curr_health += unit.regen
+				unit.curr_health = min(unit.max_health, unit.curr_health + unit.regen)
 				unit.set_health_bar()
 				unit.is_healing = false
 			if unit.auto_heal and unit.curr_health >= unit.max_health:
