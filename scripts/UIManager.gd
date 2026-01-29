@@ -2770,7 +2770,7 @@ func _unhandled_input(ev):
 			if turn_mgr.is_host():
 				if NetworkManager.request_buy_unit(current_player, placing_unit, cell):
 					_refresh_resource_labels()
-					placing_unit = ""
+					_cancel_purchase_mode()
 					$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
 					_update_done_button_state()
 				else:
@@ -2778,7 +2778,7 @@ func _unhandled_input(ev):
 					_cancel_purchase_mode()
 			else:
 				NetworkManager.request_buy_unit(current_player, placing_unit, cell)
-				placing_unit = ""
+				_cancel_purchase_mode()
 				gold_lbl.text = "Purchase requested"
 				$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
 				_update_done_button_state()
