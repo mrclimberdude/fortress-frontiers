@@ -23,6 +23,7 @@ extends Node2D
 @export var is_healing:      bool = false
 @export var auto_heal:       bool = false
 @export var auto_defend:     bool = false
+@export var auto_lookout:    bool = false
 @export var auto_build:      bool = false
 @export var auto_build_type: String = ""
 @export var build_queue: Array = []

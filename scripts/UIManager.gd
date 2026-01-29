@@ -135,6 +135,7 @@ const ACTION_SPELL_ID: int = 13
 const ACTION_SPELL_STRUCTURE_ID: int = 14
 const ACTION_WARD_VISION_ID: int = 15
 const ACTION_WARD_VISION_ALWAYS_ID: int = 16
+const ACTION_LOOKOUT_ALWAYS_ID: int = 17
 
 const SPELL_OPTIONS = [
 	{"id": 0, "label": "Heal", "type": "heal"},
@@ -1442,6 +1443,8 @@ func _on_order_result(player_id: String, unit_net_id: int, order: Dictionary, ok
 				unit.auto_heal = false
 			if order.get("type", "") != "defend":
 				unit.auto_defend = false
+			if order.get("type", "") != "lookout":
+				unit.auto_lookout = false
 			match order.get("type", ""):
 				"move":
 					unit.is_moving = true
@@ -1456,6 +1459,9 @@ func _on_order_result(player_id: String, unit_net_id: int, order: Dictionary, ok
 					unit.is_defending = true
 					if bool(order.get("auto_defend", false)):
 						unit.auto_defend = true
+				"lookout":
+					if bool(order.get("auto_lookout", false)):
+						unit.auto_lookout = true
 			unit.ordered = true
 		_draw_all()
 		$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
@@ -1698,6 +1704,7 @@ func _on_unit_selected(unit: Node) -> void:
 	action_menu.add_item("Always Defend", 11)
 	if str(unit.unit_type).to_lower() == "scout":
 		action_menu.add_item("Lookout", 9)
+		action_menu.add_item("Always Lookout", ACTION_LOOKOUT_ALWAYS_ID)
 	action_menu.add_item("Sabotage", 6)
 	if unit.is_builder:
 		action_menu.add_item("Build", 7)
@@ -1827,6 +1834,13 @@ func _on_action_selected(id: int) -> void:
 			NetworkManager.request_order(current_player, {
 				"unit_net_id": currently_selected_unit.net_id,
 				"type": "lookout",
+			})
+			action_mode = ""
+		ACTION_LOOKOUT_ALWAYS_ID:
+			print("Always-lookout selected for %s" % currently_selected_unit.name)
+			NetworkManager.request_order(current_player, {
+				"unit_net_id": currently_selected_unit.net_id,
+				"type": "lookout_always",
 			})
 			action_mode = ""
 		6:

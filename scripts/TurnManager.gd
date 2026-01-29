@@ -1485,6 +1485,7 @@ func _serialize_unit(unit) -> Dictionary:
 		"is_healing": unit.is_healing,
 		"auto_heal": unit.auto_heal,
 		"auto_defend": unit.auto_defend,
+		"auto_lookout": unit.auto_lookout,
 		"auto_build": unit.auto_build,
 		"auto_build_type": unit.auto_build_type,
 		"build_queue": unit.build_queue,
@@ -1797,6 +1798,7 @@ func _apply_units(units_data: Array) -> void:
 		unit.is_healing = bool(data.get("is_healing", false))
 		unit.auto_heal = bool(data.get("auto_heal", false))
 		unit.auto_defend = bool(data.get("auto_defend", false))
+		unit.auto_lookout = bool(data.get("auto_lookout", false))
 		unit.auto_build = bool(data.get("auto_build", false))
 		unit.auto_build_type = str(data.get("auto_build_type", ""))
 		var queue_data = data.get("build_queue", [])
@@ -2272,6 +2274,7 @@ func _do_upkeep() -> void:
 		unit.is_moving = false
 	_apply_auto_heal_orders(all_units)
 	_apply_auto_defend_orders(all_units)
+	_apply_auto_lookout_orders(all_units)
 	_apply_auto_build_orders(all_units)
 	_apply_auto_ward_orders()
 	_apply_build_queue_orders(all_units)
@@ -2332,6 +2335,36 @@ func _apply_auto_defend_orders(all_units: Dictionary) -> void:
 			if orders.has(unit.net_id):
 				continue
 			var order = {"unit_net_id": unit.net_id, "type": "defend", "auto_defend": true}
+			orders[unit.net_id] = order
+			NetworkManager.player_orders[player][unit.net_id] = order
+			_apply_order_flags(unit, order)
+		player_orders[player] = orders
+
+func _apply_auto_lookout_orders(all_units: Dictionary) -> void:
+	for player in ["player1", "player2"]:
+		if not all_units.has(player):
+			continue
+		var orders = player_orders.get(player, {})
+		if not NetworkManager.player_orders.has(player):
+			NetworkManager.player_orders[player] = orders
+		for unit in all_units[player]:
+			if unit == null or unit.is_base or unit.is_tower:
+				continue
+			if str(unit.unit_type).to_lower() != "scout":
+				unit.auto_lookout = false
+				continue
+			if unit.move_queue.size() > 0:
+				continue
+			if unit.build_queue.size() > 0:
+				continue
+			if unit.curr_health <= 0:
+				unit.auto_lookout = false
+				continue
+			if not unit.auto_lookout:
+				continue
+			if orders.has(unit.net_id):
+				continue
+			var order = {"unit_net_id": unit.net_id, "type": "lookout", "auto_lookout": true}
 			orders[unit.net_id] = order
 			NetworkManager.player_orders[player][unit.net_id] = order
 			_apply_order_flags(unit, order)
@@ -2844,6 +2877,8 @@ func _apply_order_flags(unit, order: Dictionary) -> void:
 		unit.auto_heal = true
 	if bool(order.get("auto_defend", false)):
 		unit.auto_defend = true
+	if bool(order.get("auto_lookout", false)):
+		unit.auto_lookout = true
 	match order.get("type", ""):
 		"move":
 			unit.is_moving = true
@@ -2941,6 +2976,8 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 		unit.auto_heal = false
 	if order_type != "defend_always" and order_type != "defend":
 		unit.auto_defend = false
+	if order_type != "lookout_always" and order_type != "lookout":
+		unit.auto_lookout = false
 	if order_type != "build":
 		unit.auto_build = false
 		unit.auto_build_type = ""
@@ -3134,6 +3171,14 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 			if unit_type != "scout":
 				result["reason"] = "invalid_action"
 				return result
+		"lookout_always":
+			var unit_type = str(unit.unit_type).to_lower()
+			if unit_type != "scout":
+				result["reason"] = "invalid_action"
+				return result
+			unit.auto_lookout = true
+			sanitized["type"] = "lookout"
+			sanitized["auto_lookout"] = true
 		"build_road_to":
 			if not unit.is_builder:
 				result["reason"] = "not_builder"
