@@ -209,6 +209,7 @@ const STRUCT_RAIL: String = "rail"
 const STRUCT_TRAP: String = "trap"
 const STRUCT_WARD: String = "ward"
 const STRUCT_MANA_POOL: String = "mana_pool"
+const STRUCT_MANA_PUMP: String = "mana_pump"
 const STRUCT_SPAWN_TOWER: String = "spawn_tower"
 const SPAWN_TOWER_ROAD_UNITS := ["scout", "builder", "miner", "crystal_miner", "soldier"]
 
@@ -222,15 +223,18 @@ const REPAIR_AMOUNT: int = 30
 const BUILD_TURNS_SHORT: int = 2
 const BUILD_TURNS_TOWER: int = 6
 const BUILD_TURNS_MANA_POOL: int = 3
+const BUILD_TURNS_MANA_PUMP: int = 3
 const ROAD_COST_PER_TURN: int = 5
 const RAIL_COST_PER_TURN: int = 10
 const FORT_COST_PER_TURN: int = 15
 const TRAP_COST_PER_TURN: int = 15
 const TOWER_COST_PER_TURN: int = 25
 const MANA_POOL_COST_PER_TURN: int = 10
+const MANA_PUMP_COST_PER_TURN: int = 20
 const WARD_COST_PER_TURN: int = 10
 const WARD_VISION_RANGE: int = 2
 const WARD_VISION_MANA_COST: int = 5
+const MANA_PUMP_MANA: int = 5
 @export var mine_road_bonus: int = 10
 @export var mine_rail_bonus: int = 20
 
@@ -240,6 +244,7 @@ const WARD_VISION_MANA_COST: int = 5
 @export var trap_sprite: Texture2D
 @export var ward_sprite: Texture2D
 @export var mana_pool_sprite: Texture2D
+@export var mana_pump_sprite: Texture2D = preload("res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Objects/HSI_icon_164.png")
 @export var spawn_tower_sprite: Texture2D
 @export var structure_sprite_scale: float = 1.35
 
@@ -410,6 +415,36 @@ func _adjacent_mines(cell: Vector2i) -> Array:
 			adj.append(neighbor)
 	return adj
 
+func _adjacent_mana_pools(cell: Vector2i, owner: String) -> Array:
+	var adj := []
+	for neighbor in $GameBoardNode.get_offset_neighbors(cell):
+		var state = _structure_state(neighbor)
+		if state.is_empty():
+			continue
+		if str(state.get("type", "")) != STRUCT_MANA_POOL:
+			continue
+		if str(state.get("owner", "")) != owner:
+			continue
+		if str(state.get("status", "")) == STRUCT_STATUS_DISABLED:
+			continue
+		adj.append(neighbor)
+	return adj
+
+func _pick_mana_pump_pair(cell: Vector2i, owner: String) -> Dictionary:
+	if owner == "":
+		return {}
+	var mines_adj = _adjacent_mines(cell)
+	var pools_adj = _adjacent_mana_pools(cell, owner)
+	if mines_adj.is_empty() or pools_adj.is_empty():
+		return {}
+	mines_adj.sort_custom(func(a, b): return a.x < b.x if a.y == b.y else a.y < b.y)
+	pools_adj.sort_custom(func(a, b): return a.x < b.x if a.y == b.y else a.y < b.y)
+	for mine in mines_adj:
+		for pool in pools_adj:
+			if _hex_distance(mine, pool) == 1:
+				return {"mine": mine, "pool": pool}
+	return {}
+
 func _reserved_mana_pool_mines(exclude_unit_id: int) -> Dictionary:
 	var reserved := {}
 	for player in ["player1", "player2"]:
@@ -496,6 +531,36 @@ func _recalculate_mana_caps() -> void:
 		player_mana_cap[player] = BASE_MANA_CAP + pools * MANA_POOL_CAP_BONUS
 		if player_mana[player] > player_mana_cap[player]:
 			player_mana[player] = player_mana_cap[player]
+
+func _mana_pump_income_for(player_id: String) -> int:
+	if player_id == "":
+		return 0
+	var total := 0
+	for cell in buildable_structures.keys():
+		var state = buildable_structures[cell]
+		if str(state.get("type", "")) != STRUCT_MANA_PUMP:
+			continue
+		if str(state.get("owner", "")) != player_id:
+			continue
+		if str(state.get("status", "")) != STRUCT_STATUS_INTACT:
+			continue
+		var mine = state.get("pump_mine", Vector2i(-9999, -9999))
+		var pool = state.get("pump_pool", Vector2i(-9999, -9999))
+		if typeof(mine) != TYPE_VECTOR2I or typeof(pool) != TYPE_VECTOR2I:
+			continue
+		if not _controls_tile(player_id, mine):
+			continue
+		var pool_state = _structure_state(pool)
+		if pool_state.is_empty():
+			continue
+		if str(pool_state.get("type", "")) != STRUCT_MANA_POOL:
+			continue
+		if str(pool_state.get("owner", "")) != player_id:
+			continue
+		if str(pool_state.get("status", "")) != STRUCT_STATUS_INTACT:
+			continue
+		total += MANA_PUMP_MANA
+	return total
 
 func _structure_counts_as_road(state: Dictionary) -> bool:
 	if state.is_empty():
@@ -599,6 +664,8 @@ func _structure_build_turns(struct_type: String, cell: Vector2i) -> int:
 		turns = BUILD_TURNS_TOWER
 	if struct_type == STRUCT_MANA_POOL:
 		turns = BUILD_TURNS_MANA_POOL
+	if struct_type == STRUCT_MANA_PUMP:
+		turns = BUILD_TURNS_MANA_PUMP
 	if struct_type == STRUCT_WARD:
 		turns = BUILD_TURNS_SHORT
 	if struct_type in [STRUCT_ROAD, STRUCT_RAIL] and _terrain_type(cell) == "river":
@@ -618,6 +685,8 @@ func _structure_turn_cost(struct_type: String) -> int:
 		return TOWER_COST_PER_TURN
 	if struct_type == STRUCT_MANA_POOL:
 		return MANA_POOL_COST_PER_TURN
+	if struct_type == STRUCT_MANA_PUMP:
+		return MANA_PUMP_COST_PER_TURN
 	if struct_type == STRUCT_WARD:
 		return WARD_COST_PER_TURN
 	return 0
@@ -766,6 +835,8 @@ func _structure_marker_color(state: Dictionary) -> Color:
 			color = Color(0.4, 0.35, 0.85, 0.8)
 		STRUCT_MANA_POOL:
 			color = Color(0.2, 0.75, 0.85, 0.8)
+		STRUCT_MANA_PUMP:
+			color = Color(0.2, 0.85, 0.45, 0.8)
 		STRUCT_SPAWN_TOWER:
 			color = Color(0.2, 0.6, 0.9, 0.8)
 	if status == STRUCT_STATUS_BUILDING:
@@ -790,6 +861,8 @@ func _structure_sprite_for_state(state: Dictionary) -> Texture2D:
 			return ward_sprite
 		STRUCT_MANA_POOL:
 			return mana_pool_sprite
+		STRUCT_MANA_PUMP:
+			return mana_pump_sprite
 		STRUCT_SPAWN_TOWER:
 			return spawn_tower_sprite
 	return null
@@ -817,6 +890,8 @@ func _structure_display_name(stype: String) -> String:
 			return "Trap"
 		STRUCT_MANA_POOL:
 			return "Mana Pool"
+		STRUCT_MANA_PUMP:
+			return "Mana Pump"
 		STRUCT_SPAWN_TOWER:
 			return "Tower"
 	return stype.capitalize()
@@ -2240,6 +2315,7 @@ func _do_upkeep() -> void:
 					income += mine_road_bonus
 		player_gold[player] += income
 		player_income[player] = income
+		mana_income += _mana_pump_income_for(player)
 		mana_income += player_mana_bonus.get(player, 0)
 		player_mana[player] = min(player_mana_cap[player], player_mana[player] + mana_income)
 		player_mana_income[player] = mana_income
@@ -3301,7 +3377,7 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 			if struct_type == "":
 				result["reason"] = "invalid_structure"
 				return result
-			if struct_type not in [STRUCT_FORTIFICATION, STRUCT_ROAD, STRUCT_RAIL, STRUCT_TRAP, STRUCT_WARD, STRUCT_MANA_POOL, STRUCT_SPAWN_TOWER]:
+			if struct_type not in [STRUCT_FORTIFICATION, STRUCT_ROAD, STRUCT_RAIL, STRUCT_TRAP, STRUCT_WARD, STRUCT_MANA_POOL, STRUCT_MANA_PUMP, STRUCT_SPAWN_TOWER]:
 				result["reason"] = "invalid_structure"
 				return result
 			var state = _structure_state(target_tile)
@@ -3339,6 +3415,13 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 						if $GameBoardNode._terrain_is_impassable(target_tile) and terrain != "lake":
 							result["reason"] = "invalid_tile"
 							return result
+					elif struct_type == STRUCT_MANA_PUMP:
+						if terrain == "mountain":
+							result["reason"] = "invalid_tile"
+							return result
+						if $GameBoardNode._terrain_is_impassable(target_tile) and terrain not in ["river", "lake"]:
+							result["reason"] = "invalid_tile"
+							return result
 					elif not _is_open_terrain(target_tile) or $GameBoardNode._terrain_is_impassable(target_tile):
 						result["reason"] = "invalid_tile"
 						return result
@@ -3348,6 +3431,13 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 						result["reason"] = "invalid_structure"
 						return result
 					sanitized["mana_mine"] = mine_choice
+				if struct_type == STRUCT_MANA_PUMP:
+					var pump_pair = _pick_mana_pump_pair(target_tile, player_id)
+					if pump_pair.is_empty():
+						result["reason"] = "invalid_structure"
+						return result
+					sanitized["pump_mine"] = pump_pair["mine"]
+					sanitized["pump_pool"] = pump_pair["pool"]
 				if struct_type == STRUCT_SPAWN_TOWER and not _spawn_tower_has_connected_road(target_tile, player_id):
 					result["reason"] = "invalid_structure"
 					return result
@@ -3369,6 +3459,13 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 						var existing_mine = state.get("mana_mine", Vector2i(-9999, -9999))
 						if typeof(existing_mine) == TYPE_VECTOR2I:
 							sanitized["mana_mine"] = existing_mine
+					if struct_type == STRUCT_MANA_PUMP:
+						var existing_mine = state.get("pump_mine", Vector2i(-9999, -9999))
+						var existing_pool = state.get("pump_pool", Vector2i(-9999, -9999))
+						if typeof(existing_mine) == TYPE_VECTOR2I:
+							sanitized["pump_mine"] = existing_mine
+						if typeof(existing_pool) == TYPE_VECTOR2I:
+							sanitized["pump_pool"] = existing_pool
 				elif existing_status == STRUCT_STATUS_INTACT:
 					if not (struct_type == STRUCT_RAIL and existing_type == STRUCT_ROAD):
 						result["reason"] = "invalid_structure"
@@ -3445,10 +3542,7 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 			var sab_owner = str(sab_state.get("owner", ""))
 			var sab_status = str(sab_state.get("status", ""))
 			var sab_type = str(sab_state.get("type", ""))
-			if sab_owner == player_id and sab_type == STRUCT_SPAWN_TOWER and sab_status != STRUCT_STATUS_BUILDING:
-				result["reason"] = "invalid_target"
-				return result
-			if sab_owner == player_id and sab_status != STRUCT_STATUS_BUILDING:
+			if sab_type == STRUCT_SPAWN_TOWER and sab_status != STRUCT_STATUS_BUILDING:
 				result["reason"] = "invalid_target"
 				return result
 			sanitized["target_tile"] = sabotage_tile
@@ -4254,6 +4348,23 @@ func _apply_build_at(player_id: String, unit, order: Dictionary) -> void:
 			state["mana_mine"] = mine_choice
 			mana_pool_mines[tile] = mine_choice
 			assigned_pool = true
+		if struct_type == STRUCT_MANA_PUMP:
+			var pump_mine = order.get("pump_mine", Vector2i(-9999, -9999))
+			var pump_pool = order.get("pump_pool", Vector2i(-9999, -9999))
+			if typeof(pump_mine) != TYPE_VECTOR2I or typeof(pump_pool) != TYPE_VECTOR2I:
+				var pair = _pick_mana_pump_pair(tile, player_id)
+				if pair.is_empty():
+					return
+				pump_mine = pair["mine"]
+				pump_pool = pair["pool"]
+			if pump_mine == Vector2i(-9999, -9999) or pump_pool == Vector2i(-9999, -9999):
+				var pair = _pick_mana_pump_pair(tile, player_id)
+				if pair.is_empty():
+					return
+				pump_mine = pair["mine"]
+				pump_pool = pair["pool"]
+			state["pump_mine"] = pump_mine
+			state["pump_pool"] = pump_pool
 		if struct_type == STRUCT_WARD:
 			_ensure_ward_id(state, tile)
 	elif str(state.get("type", "")) == STRUCT_ROAD and str(state.get("status", "")) == STRUCT_STATUS_INTACT and struct_type == STRUCT_RAIL:
@@ -4277,6 +4388,13 @@ func _apply_build_at(player_id: String, unit, order: Dictionary) -> void:
 				mana_pool_mines[tile] = existing_mine
 		if struct_type == STRUCT_WARD:
 			_ensure_ward_id(state, tile)
+		if struct_type == STRUCT_MANA_PUMP:
+			if not state.has("pump_mine") or not state.has("pump_pool"):
+				var pair = _pick_mana_pump_pair(tile, player_id)
+				if pair.is_empty():
+					return
+				state["pump_mine"] = pair["mine"]
+				state["pump_pool"] = pair["pool"]
 	var turn_cost = int(state.get("turn_cost", _structure_turn_cost(struct_type)))
 	if turn_cost > 0:
 		if player_gold[player_id] < turn_cost:

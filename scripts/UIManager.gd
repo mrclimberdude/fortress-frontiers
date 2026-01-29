@@ -127,6 +127,7 @@ const BUILD_OPTIONS = [
 	{"id": 3, "label": "Spawn Tower", "type": "spawn_tower"},
 	{"id": 4, "label": "Trap", "type": "trap"},
 	{"id": 5, "label": "Mana Pool", "type": "mana_pool"},
+	{"id": 7, "label": "Mana Pump", "type": "mana_pump"},
 	{"id": 6, "label": "Ward", "type": "ward"}
 ]
 const BUILD_MENU_ROAD_TO_ID: int = 100
@@ -327,12 +328,14 @@ func _ready():
 	var short_turns = int(turn_mgr.BUILD_TURNS_SHORT)
 	var tower_turns = int(turn_mgr.BUILD_TURNS_TOWER)
 	var mana_turns = int(turn_mgr.BUILD_TURNS_MANA_POOL)
+	var pump_turns = int(turn_mgr.BUILD_TURNS_MANA_PUMP)
 	var fort_bonus = "%d/%d" % [turn_mgr.fort_melee_bonus, turn_mgr.fort_ranged_bonus]
 	var build_rows = [
 		{"name": "Fortification", "cost": turn_mgr.get_build_turn_cost("fortification"), "turns": short_turns, "effect": "+%s melee/ranged (atk/def)" % fort_bonus},
 		{"name": "Road", "cost": turn_mgr.get_build_turn_cost("road"), "turns": short_turns, "effect": "Move x0.5; +1 turn on river; mines +10 if connected"},
 		{"name": "Railroad", "cost": turn_mgr.get_build_turn_cost("rail"), "turns": short_turns, "effect": "Move x0.25; upgrade intact road; rail build counts as road; +1 turn on river; mines +20 if connected"},
 		{"name": "Mana Pool", "cost": turn_mgr.get_build_turn_cost("mana_pool"), "turns": mana_turns, "effect": "Adjacent to mine; +100 mana cap; one per mine"},
+		{"name": "Mana Pump", "cost": turn_mgr.get_build_turn_cost("mana_pump"), "turns": pump_turns, "effect": "Triangle with mine+pool; +5 mana/turn if mine controlled & pool intact"},
 		{"name": "Ward", "cost": turn_mgr.get_build_turn_cost("ward"), "turns": short_turns, "effect": "Hidden from enemies except wizards; spend 5 mana for vision radius 2"},
 		{"name": "Spawn Tower", "cost": turn_mgr.get_build_turn_cost("spawn_tower"), "turns": tower_turns, "effect": "Spawn point; tower bonuses; no income; needs road/rail link"},
 		{"name": "Trap", "cost": turn_mgr.get_build_turn_cost("trap"), "turns": short_turns, "effect": "Hidden from enemies; triggers to disable, stop movement, deal 30 dmg"}
