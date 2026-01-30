@@ -14,7 +14,7 @@ font_size = 30
 font_color = Color(0.989583, 0.989583, 0, 1)
 
 [node name="Tower" instance=ExtResource("1_kl3vk")]
-melee_strength = 35
+melee_strength = 40
 move_range = 0
 is_tower = true
 

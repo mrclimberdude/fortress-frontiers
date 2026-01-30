@@ -15,7 +15,7 @@ font_color = Color(0.989583, 0.989583, 0, 1)
 
 [node name="Phalanx" instance=ExtResource("1_cpxye")]
 cost = 100
-melee_strength = 10
+melee_strength = 15
 multi_def_penalty = 0
 is_phalanx = true
 special_skills = "+20 str when defending, No multi-defender penalty"
