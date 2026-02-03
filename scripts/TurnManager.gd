@@ -1342,7 +1342,7 @@ func _queue_neutral_attack(attacker, target, atk_mode: String, dmg_map: Dictiona
 	var retaliator = _get_retaliator_for_target(target)
 	var retaliate = _retaliator_can_hit(attacker, retaliator)
 	if retaliate and retaliator != target:
-		ret_dmg = calculate_damage(attacker, retaliator, atk_mode, 1)[0]
+		ret_dmg = calculate_damage(retaliator, attacker, atk_mode, 1)[1]
 	dmg_map[target.net_id] = dmg_map.get(target.net_id, 0) + defr_in_dmg
 	_accumulate_damage_by_player(src_map, target.net_id, attacker.player_id, defr_in_dmg)
 	if retaliate:
@@ -3671,6 +3671,7 @@ func calculate_damage(attacker, defender, atk_mode, num_atkrs):
 		defr_str += TOWER_MELEE_BONUS
 	if _has_adjacent_defending_phalanx(defender):
 		defr_str += PHALANX_ADJ_BONUS
+	defr_str += player_melee_bonus.get(defender.player_id, 0)
 	if atk_mode == "ranged":
 		defr_str += _terrain_bonus(defender.grid_pos, "ranged_defense_bonus")
 	else:
@@ -3687,6 +3688,7 @@ func calculate_damage(attacker, defender, atk_mode, num_atkrs):
 			defr_ranged_str += TOWER_RANGED_BONUS
 		if _has_adjacent_defending_phalanx(defender):
 			defr_ranged_str += PHALANX_ADJ_BONUS
+		defr_ranged_str += player_ranged_bonus.get(defender.player_id, 0)
 		defr_ranged_str += _terrain_bonus(defender.grid_pos, "ranged_defense_bonus")
 		atkr_in_dmg = 30 * (1.041**(defr_ranged_str - attacker.melee_strength * atkr_damaged_penalty))
 	else:
@@ -4126,7 +4128,7 @@ func _process_attacks():
 			var ret_target = _retaliation_target_for_attacker(unit, "ranged")
 			if retaliate:
 				var ret_calc_target = ret_target if ret_target != null else unit
-				ret_dmg = calculate_damage(ret_calc_target, retaliator, "ranged", num_attackers)[0]
+				ret_dmg = calculate_damage(retaliator, ret_calc_target, "ranged", num_attackers)[1]
 			if retaliate:
 				var ret_target_id = (ret_target if ret_target != null else unit).net_id
 				ranged_dmg[ret_target_id] = ranged_dmg.get(ret_target_id, 0) + ret_dmg
@@ -4157,7 +4159,7 @@ func _process_attacks():
 			var ret_target = _retaliation_target_for_attacker(attacker, "melee")
 			if retaliate:
 				var ret_calc_target = ret_target if ret_target != null else attacker
-				ret_dmg = calculate_damage(ret_calc_target, retaliator, "melee", num_attackers)[0]
+				ret_dmg = calculate_damage(retaliator, ret_calc_target, "melee", num_attackers)[1]
 			if retaliate:
 				var ret_target_id = (ret_target if ret_target != null else attacker).net_id
 				melee_dmg[ret_target_id] = melee_dmg.get(ret_target_id, 0) + ret_dmg
@@ -4774,7 +4776,7 @@ func _mg_tile_fifo_commit(t: Vector2i, entrants: Array, stationary_defender: Nod
 		if retaliate:
 			ret_dmg = dmg[0]
 			if retaliator != stationary_defender:
-				ret_dmg = calculate_damage(atk, retaliator, "move", 1)[0]
+				ret_dmg = calculate_damage(retaliator, atk, "move", 1)[1]
 			atk.curr_health -= ret_dmg
 			atk.last_damaged_by = retaliator.player_id
 			atk.set_health_bar()
