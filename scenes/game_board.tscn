@@ -646,10 +646,22 @@ text = "Skip movement phase"
 
 [node name="DamagePanel" type="Panel" parent="UI"]
 visible = false
-offset_left = 833.0
-offset_top = 299.0
-offset_right = 1157.0
-offset_bottom = 641.0
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -324.0
+offset_top = -342.0
+
+[node name="ResizeHandle" type="ColorRect" parent="UI/DamagePanel"]
+layout_mode = 0
+offset_left = 2.0
+offset_top = 2.0
+offset_right = 14.0
+offset_bottom = 14.0
+mouse_filter = 1
+color = Color(0.82, 0.82, 0.82, 0.9)
 
 [node name="Label" type="Label" parent="UI/DamagePanel"]
 layout_mode = 0
@@ -660,18 +672,22 @@ text = "Damage Report"
 
 [node name="ToggleDamageButton" type="Button" parent="UI/DamagePanel"]
 layout_mode = 0
-offset_left = 246.0
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -74.0
 offset_top = 2.0
-offset_right = 318.0
+offset_right = -2.0
 offset_bottom = 24.0
 text = "-"
 
 [node name="ScrollContainer" type="ScrollContainer" parent="UI/DamagePanel"]
 layout_mode = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
 offset_left = 2.0
 offset_top = 24.0
-offset_right = 320.0
-offset_bottom = 323.0
+offset_right = -2.0
+offset_bottom = -2.0
 
 [node name="VBoxContainer" type="VBoxContainer" parent="UI/DamagePanel/ScrollContainer"]
 layout_mode = 2

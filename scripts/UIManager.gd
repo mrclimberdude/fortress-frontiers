@@ -36,7 +36,9 @@ var menu_popup: PopupMenu = null
 var save_slot_index: int = 0
 var damage_panel_minimized: bool = false
 var damage_panel_full_size: Vector2 = Vector2.ZERO
-var damage_panel_full_position: Vector2 = Vector2.ZERO
+var damage_panel_dragging: bool = false
+var damage_panel_drag_start: Vector2 = Vector2.ZERO
+var damage_panel_start_size: Vector2 = Vector2.ZERO
 var auto_pass_enabled: bool = false
 var last_damage_log_count: int = 0
 var done_button_default_modulate: Color = Color(1, 1, 1)
@@ -72,6 +74,7 @@ var _default_camera_zoom: Vector2 = Vector2.ZERO
 @onready var damage_panel = $DamagePanel as Panel
 @onready var damage_scroll = $DamagePanel/ScrollContainer as ScrollContainer
 @onready var damage_toggle_button = $DamagePanel/ToggleDamageButton as Button
+@onready var damage_resize_handle = $DamagePanel/ResizeHandle as Control
 @onready var finish_move_button = $Panel/FinishMoveButton
 @onready var map_select = $MapSelect as MenuButton
 @onready var map_label = $MapLabel as Label
@@ -103,6 +106,7 @@ const BuffIcon = preload("res://assets/HK-Heightend Sensory Input v2/HSI - Icons
 const LightningIcon = preload("res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Objects/HSI_icon_174.png")
 const SAVE_SLOT_COUNT_UI: int = 3
 const ORDER_ICON_Z: int = 12
+const DAMAGE_PANEL_MIN_SIZE: Vector2 = Vector2(220, 120)
 
 const MENU_ID_SAVE: int = 1
 const MENU_ID_LOAD: int = 2
@@ -196,6 +200,9 @@ func _ready():
 	if damage_toggle_button != null:
 		damage_toggle_button.connect("pressed",
 					 Callable(self, "_on_damage_toggle_pressed"))
+	if damage_resize_handle != null:
+		damage_resize_handle.connect("gui_input",
+					Callable(self, "_on_damage_resize_input"))
 	NetworkManager.connect("buy_result",
 					Callable(self, "_on_buy_result"))
 	NetworkManager.connect("undo_result",
@@ -417,7 +424,7 @@ func _init_menu() -> void:
 	_sync_menu_checks()
 	menu_popup.connect("id_pressed", Callable(self, "_on_menu_id_pressed"))
 	damage_panel_full_size = damage_panel.size
-	damage_panel_full_position = damage_panel.position
+	_apply_damage_panel_size(damage_panel_full_size)
 	_update_damage_panel()
 
 func _init_map_select() -> void:
@@ -1205,6 +1212,15 @@ func _on_damage_toggle_pressed() -> void:
 	damage_panel_minimized = not damage_panel_minimized
 	_update_damage_panel()
 
+func _apply_damage_panel_size(size: Vector2) -> void:
+	if damage_panel == null:
+		return
+	damage_panel.size = size
+	damage_panel.offset_left = -size.x
+	damage_panel.offset_top = -size.y
+	damage_panel.offset_right = 0
+	damage_panel.offset_bottom = 0
+
 func _update_damage_panel() -> void:
 	if damage_scroll == null or damage_panel == null:
 		return
@@ -1212,18 +1228,34 @@ func _update_damage_panel() -> void:
 	if damage_panel_minimized:
 		damage_scroll.visible = false
 		damage_panel.custom_minimum_size = Vector2(damage_panel_full_size.x, header_height)
-		damage_panel.size = Vector2(damage_panel_full_size.x, header_height)
-		damage_panel.position = Vector2(
-			damage_panel_full_position.x,
-			damage_panel_full_position.y + damage_panel_full_size.y - header_height
-		)
+		_apply_damage_panel_size(Vector2(damage_panel_full_size.x, header_height))
 		damage_toggle_button.text = "+"
 	else:
 		damage_scroll.visible = true
 		damage_panel.custom_minimum_size = Vector2.ZERO
-		damage_panel.size = damage_panel_full_size
-		damage_panel.position = damage_panel_full_position
+		_apply_damage_panel_size(damage_panel_full_size)
 		damage_toggle_button.text = "-"
+	if damage_resize_handle != null:
+		damage_resize_handle.visible = not damage_panel_minimized
+
+func _on_damage_resize_input(event: InputEvent) -> void:
+	if damage_panel_minimized or damage_panel == null:
+		return
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		if event.pressed:
+			damage_panel_dragging = true
+			damage_panel_drag_start = get_viewport().get_mouse_position()
+			damage_panel_start_size = damage_panel_full_size
+		else:
+			damage_panel_dragging = false
+	elif event is InputEventMouseMotion and damage_panel_dragging:
+		var delta = get_viewport().get_mouse_position() - damage_panel_drag_start
+		var new_size = damage_panel_start_size - delta
+		var viewport_size = get_viewport().get_visible_rect().size
+		new_size.x = clamp(new_size.x, DAMAGE_PANEL_MIN_SIZE.x, viewport_size.x)
+		new_size.y = clamp(new_size.y, DAMAGE_PANEL_MIN_SIZE.y, viewport_size.y)
+		damage_panel_full_size = new_size
+		_apply_damage_panel_size(new_size)
 
 func _on_auto_pass_toggled(pressed: bool) -> void:
 	auto_pass_enabled = pressed
