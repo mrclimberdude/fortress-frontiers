@@ -49,9 +49,10 @@ var _default_camera_zoom: Vector2 = Vector2.ZERO
 @onready var unit_mgr = get_node(unit_manager_path) as Node
 @onready var game_board: Node = get_node("../GameBoardNode")
 @onready var hex = $"../GameBoardNode/HexTileMap"
-@onready var gold_lbl = $Panel/VBoxContainer/GoldLabel as Label
-@onready var income_lbl = $Panel/VBoxContainer/IncomeLabel as Label
-@onready var mana_lbl = $Panel/VBoxContainer/ManaLabel as Label
+@onready var status_lbl = $Panel/VBoxContainer/StatusLabel as Label
+@onready var resource_panel = $ResourcePanel as Panel
+@onready var gold_resource_lbl = $ResourcePanel/VBoxContainer/GoldResourceLabel as Label
+@onready var mana_resource_lbl = $ResourcePanel/VBoxContainer/ManaResourceLabel as Label
 @onready var action_menu: PopupMenu      = $Panel/ActionMenu as PopupMenu
 @onready var build_menu: PopupMenu = PopupMenu.new()
 @onready var spell_menu: PopupMenu = PopupMenu.new()
@@ -1084,6 +1085,8 @@ func _on_orders_phase_begin(player: String) -> void:
 	_refresh_resource_labels()
 	placing_unit  = ""
 	$Panel.visible = true
+	if resource_panel != null:
+		resource_panel.visible = true
 	allow_clicks = true
 	move_priority = 0
 	_update_done_button_state()
@@ -1097,47 +1100,47 @@ func _on_orders_phase_end() -> void:
 
 func _on_archer_pressed():
 	placing_unit = "archer"
-	gold_lbl.text = "Click map to place Archer\nGold: %d" % turn_mgr.player_gold[current_player]
+	status_lbl.text = "Click map to place Archer"
 	_find_placeable()
 
 func _on_wizard_pressed():
 	placing_unit = "wizard"
-	gold_lbl.text = "Click map to place Wizard\nGold: %d" % turn_mgr.player_gold[current_player]
+	status_lbl.text = "Click map to place Wizard"
 	_find_placeable()
 
 func _on_soldier_pressed():
 	placing_unit = "soldier"
-	gold_lbl.text = "Click map to place Soldier\nGold: %d" % turn_mgr.player_gold[current_player]
+	status_lbl.text = "Click map to place Soldier"
 	_find_placeable()
 
 func _on_scout_pressed():
 	placing_unit = "scout"
-	gold_lbl.text = "Click map to place Scout\nGold: %d" % turn_mgr.player_gold[current_player]
+	status_lbl.text = "Click map to place Scout"
 	_find_placeable()
 
 func _on_miner_pressed():
 	placing_unit = "miner"
-	gold_lbl.text = "Click map to place Miner\nGold: %d" % turn_mgr.player_gold[current_player]
+	status_lbl.text = "Click map to place Miner"
 	_find_placeable()
 
 func _on_crystal_miner_pressed():
 	placing_unit = "crystal_miner"
-	gold_lbl.text = "Click map to place Crystal Miner\nGold: %d" % turn_mgr.player_gold[current_player]
+	status_lbl.text = "Click map to place Crystal Miner"
 	_find_placeable()
 
 func _on_builder_pressed():
 	placing_unit = "builder"
-	gold_lbl.text = "Click map to place Builder\nGold: %d" % turn_mgr.player_gold[current_player]
+	status_lbl.text = "Click map to place Builder"
 	_find_placeable()
 
 func _on_tank_pressed():
 	placing_unit = "phalanx"
-	gold_lbl.text = "Click map to place Phalanx\nGold: %d" % turn_mgr.player_gold[current_player]
+	status_lbl.text = "Click map to place Phalanx"
 	_find_placeable()
 
 func _on_cavalry_pressed():
 	placing_unit = "cavalry"
-	gold_lbl.text = "Click map to place cavalry\nGold: %d" % turn_mgr.player_gold[current_player]
+	status_lbl.text = "Click map to place Cavalry"
 	_find_placeable()
 
 func _find_placeable():
@@ -1180,7 +1183,8 @@ func _on_fog_toggled(pressed:bool):
 func _on_give_income_pressed():
 	for player in ["player1", "player2"]:
 		turn_mgr.player_gold[player] += turn_mgr.player_income[player]
-	gold_lbl.text = "%s Gold: %d" % [current_player, turn_mgr.player_gold[current_player]]
+	status_lbl.text = "Income granted"
+	_refresh_resource_labels()
 
 func _on_respawn_timers_toggled(pressed: bool) -> void:
 	turn_mgr.set_respawn_timer_override(pressed)
@@ -1190,10 +1194,10 @@ func _on_resync_pressed() -> void:
 
 func _on_skip_movement_pressed() -> void:
 	if not turn_mgr.is_host():
-		gold_lbl.text = "[Skip failed: host only]"
+		status_lbl.text = "[Skip failed: host only]"
 		return
 	if turn_mgr.current_phase != turn_mgr.Phase.EXECUTION:
-		gold_lbl.text = "[Skip failed: execution only]"
+		status_lbl.text = "[Skip failed: execution only]"
 		return
 	turn_mgr.force_skip_movement_phase()
 
@@ -1294,30 +1298,30 @@ func _auto_pass_step() -> void:
 
 func _on_save_game_pressed() -> void:
 	if not turn_mgr.is_host():
-		gold_lbl.text = "[Save failed: host only]"
+		status_lbl.text = "[Save failed: host only]"
 		return
 	if turn_mgr.save_game_slot(save_slot_index):
-		gold_lbl.text = "Game saved (slot %d)" % (save_slot_index + 1)
+		status_lbl.text = "Game saved (slot %d)" % (save_slot_index + 1)
 	else:
-		gold_lbl.text = "[Save failed]"
+		status_lbl.text = "[Save failed]"
 
 func _on_load_game_pressed() -> void:
 	if not turn_mgr.is_host():
-		gold_lbl.text = "[Load failed: host only]"
+		status_lbl.text = "[Load failed: host only]"
 		return
 	if turn_mgr.load_game_slot(save_slot_index):
-		gold_lbl.text = "Game loaded (slot %d)" % (save_slot_index + 1)
+		status_lbl.text = "Game loaded (slot %d)" % (save_slot_index + 1)
 	else:
-		gold_lbl.text = "[Load failed]"
+		status_lbl.text = "[Load failed]"
 
 func _on_load_autosave_pressed() -> void:
 	if not turn_mgr.is_host():
-		gold_lbl.text = "[Load failed: host only]"
+		status_lbl.text = "[Load failed: host only]"
 		return
 	if turn_mgr.load_game_slot(-1):
-		gold_lbl.text = "Autosave loaded"
+		status_lbl.text = "Autosave loaded"
 	else:
-		gold_lbl.text = "[Load failed]"
+		status_lbl.text = "[Load failed]"
 
 func _buy_error_message(reason: String, cost: int) -> String:
 	var msg := ""
@@ -1382,23 +1386,40 @@ func _order_error_message(reason: String) -> String:
 	return _format_error_with_gold(msg)
 
 func _format_error_with_gold(message: String) -> String:
-	if turn_mgr == null or current_player == "":
-		return message
-	var gold = turn_mgr.player_gold.get(current_player, 0)
-	var mana = turn_mgr.player_mana.get(current_player, 0)
-	var cap = turn_mgr.player_mana_cap.get(current_player, 0)
-	return "%s\nGold: %d  Mana: %d/%d" % [message, gold, mana, cap]
+	return message
+
+func _current_resource_spend(player_id: String) -> Dictionary:
+	var spend := {"gold": 0, "mana": 0}
+	if turn_mgr == null or player_id == "":
+		return spend
+	var orders = turn_mgr.player_orders.get(player_id, {})
+	if turn_mgr.current_phase == turn_mgr.Phase.EXECUTION:
+		orders = turn_mgr.committed_orders.get(player_id, orders)
+	for order in orders.values():
+		var otype = str(order.get("type", ""))
+		if otype == "build":
+			var struct_type = str(order.get("structure_type", ""))
+			spend["gold"] += int(turn_mgr.get_build_turn_cost(struct_type))
+		elif otype == "spell":
+			var spell_type = str(order.get("spell_type", ""))
+			spend["mana"] += int(turn_mgr.get_spell_cost(spell_type))
+		elif otype == "ward_vision":
+			spend["mana"] += int(turn_mgr.WARD_VISION_MANA_COST)
+	return spend
 
 func _refresh_resource_labels() -> void:
 	if turn_mgr == null or current_player == "":
 		return
-	gold_lbl.text = "Current Gold: %d" % turn_mgr.player_gold.get(current_player, 0)
-	income_lbl.text = "Income: %d per turn" % turn_mgr.player_income.get(current_player, 0)
-	if mana_lbl != null:
-		var mana = turn_mgr.player_mana.get(current_player, 0)
-		var cap = turn_mgr.player_mana_cap.get(current_player, 0)
-		var income = turn_mgr.player_mana_income.get(current_player, 0)
-		mana_lbl.text = "Mana: %d/%d (+%d)" % [mana, cap, income]
+	var gold = int(turn_mgr.player_gold.get(current_player, 0))
+	var income = int(turn_mgr.player_income.get(current_player, 0))
+	var mana = int(turn_mgr.player_mana.get(current_player, 0))
+	var cap = int(turn_mgr.player_mana_cap.get(current_player, 0))
+	var mana_income = int(turn_mgr.player_mana_income.get(current_player, 0))
+	var spend = _current_resource_spend(current_player)
+	if gold_resource_lbl != null:
+		gold_resource_lbl.text = "Gold: %d  Spend: %d  Income: +%d" % [gold, int(spend["gold"]), income]
+	if mana_resource_lbl != null:
+		mana_resource_lbl.text = "Mana: %d/%d  Spend: %d  Income: +%d" % [mana, cap, int(spend["mana"]), mana_income]
 
 func _on_buy_result(player_id: String, unit_type: String, grid_pos: Vector2i, ok: bool, reason: String, cost: int) -> void:
 	if player_id != turn_mgr.local_player_id:
@@ -1408,7 +1429,7 @@ func _on_buy_result(player_id: String, unit_type: String, grid_pos: Vector2i, ok
 	if ok:
 		_refresh_resource_labels()
 	else:
-		gold_lbl.text = _buy_error_message(reason, cost)
+		status_lbl.text = _buy_error_message(reason, cost)
 		_cancel_purchase_mode()
 
 func _on_undo_result(player_id: String, unit_net_id: int, ok: bool, reason: String, refund: int) -> void:
@@ -1419,7 +1440,7 @@ func _on_undo_result(player_id: String, unit_net_id: int, ok: bool, reason: Stri
 	if ok:
 		_refresh_resource_labels()
 	else:
-		gold_lbl.text = _undo_error_message(reason)
+		status_lbl.text = _undo_error_message(reason)
 
 func _on_order_result(player_id: String, unit_net_id: int, order: Dictionary, ok: bool, reason: String) -> void:
 	if player_id != turn_mgr.local_player_id:
@@ -1437,6 +1458,7 @@ func _on_order_result(player_id: String, unit_net_id: int, order: Dictionary, ok
 			_draw_all()
 			$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
 			_update_done_button_state()
+			_refresh_resource_labels()
 			return
 		turn_mgr.player_orders[player_id][unit_net_id] = order
 		NetworkManager.player_orders[player_id][unit_net_id] = order
@@ -1483,8 +1505,9 @@ func _on_order_result(player_id: String, unit_net_id: int, order: Dictionary, ok
 		_draw_all()
 		$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
 		_update_done_button_state()
+		_refresh_resource_labels()
 	else:
-		gold_lbl.text = _order_error_message(reason)
+		status_lbl.text = _order_error_message(reason)
 	
 
 func _on_host_pressed():
@@ -1538,6 +1561,8 @@ func _on_cancel_game_pressed():
 		proc_custom_panel.visible = false
 	$CancelGameButton.visible = false
 	$Panel.visible = false
+	if resource_panel != null:
+		resource_panel.visible = false
 	cancel_done_button.visible = false
 	exec_panel.visible = false
 	turn_mgr.reset_to_lobby()
@@ -1689,7 +1714,7 @@ func _on_next_unordered_pressed() -> void:
 		return
 	var unit = _get_next_unordered_unit()
 	if unit == null:
-		gold_lbl.text = "All units have orders"
+		status_lbl.text = "All units have orders"
 		return
 	_show_action_menu_for_unit(unit)
 
@@ -1891,7 +1916,7 @@ func _on_action_selected(id: int) -> void:
 		8:
 			print("Repair selected for %s" % currently_selected_unit.name)
 			if not _has_repair_target_here(currently_selected_unit):
-				gold_lbl.text = "[Nothing to repair]"
+				status_lbl.text = "[Nothing to repair]"
 				action_menu.hide()
 				return
 			NetworkManager.request_order(current_player, {
@@ -1991,7 +2016,7 @@ func _on_done_pressed():
 
 func _on_cancel_pressed():
 	NetworkManager.cancel_orders(current_player)
-	gold_lbl.text = "Orders unsubmitted - edit and resubmit"
+	status_lbl.text = "Orders unsubmitted - edit and resubmit"
 	_draw_all()
 	currently_selected_unit = null
 	action_mode = ""
@@ -2638,7 +2663,7 @@ func _on_spell_selected(id: int) -> void:
 	current_spell_type = spell_type
 	spell_tiles = _get_spell_target_tiles(spell_caster, spell_type)
 	if spell_tiles.is_empty():
-		gold_lbl.text = "[No valid spell targets]"
+		status_lbl.text = "[No valid spell targets]"
 		action_mode = ""
 		current_spell_type = ""
 		spell_caster = null
@@ -2803,16 +2828,16 @@ func _unhandled_input(ev):
 					$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
 					_update_done_button_state()
 				else:
-					gold_lbl.text = "[Not enough gold]\nGold: %d" % turn_mgr.player_gold[current_player]
+					status_lbl.text = "[Not enough gold]"
 					_cancel_purchase_mode()
 			else:
 				NetworkManager.request_buy_unit(current_player, placing_unit, cell)
 				_cancel_purchase_mode()
-				gold_lbl.text = "Purchase requested"
+				status_lbl.text = "Purchase requested"
 				$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
 				_update_done_button_state()
 		else:
-			gold_lbl.text = "[Can't place there]\nGold: %d" % turn_mgr.player_gold[current_player]
+			status_lbl.text = "[Can't place there]"
 			_cancel_purchase_mode()
 		return
 	
