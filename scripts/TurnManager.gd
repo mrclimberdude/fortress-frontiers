@@ -1796,6 +1796,7 @@ func load_game(path: String = SAVE_DEFAULT_PATH) -> bool:
 	_reset_map_state()
 	_load_map_by_index(map_index)
 	apply_state(state, true)
+	_rebuild_orders_after_load()
 	call_deferred("_refresh_fog_after_load")
 	NetworkManager._orders_submitted = { "player1": false, "player2": false }
 	NetworkManager._step_ready_counts = {}
@@ -1835,6 +1836,24 @@ func _clamp_unit_healths() -> void:
 		if unit.curr_health > unit.max_health:
 			unit.curr_health = unit.max_health
 			unit.set_health_bar()
+
+func _rebuild_orders_after_load() -> void:
+	if not _is_host():
+		return
+	if current_phase != Phase.ORDERS:
+		return
+	for player in ["player1", "player2"]:
+		player_orders[player].clear()
+		if NetworkManager.player_orders.has(player):
+			NetworkManager.player_orders[player].clear()
+	var all_units = $GameBoardNode.get_all_units()
+	_apply_auto_heal_orders(all_units)
+	_apply_auto_defend_orders(all_units)
+	_apply_auto_lookout_orders(all_units)
+	_apply_auto_build_orders(all_units)
+	_apply_auto_ward_orders()
+	_apply_build_queue_orders(all_units)
+	_apply_move_queue_orders(all_units)
 
 func _clear_units_only() -> void:
 	var hex = $GameBoardNode/HexTileMap
