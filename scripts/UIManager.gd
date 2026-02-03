@@ -136,6 +136,7 @@ const ACTION_SPELL_ID: int = 13
 const ACTION_SPELL_STRUCTURE_ID: int = 14
 const ACTION_WARD_VISION_ID: int = 15
 const ACTION_WARD_VISION_ALWAYS_ID: int = 16
+const ACTION_WARD_VISION_STOP_ID: int = 18
 const ACTION_LOOKOUT_ALWAYS_ID: int = 17
 
 const SPELL_OPTIONS = [
@@ -1424,6 +1425,19 @@ func _on_order_result(player_id: String, unit_net_id: int, order: Dictionary, ok
 	if player_id != turn_mgr.local_player_id:
 		return
 	if ok:
+		if order.get("type", "") == "ward_vision_stop":
+			turn_mgr.player_orders[player_id].erase(unit_net_id)
+			NetworkManager.player_orders[player_id].erase(unit_net_id)
+			var ward_tile = order.get("ward_tile", Vector2i(-9999, -9999))
+			if typeof(ward_tile) == TYPE_VECTOR2I:
+				var state = turn_mgr.buildable_structures.get(ward_tile, {})
+				if not state.is_empty() and str(state.get("type", "")) == turn_mgr.STRUCT_WARD and str(state.get("owner", "")) == current_player:
+					state["auto_ward"] = false
+					turn_mgr.buildable_structures[ward_tile] = state
+			_draw_all()
+			$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
+			_update_done_button_state()
+			return
 		turn_mgr.player_orders[player_id][unit_net_id] = order
 		NetworkManager.player_orders[player_id][unit_net_id] = order
 		var unit = unit_mgr.get_unit_by_net_id(unit_net_id)
@@ -1723,7 +1737,10 @@ func _on_unit_selected(unit: Node) -> void:
 			selected_structure_tile = unit.grid_pos
 			selected_structure_type = "ward"
 			action_menu.add_item("Ward Vision", ACTION_WARD_VISION_ID)
-			action_menu.add_item("Always Vision", ACTION_WARD_VISION_ALWAYS_ID)
+			if bool(ward_state.get("auto_ward", false)):
+				action_menu.add_item("Stop Vision", ACTION_WARD_VISION_STOP_ID)
+			else:
+				action_menu.add_item("Always Vision", ACTION_WARD_VISION_ALWAYS_ID)
 
 func _on_action_selected(id: int) -> void:
 	if id == ACTION_WARD_VISION_ID:
@@ -1744,6 +1761,18 @@ func _on_action_selected(id: int) -> void:
 			return
 		NetworkManager.request_order(current_player, {
 			"type": "ward_vision_always",
+			"ward_tile": selected_structure_tile
+		})
+		selected_structure_tile = Vector2i(-9999, -9999)
+		selected_structure_type = ""
+		action_menu.hide()
+		return
+	if id == ACTION_WARD_VISION_STOP_ID:
+		if selected_structure_type != "ward" or selected_structure_tile == Vector2i(-9999, -9999):
+			action_menu.hide()
+			return
+		NetworkManager.request_order(current_player, {
+			"type": "ward_vision_stop",
 			"ward_tile": selected_structure_tile
 		})
 		selected_structure_tile = Vector2i(-9999, -9999)
@@ -2938,7 +2967,10 @@ func _unhandled_input(ev):
 				selected_structure_type = "ward"
 				action_menu.clear()
 				action_menu.add_item("Ward Vision", ACTION_WARD_VISION_ID)
-				action_menu.add_item("Always Vision", ACTION_WARD_VISION_ALWAYS_ID)
+				if bool(ward_state.get("auto_ward", false)):
+					action_menu.add_item("Stop Vision", ACTION_WARD_VISION_STOP_ID)
+				else:
+					action_menu.add_item("Always Vision", ACTION_WARD_VISION_ALWAYS_ID)
 				last_click_pos = ev.position
 				var menu_pos = ev.position
 				var menu_size = action_menu.size

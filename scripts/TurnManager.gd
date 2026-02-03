@@ -2984,7 +2984,7 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 		result["reason"] = "invalid_order"
 		return result
 	var order_type = str(order.get("type", ""))
-	if order_type == "ward_vision" or order_type == "ward_vision_always":
+	if order_type == "ward_vision" or order_type == "ward_vision_always" or order_type == "ward_vision_stop":
 		var ward_raw = order.get("ward_tile", Vector2i(-9999, -9999))
 		var ward_tile: Vector2i
 		if typeof(ward_raw) == TYPE_VECTOR2I:
@@ -3005,6 +3005,17 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 			result["reason"] = "invalid_structure"
 			return result
 		var ward_id = _ensure_ward_id(ward_state, ward_tile)
+		if order_type == "ward_vision_stop":
+			ward_state["auto_ward"] = false
+			_remove_player_order(player_id, ward_id)
+			result["ok"] = true
+			result["order"] = {
+				"unit_net_id": ward_id,
+				"type": "ward_vision_stop",
+				"ward_tile": ward_tile
+			}
+			result["unit_net_id"] = ward_id
+			return result
 		if player_mana.get(player_id, 0) < WARD_VISION_MANA_COST:
 			result["reason"] = "not_enough_mana"
 			return result
