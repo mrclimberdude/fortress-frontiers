@@ -1355,6 +1355,20 @@ func _queue_neutral_attack_to_combat_maps(attacker, target, atk_mode: String, ra
 	var src_map = ranged_sources if atk_mode == "ranged" else melee_sources
 	_queue_neutral_attack(attacker, target, atk_mode, dmg_map, src_map, dmg_map, src_map)
 
+func _camp_archer_attack_target(neutral):
+	if neutral == null:
+		return null
+	var candidates = _units_in_range_los(neutral.grid_pos, camp_archer_range)
+	if candidates.size() == 0:
+		return null
+	var weights := []
+	for unit in candidates:
+		weights.append(_target_weight(unit, neutral.grid_pos))
+	var idx = _pick_weighted_index(weights)
+	if idx < 0:
+		return null
+	return candidates[idx]
+
 func _dragon_attack_targets(neutral) -> Dictionary:
 	var targets := { "melee": [], "ranged": [] }
 	if neutral == null:
@@ -4125,25 +4139,80 @@ func _process_spells() -> void:
 		_remove_player_order(player_id, entry["unit_net_id"])
 	$GameBoardNode/FogOfWar._update_fog()
 
-func _queue_dragon_last_breath_attacks(ranged_dmg: Dictionary, melee_dmg: Dictionary, ranged_sources: Dictionary, melee_sources: Dictionary) -> void:
+func _queue_neutral_last_breath_attacks(ranged_dmg: Dictionary, melee_dmg: Dictionary, ranged_sources: Dictionary, melee_sources: Dictionary) -> void:
 	var neutral_units = $GameBoardNode.get_all_units().get("neutral", [])
 	if neutral_units.is_empty():
 		return
 	for neutral in neutral_units:
 		if neutral == null or neutral.curr_health <= 0:
 			continue
-		if neutral.unit_type != DRAGON_TYPE:
-			continue
 		var incoming = ranged_dmg.get(neutral.net_id, 0) + melee_dmg.get(neutral.net_id, 0)
 		if incoming <= 0:
 			continue
 		if incoming < neutral.curr_health:
 			continue
-		var targets = _dragon_attack_targets(neutral)
+		if neutral.unit_type == CAMP_ARCHER_TYPE:
+			var target = _camp_archer_attack_target(neutral)
+			if target != null:
+				_queue_neutral_attack_to_combat_maps(neutral, target, "ranged", ranged_dmg, melee_dmg, ranged_sources, melee_sources)
+		elif neutral.unit_type == DRAGON_TYPE:
+			var targets = _dragon_attack_targets(neutral)
+			for target in targets.get("melee", []):
+				_queue_neutral_attack_to_combat_maps(neutral, target, "melee", ranged_dmg, melee_dmg, ranged_sources, melee_sources)
+			for target in targets.get("ranged", []):
+				_queue_neutral_attack_to_combat_maps(neutral, target, "ranged", ranged_dmg, melee_dmg, ranged_sources, melee_sources)
+
+func _resolve_neutral_last_breath(attacker, protected_ids: Dictionary = {}) -> void:
+	if attacker == null or not is_instance_valid(attacker):
+		return
+	if attacker.player_id != "neutral":
+		return
+	if attacker.unit_type not in [CAMP_ARCHER_TYPE, DRAGON_TYPE]:
+		return
+	var neutral_dmg: Dictionary = {}
+	var neutral_sources: Dictionary = {}
+	var retaliation_dmg: Dictionary = {}
+	var retaliation_sources: Dictionary = {}
+	if attacker.unit_type == CAMP_ARCHER_TYPE:
+		var target = _camp_archer_attack_target(attacker)
+		if target != null:
+			_queue_neutral_attack(attacker, target, "ranged", neutral_dmg, neutral_sources, retaliation_dmg, retaliation_sources)
+	elif attacker.unit_type == DRAGON_TYPE:
+		var targets = _dragon_attack_targets(attacker)
 		for target in targets.get("melee", []):
-			_queue_neutral_attack_to_combat_maps(neutral, target, "melee", ranged_dmg, melee_dmg, ranged_sources, melee_sources)
+			_queue_neutral_attack(attacker, target, "melee", neutral_dmg, neutral_sources, retaliation_dmg, retaliation_sources)
 		for target in targets.get("ranged", []):
-			_queue_neutral_attack_to_combat_maps(neutral, target, "ranged", ranged_dmg, melee_dmg, ranged_sources, melee_sources)
+			_queue_neutral_attack(attacker, target, "ranged", neutral_dmg, neutral_sources, retaliation_dmg, retaliation_sources)
+	var target_ids = neutral_dmg.keys()
+	target_ids.sort()
+	for target_net_id in target_ids:
+		var target = unit_manager.get_unit_by_net_id(target_net_id)
+		if target == null:
+			continue
+		target.curr_health -= neutral_dmg[target_net_id]
+		_assign_last_damaged_by(target, neutral_sources, target_net_id)
+		if target.curr_health <= 0:
+			if protected_ids.has(target.net_id):
+				target.set_health_bar()
+			else:
+				_cleanup_dead_unit(target)
+		else:
+			target.set_health_bar()
+	var retaliation_ids = retaliation_dmg.keys()
+	retaliation_ids.sort()
+	for target_net_id in retaliation_ids:
+		var target = unit_manager.get_unit_by_net_id(target_net_id)
+		if target == null:
+			continue
+		target.curr_health -= retaliation_dmg[target_net_id]
+		_assign_last_damaged_by(target, retaliation_sources, target_net_id)
+		if target.curr_health <= 0:
+			if protected_ids.has(target.net_id):
+				target.set_health_bar()
+			else:
+				_cleanup_dead_unit(target)
+		else:
+			target.set_health_bar()
 
 func _process_attacks():
 	var ranged_attacks: Dictionary = {} # key: target.net_id, value: [attacker.net_id]
@@ -4310,7 +4379,7 @@ func _process_attacks():
 	for target_net_id in spell_dmg.keys():
 		ranged_dmg[target_net_id] = ranged_dmg.get(target_net_id, 0) + spell_dmg[target_net_id]
 
-	_queue_dragon_last_breath_attacks(ranged_dmg, melee_dmg, ranged_sources, melee_sources)
+	_queue_neutral_last_breath_attacks(ranged_dmg, melee_dmg, ranged_sources, melee_sources)
 	
 	# deal ranged damage
 	target_ids = ranged_dmg.keys()
@@ -4641,15 +4710,10 @@ func _process_neutral_attacks() -> void:
 			continue
 		var attacked = false
 		if neutral.unit_type == CAMP_ARCHER_TYPE:
-			var candidates = _units_in_range_los(neutral.grid_pos, camp_archer_range)
-			if candidates.size() > 0:
-				var weights := []
-				for unit in candidates:
-					weights.append(_target_weight(unit, neutral.grid_pos))
-				var idx = _pick_weighted_index(weights)
-				if idx >= 0:
-					_queue_neutral_attack(neutral, candidates[idx], "ranged", neutral_dmg, neutral_sources, retaliation_dmg, retaliation_sources)
-					attacked = true
+			var target = _camp_archer_attack_target(neutral)
+			if target != null:
+				_queue_neutral_attack(neutral, target, "ranged", neutral_dmg, neutral_sources, retaliation_dmg, retaliation_sources)
+				attacked = true
 		elif neutral.unit_type == DRAGON_TYPE:
 			var targets = _dragon_attack_targets(neutral)
 			for target in targets.get("melee", []):
@@ -4713,7 +4777,14 @@ func _mg_resolve_enemy_swap(a_pos: Vector2i, b_pos: Vector2i) -> void:
 
 	var ua_dead = ua.curr_health <= 0
 	var ub_dead = ub.curr_health <= 0
-	
+	var protected_ids := { ua.net_id: true, ub.net_id: true }
+	if ua_dead and ua.player_id == "neutral":
+		_resolve_neutral_last_breath(ua, protected_ids)
+	if ub_dead and ub.player_id == "neutral":
+		_resolve_neutral_last_breath(ub, protected_ids)
+	ua_dead = ua.curr_health <= 0
+	ub_dead = ub.curr_health <= 0
+
 	if ua_dead and ub_dead:
 		_cleanup_dead_unit(ua)
 		_cleanup_dead_unit(ub)
@@ -4847,6 +4918,15 @@ func _mg_tile_fifo_commit(t: Vector2i, entrants: Array, stationary_defender: Nod
 			atk.last_damaged_by = retaliator.player_id
 			atk.set_health_bar()
 		dealt_dmg_report(atk, stationary_defender, ret_dmg, dmg[1], retaliate, "move")
+		var protected_ids := {}
+		if atk != null:
+			protected_ids[atk.net_id] = true
+		if stationary_defender != null:
+			protected_ids[stationary_defender.net_id] = true
+		if atk != null and atk.curr_health <= 0 and atk.player_id == "neutral":
+			_resolve_neutral_last_breath(atk, protected_ids)
+		if stationary_defender != null and stationary_defender.curr_health <= 0 and stationary_defender.player_id == "neutral":
+			_resolve_neutral_last_breath(stationary_defender, protected_ids)
 
 		# Attacker fought this tick -> stop and clear order
 		atk.is_moving = false
@@ -4854,15 +4934,19 @@ func _mg_tile_fifo_commit(t: Vector2i, entrants: Array, stationary_defender: Nod
 			NetworkManager.player_orders[atk.player_id].erase(atk.net_id)
 
 		# Handle deaths
-		if atk.curr_health <= 0:
-			_cleanup_dead_unit(atk)
+		var atk_dead = atk == null or not is_instance_valid(atk) or atk.curr_health <= 0
+		var defender_dead = stationary_defender == null or not is_instance_valid(stationary_defender) or stationary_defender.curr_health <= 0
+		if atk_dead:
+			if atk != null and is_instance_valid(atk):
+				_cleanup_dead_unit(atk)
 			enemy_item = null
-		if stationary_defender.curr_health <= 0:
+		if defender_dead:
 			# Defender died at atk's hand; remember killer if alive
-			if atk != null and atk.curr_health > 0:
+			if atk != null and is_instance_valid(atk) and atk.curr_health > 0:
 				killer_item = {"from": atk.grid_pos, "unit": atk, "fought": true}
 			# Remove defender from board
-			_cleanup_dead_unit(stationary_defender)
+			if stationary_defender != null and is_instance_valid(stationary_defender):
+				_cleanup_dead_unit(stationary_defender)
 			stationary_defender = null
 			if fallback_defender != null and is_instance_valid(fallback_defender) and fallback_defender.curr_health > 0:
 				stationary_defender = fallback_defender
@@ -4965,6 +5049,13 @@ func _fifo_resolve_empty_tile(dest: Vector2i, qA: Array, qB: Array) -> Variant:
 
 		var ua_dead = ua.curr_health <= 0
 		var ub_dead = ub.curr_health <= 0
+		var protected_ids := { ua.net_id: true, ub.net_id: true }
+		if ua_dead and ua.player_id == "neutral":
+			_resolve_neutral_last_breath(ua, protected_ids)
+		if ub_dead and ub.player_id == "neutral":
+			_resolve_neutral_last_breath(ub, protected_ids)
+		ua_dead = ua.curr_health <= 0
+		ub_dead = ub.curr_health <= 0
 		if ua_dead:
 			_cleanup_dead_unit(ua)
 		if ub_dead:
