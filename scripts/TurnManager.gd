@@ -140,13 +140,13 @@ var player_gold       := { "player1": 25, "player2": 25 }
 var player_income    := { "player1": 0, "player2": 0 }
 var player_mana       := { "player1": 0, "player2": 0 }
 var player_mana_income := { "player1": 0, "player2": 0 }
-var player_mana_cap   := { "player1": 50, "player2": 50 }
+var player_mana_cap   := { "player1": 0, "player2": 0 }
 const BASE_INCOME    : int = 10
 const TOWER_INCOME   : int = 5
 const SPECIAL_INCOME : int = 10
 const MINER_BONUS    : int = 15
 const CRYSTAL_MINER_MANA : int = 10
-const BASE_MANA_CAP : int = 50
+const BASE_MANA_CAP : int = 0
 const MANA_POOL_CAP_BONUS : int = 100
 const PHALANX_BONUS     : int = 20
 const PHALANX_ADJ_BONUS : int = 2
@@ -405,14 +405,20 @@ func get_ward_vision_tiles(player_id: String) -> Array:
 			tiles.append(tile)
 	return tiles
 
-func _adjacent_mines(cell: Vector2i) -> Array:
+func _adjacent_mana_sources(cell: Vector2i, owner: String = "") -> Array:
 	var all_mines: Array = []
-	for owner in ["unclaimed", "player1", "player2"]:
-		all_mines.append_array(mines.get(owner, []))
+	for mine_owner in ["unclaimed", "player1", "player2"]:
+		all_mines.append_array(mines.get(mine_owner, []))
 	var adj := []
-	for neighbor in $GameBoardNode.get_offset_neighbors(cell):
+	var neighbors = $GameBoardNode.get_offset_neighbors(cell)
+	for neighbor in neighbors:
 		if neighbor in all_mines:
 			adj.append(neighbor)
+	if owner != "":
+		var base_pos = base_positions.get(owner, Vector2i(-9999, -9999))
+		if base_pos != Vector2i(-9999, -9999) and base_pos in neighbors:
+			if base_pos not in adj:
+				adj.append(base_pos)
 	return adj
 
 func _adjacent_mana_pools(cell: Vector2i, owner: String) -> Array:
@@ -433,7 +439,7 @@ func _adjacent_mana_pools(cell: Vector2i, owner: String) -> Array:
 func _pick_mana_pump_pair(cell: Vector2i, owner: String) -> Dictionary:
 	if owner == "":
 		return {}
-	var mines_adj = _adjacent_mines(cell)
+	var mines_adj = _adjacent_mana_sources(cell, owner)
 	var pools_adj = _adjacent_mana_pools(cell, owner)
 	if mines_adj.is_empty() or pools_adj.is_empty():
 		return {}
@@ -462,8 +468,8 @@ func _reserved_mana_pool_mines(exclude_unit_id: int) -> Dictionary:
 				reserved[mine] = true
 	return reserved
 
-func _pick_mana_pool_mine(cell: Vector2i, exclude_unit_id: int = -1) -> Vector2i:
-	var candidates = _adjacent_mines(cell)
+func _pick_mana_pool_mine(cell: Vector2i, owner: String, exclude_unit_id: int = -1) -> Vector2i:
+	var candidates = _adjacent_mana_sources(cell, owner)
 	if candidates.is_empty():
 		return Vector2i(-9999, -9999)
 	var used := {}
@@ -495,7 +501,7 @@ func _rebuild_mana_pool_assignments() -> void:
 		var state = buildable_structures[cell]
 		var mine = state.get("mana_mine", null)
 		if typeof(mine) != TYPE_VECTOR2I:
-			mine = _pick_mana_pool_mine(cell)
+			mine = _pick_mana_pool_mine(cell, str(state.get("owner", "")))
 		if typeof(mine) == TYPE_VECTOR2I and mine != Vector2i(-9999, -9999):
 			mana_pool_mines[cell] = mine
 			state["mana_mine"] = mine
@@ -3559,7 +3565,7 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 						result["reason"] = "invalid_tile"
 						return result
 				if struct_type == STRUCT_MANA_POOL:
-					var mine_choice = _pick_mana_pool_mine(target_tile, unit_net_id)
+					var mine_choice = _pick_mana_pool_mine(target_tile, player_id, unit_net_id)
 					if mine_choice == Vector2i(-9999, -9999):
 						result["reason"] = "invalid_structure"
 						return result
@@ -4554,7 +4560,7 @@ func _apply_build_at(player_id: String, unit, order: Dictionary) -> void:
 		if struct_type == STRUCT_MANA_POOL:
 			var mine_choice = order.get("mana_mine", Vector2i(-9999, -9999))
 			if typeof(mine_choice) != TYPE_VECTOR2I or mine_choice == Vector2i(-9999, -9999):
-				mine_choice = _pick_mana_pool_mine(tile)
+				mine_choice = _pick_mana_pool_mine(tile, player_id)
 			if mine_choice == Vector2i(-9999, -9999):
 				return
 			state["mana_mine"] = mine_choice
