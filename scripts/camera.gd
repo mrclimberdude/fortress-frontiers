@@ -13,9 +13,15 @@ func _ready():
 func _unhandled_input(event):
 	if event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			var mouse_before = get_global_mouse_position()
 			zoom *= Vector2(1 - zoom_speed, 1 - zoom_speed)
+			var mouse_after = get_global_mouse_position()
+			position += mouse_before - mouse_after
 		elif event.button_index == MOUSE_BUTTON_WHEEL_UP:
+			var mouse_before = get_global_mouse_position()
 			zoom *= Vector2(1 + zoom_speed, 1 + zoom_speed)
+			var mouse_after = get_global_mouse_position()
+			position += mouse_before - mouse_after
 		elif event.button_index == MOUSE_BUTTON_RIGHT:
 			# Begin or end panning
 			if event.pressed:
