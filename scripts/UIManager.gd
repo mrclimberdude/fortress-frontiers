@@ -269,11 +269,11 @@ func _ready():
 	var unit_specials = [
 		"Sight 3; lookout; forest cost 1",
 		"Mine bonus +15 on mine",
-		"Mine bonus +5 mana on mine",
+		"Mine bonus +10 mana on mine",
 		"Build/repair/sabotage; queue roads/rails",
 		"None",
 		"Ranged range 2",
-		"Cast spells (range 3)",
+		"Cast spells (range 3, +1 in tower)",
 		"Defend: +20 melee, no multi-def penalty; adjacent allies +2",
 		"Sight 3"
 	]
@@ -335,9 +335,9 @@ func _ready():
 		{"name": "Fortification", "cost": turn_mgr.get_build_turn_cost("fortification"), "turns": short_turns, "effect": "+%s melee/ranged (atk/def)" % fort_bonus},
 		{"name": "Road", "cost": turn_mgr.get_build_turn_cost("road"), "turns": short_turns, "effect": "Move x0.5; +1 turn on river; mines +10 if connected"},
 		{"name": "Railroad", "cost": turn_mgr.get_build_turn_cost("rail"), "turns": short_turns, "effect": "Move x0.25; upgrade intact road; rail build counts as road; +1 turn on river; mines +20 if connected"},
-		{"name": "Mana Pool", "cost": turn_mgr.get_build_turn_cost("mana_pool"), "turns": mana_turns, "effect": "Adjacent to mine; +100 mana cap; one per mine"},
-		{"name": "Mana Pump", "cost": turn_mgr.get_build_turn_cost("mana_pump"), "turns": pump_turns, "effect": "Triangle with mine+pool; +5 mana/turn if mine controlled & pool intact"},
-		{"name": "Ward", "cost": turn_mgr.get_build_turn_cost("ward"), "turns": short_turns, "effect": "Hidden from enemies except wizards; spend 5 mana for vision radius 2"},
+		{"name": "Mana Pool", "cost": turn_mgr.get_build_turn_cost("mana_pool"), "turns": mana_turns, "effect": "Adjacent to mine or base; +100 mana cap; one per mine/base"},
+		{"name": "Mana Pump", "cost": turn_mgr.get_build_turn_cost("mana_pump"), "turns": pump_turns, "effect": "Triangle with mine/base + pool; +5 mana/turn if source controlled & pool intact"},
+		{"name": "Ward", "cost": turn_mgr.get_build_turn_cost("ward"), "turns": short_turns, "effect": "Hidden from enemies except wizards; spend 5 mana for vision radius 2; sees through forests"},
 		{"name": "Spawn Tower", "cost": turn_mgr.get_build_turn_cost("spawn_tower"), "turns": tower_turns, "effect": "Spawn point; tower bonuses; no income; needs road/rail link"},
 		{"name": "Trap", "cost": turn_mgr.get_build_turn_cost("trap"), "turns": short_turns, "effect": "Hidden from enemies; triggers to disable, stop movement, deal 30 dmg"}
 	]
@@ -357,10 +357,10 @@ func _ready():
 	var spell_col_widths = [120.0, 80.0, 80.0]
 	_add_build_stats_row(spell_container, ["Spell", "Cost", "Phase", "Effect"], spell_col_widths, base_font, true, true)
 	var spell_rows = [
-		{"name": "Heal", "cost": turn_mgr.get_spell_cost("heal"), "phase": "Spells", "effect": "Heal 25; range 3; requires vision"},
-		{"name": "Fireball", "cost": turn_mgr.get_spell_cost("fireball"), "phase": "Attacks", "effect": "50 dmg units; 10 dmg tower/base; range 3; requires vision"},
-		{"name": "Combat Buff", "cost": turn_mgr.get_spell_cost("buff"), "phase": "Spells", "effect": "+5 melee/ranged for 1 turn; range 3; requires vision"},
-		{"name": "Lightning", "cost": turn_mgr.get_spell_cost("lightning"), "phase": "Attacks", "effect": "32 dmg + chain halving to adjacent enemies; range 3; requires vision"}
+		{"name": "Heal", "cost": turn_mgr.get_spell_cost("heal"), "phase": "Spells", "effect": "Heal 25; range 3"},
+		{"name": "Fireball", "cost": turn_mgr.get_spell_cost("fireball"), "phase": "Attacks", "effect": "50 dmg units; 10 dmg tower/base; range 3"},
+		{"name": "Combat Buff", "cost": turn_mgr.get_spell_cost("buff"), "phase": "Spells", "effect": "+5 melee/ranged for 1 turn; range 3"},
+		{"name": "Lightning", "cost": turn_mgr.get_spell_cost("lightning"), "phase": "Attacks", "effect": "32 dmg + chain halving to adjacent enemies; range 3"}
 	]
 	for i in range(spell_rows.size()):
 		var row = spell_rows[i]
