@@ -257,10 +257,13 @@ const TOWER_RANGE_BONUS: int = 1
 const SPELL_RANGE: int = 3
 const SPELL_COST_HEAL: int = 15
 const SPELL_COST_FIREBALL: int = 40
-const SPELL_COST_BUFF: int = 25
+const SPELL_COST_BUFF: int = 0
 const SPELL_COST_LIGHTNING: int = 50
 const SPELL_COST_GLOBAL_VISION: int = 250
 const SPELL_COST_TARGETED_VISION: int = 10
+const SPELL_BUFF_MIN: int = 5
+const SPELL_BUFF_MAX: int = 100
+const SPELL_BUFF_STEP: int = 5
 const SPELL_HEAL_AMOUNT: int = 25
 const SPELL_FIREBALL_DAMAGE: int = 50
 const SPELL_FIREBALL_DRAGON_DAMAGE: int = 15
@@ -2093,8 +2096,8 @@ func _apply_units(units_data: Array) -> void:
 		unit.first_turn_move = bool(data.get("first_turn_move", false))
 		unit.ordered = bool(data.get("ordered", false))
 		unit.last_damaged_by = data.get("last_damaged_by", "")
-		unit.spell_buff_melee = int(data.get("spell_buff_melee", 0))
-		unit.spell_buff_ranged = int(data.get("spell_buff_ranged", 0))
+		unit.spell_buff_melee = float(data.get("spell_buff_melee", 0.0))
+		unit.spell_buff_ranged = float(data.get("spell_buff_ranged", 0.0))
 		unit.spell_buff_turns = int(data.get("spell_buff_turns", 0))
 		unit.set_health_bar()
 		if unit.is_tower and spawn_tower_positions.has(unit.player_id):
@@ -2546,8 +2549,8 @@ func _do_upkeep() -> void:
 			if unit.spell_buff_turns > 0:
 				unit.spell_buff_turns -= 1
 				if unit.spell_buff_turns <= 0:
-					unit.spell_buff_melee = 0
-					unit.spell_buff_ranged = 0
+					unit.spell_buff_melee = 0.0
+					unit.spell_buff_ranged = 0.0
 			if unit.is_healing:
 				unit.curr_health = min(unit.max_health, unit.curr_health + unit.regen)
 				unit.set_health_bar()
@@ -3485,6 +3488,16 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 					result["reason"] = "out_of_range"
 					return result
 				var spell_cost = get_spell_cost(spell_type)
+				if spell_type == SPELL_BUFF:
+					var mana_spent = int(order.get("mana_spent", 0))
+					if mana_spent < SPELL_BUFF_MIN or mana_spent > SPELL_BUFF_MAX:
+						result["reason"] = "invalid_target"
+						return result
+					if mana_spent % SPELL_BUFF_STEP != 0:
+						result["reason"] = "invalid_target"
+						return result
+					spell_cost = mana_spent
+					sanitized["mana_spent"] = mana_spent
 				if player_mana.get(player_id, 0) < spell_cost:
 					result["reason"] = "not_enough_mana"
 					return result
@@ -4308,6 +4321,14 @@ func _process_spells() -> void:
 			continue
 		var spell_type = str(order.get("spell_type", ""))
 		var spell_cost = get_spell_cost(spell_type)
+		var buff_amount := 0.0
+		if spell_type == SPELL_BUFF:
+			var mana_spent = int(order.get("mana_spent", 0))
+			if mana_spent < SPELL_BUFF_MIN or mana_spent > SPELL_BUFF_MAX or mana_spent % SPELL_BUFF_STEP != 0:
+				_remove_player_order(player_id, entry["unit_net_id"])
+				continue
+			spell_cost = mana_spent
+			buff_amount = snappedf(float(mana_spent) * 0.1, 0.1)
 		if player_mana.get(player_id, 0) < spell_cost:
 			_remove_player_order(player_id, entry["unit_net_id"])
 			continue
@@ -4317,8 +4338,8 @@ func _process_spells() -> void:
 			target.curr_health = min(target.max_health, target.curr_health + SPELL_HEAL_AMOUNT)
 			target.set_health_bar()
 		elif spell_type == SPELL_BUFF:
-			target.spell_buff_melee = SPELL_BUFF_AMOUNT
-			target.spell_buff_ranged = SPELL_BUFF_AMOUNT
+			target.spell_buff_melee = buff_amount
+			target.spell_buff_ranged = buff_amount
 			target.spell_buff_turns = SPELL_BUFF_TURNS
 		_remove_player_order(player_id, entry["unit_net_id"])
 	$GameBoardNode/FogOfWar._update_fog()

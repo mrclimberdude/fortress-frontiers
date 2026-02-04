@@ -25,6 +25,9 @@ var last_click_pos: Vector2 = Vector2.ZERO
 var current_spell_type: String = ""
 var spell_tiles: Array = []
 var spell_caster: Node = null
+var current_spell_mana_spent: int = 0
+var pending_spell_type: String = ""
+var _buff_input_updating: bool = false
 var selected_structure_tile: Vector2i = Vector2i(-9999, -9999)
 var selected_structure_type: String = ""
 var _build_hover_root: Node2D = null
@@ -56,6 +59,11 @@ var _default_camera_zoom: Vector2 = Vector2.ZERO
 @onready var resource_panel = $ResourcePanel as Panel
 @onready var gold_resource_lbl = $ResourcePanel/VBoxContainer/GoldResourceLabel as Label
 @onready var mana_resource_lbl = $ResourcePanel/VBoxContainer/ManaResourceLabel as Label
+@onready var buff_mana_panel = $BuffManaPanel as Panel
+@onready var buff_mana_slider = $BuffManaPanel/VBoxContainer/ValueRow/BuffManaSlider as HSlider
+@onready var buff_mana_input = $BuffManaPanel/VBoxContainer/ValueRow/ValueInput as LineEdit
+@onready var buff_mana_ok = $BuffManaPanel/VBoxContainer/Buttons/OkButton as Button
+@onready var buff_mana_cancel = $BuffManaPanel/VBoxContainer/Buttons/CancelButton as Button
 @onready var action_menu: PopupMenu      = $Panel/ActionMenu as PopupMenu
 @onready var build_menu: PopupMenu = PopupMenu.new()
 @onready var spell_menu: PopupMenu = PopupMenu.new()
@@ -205,6 +213,20 @@ func _ready():
 	if damage_toggle_button != null:
 		damage_toggle_button.connect("pressed",
 					 Callable(self, "_on_damage_toggle_pressed"))
+	if buff_mana_slider != null:
+		buff_mana_slider.connect("value_changed",
+					Callable(self, "_on_buff_mana_value_changed"))
+	if buff_mana_input != null:
+		buff_mana_input.connect("text_changed",
+					Callable(self, "_on_buff_mana_text_changed"))
+		buff_mana_input.connect("text_submitted",
+					Callable(self, "_on_buff_mana_text_submitted"))
+	if buff_mana_ok != null:
+		buff_mana_ok.connect("pressed",
+					Callable(self, "_on_buff_mana_confirm"))
+	if buff_mana_cancel != null:
+		buff_mana_cancel.connect("pressed",
+					Callable(self, "_on_buff_mana_cancel"))
 	if damage_resize_handle != null:
 		damage_resize_handle.connect("gui_input",
 					Callable(self, "_on_damage_resize_input"))
@@ -372,10 +394,10 @@ func _ready():
 	var spell_rows = [
 		{"name": "Heal", "cost": turn_mgr.get_spell_cost("heal"), "phase": "Spells", "effect": "Heal 25; range 3"},
 		{"name": "Fireball", "cost": turn_mgr.get_spell_cost("fireball"), "phase": "Attacks", "effect": "50 dmg units; 10 dmg tower/base; range 3"},
-		{"name": "Combat Buff", "cost": turn_mgr.get_spell_cost("buff"), "phase": "Spells", "effect": "+5 melee/ranged for 1 turn; range 3"},
+		{"name": "Combat Buff", "cost": "5-100", "phase": "Spells", "effect": "Spend 5-100 mana; +0.1 melee/ranged per mana; 1 turn"},
 		{"name": "Lightning", "cost": turn_mgr.get_spell_cost("lightning"), "phase": "Attacks", "effect": "32 dmg + chain halving to adjacent enemies; range 3"},
 		{"name": "Global Vision", "cost": turn_mgr.get_spell_cost("global_vision"), "phase": "Spawns", "effect": "Reveal all explored tiles for 1 turn"},
-		{"name": "Targeted Vision", "cost": turn_mgr.get_spell_cost("targeted_vision"), "phase": "Spawns", "effect": "Ward-like vision for 1 turn; range 3"}
+		{"name": "Targeted Vision", "cost": turn_mgr.get_spell_cost("targeted_vision"), "phase": "Spawns", "effect": "Ward vision radius 2 for 1 turn; cast range 3"}
 	]
 	for i in range(spell_rows.size()):
 		var row = spell_rows[i]
@@ -1028,9 +1050,12 @@ func _refresh_build_menu_labels() -> void:
 func _refresh_spell_menu_labels() -> void:
 	for entry in SPELL_OPTIONS:
 		var label = entry["label"]
-		var mana_cost = int(turn_mgr.get_spell_cost(entry["type"]))
-		if mana_cost > 0:
-			label = "%s (%d mana)" % [label, mana_cost]
+		if entry["type"] == turn_mgr.SPELL_BUFF:
+			label = "%s (5-100 mana)" % label
+		else:
+			var mana_cost = int(turn_mgr.get_spell_cost(entry["type"]))
+			if mana_cost > 0:
+				label = "%s (%d mana)" % [label, mana_cost]
 		var idx = -1
 		for i in range(spell_menu.get_item_count()):
 			if spell_menu.get_item_id(i) == entry["id"]:
@@ -1038,6 +1063,111 @@ func _refresh_spell_menu_labels() -> void:
 				break
 		if idx >= 0:
 			spell_menu.set_item_text(idx, label)
+
+func _show_buff_mana_panel() -> void:
+	if buff_mana_panel == null or buff_mana_slider == null or buff_mana_input == null:
+		return
+	var min_mana = int(turn_mgr.SPELL_BUFF_MIN)
+	var max_mana = int(turn_mgr.SPELL_BUFF_MAX)
+	var available = int(turn_mgr.player_mana.get(current_player, 0))
+	max_mana = min(max_mana, available)
+	if max_mana < min_mana:
+		status_lbl.text = "[Not enough mana]"
+		pending_spell_type = ""
+		buff_mana_panel.visible = false
+		return
+	buff_mana_slider.min_value = float(min_mana)
+	buff_mana_slider.max_value = float(max_mana)
+	buff_mana_slider.step = float(turn_mgr.SPELL_BUFF_STEP)
+	var start_value = clamp(int(buff_mana_slider.value), min_mana, max_mana)
+	if start_value < min_mana:
+		start_value = min_mana
+	buff_mana_slider.value = float(start_value)
+	if buff_mana_input != null:
+		_buff_input_updating = true
+		buff_mana_input.text = str(start_value)
+		_buff_input_updating = false
+	_on_buff_mana_value_changed(buff_mana_slider.value)
+	var viewport_size = get_viewport().get_visible_rect().size
+	var panel_size = buff_mana_panel.size
+	if panel_size == Vector2.ZERO:
+		panel_size = buff_mana_panel.get_minimum_size()
+	var pos = last_click_pos
+	pos.x = clamp(pos.x, 0.0, max(0.0, viewport_size.x - panel_size.x))
+	pos.y = clamp(pos.y, 0.0, max(0.0, viewport_size.y - panel_size.y))
+	buff_mana_panel.position = pos
+	buff_mana_panel.visible = true
+
+func _snap_buff_mana_value(value: int, min_mana: int, max_mana: int) -> int:
+	var step = int(turn_mgr.SPELL_BUFF_STEP)
+	var snapped = int(round(float(value) / float(step))) * step
+	return clamp(snapped, min_mana, max_mana)
+
+func _on_buff_mana_value_changed(value: float) -> void:
+	if _buff_input_updating:
+		return
+	var min_mana = int(turn_mgr.SPELL_BUFF_MIN)
+	var max_mana = int(turn_mgr.SPELL_BUFF_MAX)
+	var snapped = _snap_buff_mana_value(int(round(value)), min_mana, max_mana)
+	current_spell_mana_spent = snapped
+	if buff_mana_input != null:
+		_buff_input_updating = true
+		buff_mana_input.text = str(snapped)
+		_buff_input_updating = false
+
+func _on_buff_mana_text_changed(text: String) -> void:
+	if _buff_input_updating:
+		return
+	if buff_mana_slider == null:
+		return
+	var value = int(text) if text.is_valid_int() else -1
+	if value < 0:
+		return
+	var min_mana = int(turn_mgr.SPELL_BUFF_MIN)
+	var max_mana = int(turn_mgr.SPELL_BUFF_MAX)
+	var snapped = _snap_buff_mana_value(value, min_mana, max_mana)
+	_buff_input_updating = true
+	buff_mana_slider.value = float(snapped)
+	_buff_input_updating = false
+	current_spell_mana_spent = snapped
+
+func _on_buff_mana_text_submitted(text: String) -> void:
+	_on_buff_mana_text_changed(text)
+
+func _on_buff_mana_confirm() -> void:
+	if pending_spell_type != turn_mgr.SPELL_BUFF:
+		buff_mana_panel.visible = false
+		return
+	buff_mana_panel.visible = false
+	current_spell_mana_spent = int(buff_mana_slider.value)
+	action_mode = "spell"
+	current_spell_type = pending_spell_type
+	pending_spell_type = ""
+	spell_tiles = _get_spell_target_tiles(spell_caster, current_spell_type)
+	if spell_tiles.is_empty():
+		status_lbl.text = "[No valid spell targets]"
+		action_mode = ""
+		current_spell_type = ""
+		current_spell_mana_spent = 0
+		spell_caster = null
+		if buff_mana_input != null:
+			_buff_input_updating = true
+			buff_mana_input.text = str(int(turn_mgr.SPELL_BUFF_MIN))
+			_buff_input_updating = false
+		return
+	game_board.show_highlights(spell_tiles)
+
+func _on_buff_mana_cancel() -> void:
+	pending_spell_type = ""
+	current_spell_mana_spent = 0
+	if buff_mana_input != null:
+		_buff_input_updating = true
+		buff_mana_input.text = str(int(turn_mgr.SPELL_BUFF_MIN))
+		_buff_input_updating = false
+	spell_caster = null
+	current_spell_type = ""
+	spell_tiles = []
+	buff_mana_panel.visible = false
 
 func _get_spell_target_tiles(caster: Node, spell_type: String) -> Array:
 	var tiles := []
@@ -1449,7 +1579,10 @@ func _current_resource_spend(player_id: String) -> Dictionary:
 			spend["gold"] += int(turn_mgr.get_build_turn_cost(struct_type))
 		elif otype == "spell":
 			var spell_type = str(order.get("spell_type", ""))
-			spend["mana"] += int(turn_mgr.get_spell_cost(spell_type))
+			if spell_type == turn_mgr.SPELL_BUFF:
+				spend["mana"] += int(order.get("mana_spent", 0))
+			else:
+				spend["mana"] += int(turn_mgr.get_spell_cost(spell_type))
 		elif otype == "ward_vision":
 			spend["mana"] += int(turn_mgr.WARD_VISION_MANA_COST)
 	return spend
@@ -2062,6 +2195,10 @@ func _reset_ui_for_snapshot() -> void:
 	support_tiles = []
 	repair_tiles = []
 	current_spell_type = ""
+	current_spell_mana_spent = 0
+	pending_spell_type = ""
+	if buff_mana_panel != null:
+		buff_mana_panel.visible = false
 	spell_tiles = []
 	spell_caster = null
 	selected_structure_tile = Vector2i(-9999, -9999)
@@ -2398,6 +2535,16 @@ func _draw_supports():
 					buff_icon.position = p2 - dir * icon_offset
 					buff_icon.z_index = ORDER_ICON_Z
 					root.add_child(buff_icon)
+					var mana_spent = int(order.get("mana_spent", 0))
+					if mana_spent > 0:
+						var buff_amount = snappedf(float(mana_spent) * 0.1, 0.1)
+						var buff_label = Label.new()
+						buff_label.text = "+%.1f" % buff_amount
+						buff_label.add_theme_color_override("font_color", Color(0.2, 0.95, 0.2))
+						var normal := Vector2(-dir.y, dir.x)
+						buff_label.position = p2 + normal * 8.0
+						buff_label.z_index = 11
+						root.add_child(buff_label)
 			elif order["type"] == "spell" and str(order.get("spell_type", "")) == turn_mgr.SPELL_TARGETED_VISION:
 				var caster = unit_mgr.get_unit_by_net_id(order["unit_net_id"])
 				if not _should_draw_unit(caster):
@@ -2784,11 +2931,17 @@ func _on_spell_selected(id: int) -> void:
 		current_spell_type = ""
 		spell_tiles = []
 		spell_caster = null
+		current_spell_mana_spent = 0
 		game_board.clear_highlights()
 		_draw_all()
 		$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
 		_update_done_button_state()
 		_refresh_resource_labels()
+		return
+	if spell_type == turn_mgr.SPELL_BUFF:
+		spell_menu.hide()
+		pending_spell_type = spell_type
+		_show_buff_mana_panel()
 		return
 	action_mode = "spell"
 	current_spell_type = spell_type
@@ -3084,6 +3237,19 @@ func _unhandled_input(ev):
 					"spell_type": current_spell_type,
 					"target_tile": cell
 				})
+			elif current_spell_type == turn_mgr.SPELL_BUFF:
+				var target_unit = _spell_target_for_tile(cell, current_spell_type)
+				if target_unit == null:
+					action_mode = ""
+					return
+				NetworkManager.request_order(current_player, {
+					"unit_net_id": spell_caster.net_id,
+					"type": "spell",
+					"spell_type": current_spell_type,
+					"target_tile": cell,
+					"target_unit_net_id": target_unit.net_id,
+					"mana_spent": current_spell_mana_spent
+				})
 			else:
 				var target_unit = _spell_target_for_tile(cell, current_spell_type)
 				if target_unit == null:
@@ -3098,6 +3264,7 @@ func _unhandled_input(ev):
 				})
 		action_mode = ""
 		current_spell_type = ""
+		current_spell_mana_spent = 0
 		spell_tiles = []
 		spell_caster = null
 		return

@@ -463,6 +463,51 @@ layout_mode = 2
 [node name="ManaResourceLabel" type="Label" parent="UI/ResourcePanel/VBoxContainer"]
 layout_mode = 2
 
+[node name="BuffManaPanel" type="Panel" parent="UI"]
+visible = false
+offset_left = 235.0
+offset_top = 90.0
+offset_right = 505.0
+offset_bottom = 200.0
+
+[node name="VBoxContainer" type="VBoxContainer" parent="UI/BuffManaPanel"]
+layout_mode = 0
+offset_right = 270.0
+offset_bottom = 110.0
+
+[node name="TitleLabel" type="Label" parent="UI/BuffManaPanel/VBoxContainer"]
+layout_mode = 2
+text = "Combat Buff Mana"
+
+[node name="ValueRow" type="HBoxContainer" parent="UI/BuffManaPanel/VBoxContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="BuffManaSlider" type="HSlider" parent="UI/BuffManaPanel/VBoxContainer/ValueRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+min_value = 5.0
+step = 5.0
+value = 5.0
+
+[node name="ValueInput" type="LineEdit" parent="UI/BuffManaPanel/VBoxContainer/ValueRow"]
+custom_minimum_size = Vector2(50, 0)
+layout_mode = 2
+text = "5"
+max_length = 3
+
+[node name="Buttons" type="HBoxContainer" parent="UI/BuffManaPanel/VBoxContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="OkButton" type="Button" parent="UI/BuffManaPanel/VBoxContainer/Buttons"]
+layout_mode = 2
+text = "OK"
+
+[node name="CancelButton" type="Button" parent="UI/BuffManaPanel/VBoxContainer/Buttons"]
+layout_mode = 2
+text = "Cancel"
+
 [node name="UnitStatsCheckButton" type="CheckButton" parent="UI"]
 visible = false
 offset_left = 215.0
