@@ -52,6 +52,7 @@ var _default_camera_zoom: Vector2 = Vector2.ZERO
 @onready var game_board: Node = get_node("../GameBoardNode")
 @onready var hex = $"../GameBoardNode/HexTileMap"
 @onready var status_lbl = $Panel/VBoxContainer/StatusLabel as Label
+@onready var turn_label = $Panel/VBoxContainer/TurnLabel as Label
 @onready var resource_panel = $ResourcePanel as Panel
 @onready var gold_resource_lbl = $ResourcePanel/VBoxContainer/GoldResourceLabel as Label
 @onready var mana_resource_lbl = $ResourcePanel/VBoxContainer/ManaResourceLabel as Label
@@ -1089,6 +1090,7 @@ func _spell_target_for_tile(tile: Vector2i, spell_type: String) -> Node:
 func _on_orders_phase_begin(player: String) -> void:
 	# show the UI and reset state
 	current_player = player
+	_update_turn_label()
 	_refresh_resource_labels()
 	placing_unit  = ""
 	$Panel.visible = true
@@ -2828,6 +2830,7 @@ func finish_current_path():
 	
 func _on_state_applied() -> void:
 	_reset_ui_for_snapshot()
+	_update_turn_label()
 	if turn_mgr.current_phase == turn_mgr.Phase.ORDERS:
 		current_player = turn_mgr.local_player_id
 		_refresh_resource_labels()
@@ -2835,6 +2838,11 @@ func _on_state_applied() -> void:
 		_update_done_button_state()
 	_draw_all()
 	_update_auto_pass_for_damage()
+
+func _update_turn_label() -> void:
+	if turn_label == null or turn_mgr == null:
+		return
+	turn_label.text = "Turn %d" % int(turn_mgr.turn_number)
 
 
 func _unhandled_input(ev):

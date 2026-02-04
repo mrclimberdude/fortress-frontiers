@@ -381,6 +381,10 @@ offset_bottom = 462.0
 [node name="StatusLabel" type="Label" parent="UI/Panel/VBoxContainer"]
 layout_mode = 2
 
+[node name="TurnLabel" type="Label" parent="UI/Panel/VBoxContainer"]
+layout_mode = 2
+text = "Turn 0"
+
 [node name="ScoutButton" type="Button" parent="UI/Panel/VBoxContainer"]
 layout_mode = 2
 text = "Buy Scout"
