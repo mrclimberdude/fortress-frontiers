@@ -147,6 +147,10 @@ func _update_fog():
 			var ward_tiles = tm_root.get_ward_vision_tiles(player)
 			for cell in ward_tiles:
 				visiblity[player][cell] = 2
+		if tm_root != null and tm_root.has_method("get_targeted_vision_tiles"):
+			var targeted_tiles = tm_root.get_targeted_vision_tiles(player)
+			for cell in targeted_tiles:
+				visiblity[player][cell] = 2
 		if tm_root != null and tm_root.has_method("has_global_vision"):
 			if tm_root.has_global_vision(player):
 				for cell in visiblity[player].keys():

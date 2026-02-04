@@ -152,7 +152,8 @@ const SPELL_OPTIONS = [
 	{"id": 1, "label": "Fireball", "type": "fireball"},
 	{"id": 2, "label": "Combat Buff", "type": "buff"},
 	{"id": 3, "label": "Lightning", "type": "lightning"},
-	{"id": 4, "label": "Global Vision", "type": "global_vision"}
+	{"id": 4, "label": "Global Vision", "type": "global_vision"},
+	{"id": 5, "label": "Targeted Vision", "type": "targeted_vision"}
 ]
 
 const ArcherScene = preload("res://scenes/Archer.tscn")
@@ -373,7 +374,8 @@ func _ready():
 		{"name": "Fireball", "cost": turn_mgr.get_spell_cost("fireball"), "phase": "Attacks", "effect": "50 dmg units; 10 dmg tower/base; range 3"},
 		{"name": "Combat Buff", "cost": turn_mgr.get_spell_cost("buff"), "phase": "Spells", "effect": "+5 melee/ranged for 1 turn; range 3"},
 		{"name": "Lightning", "cost": turn_mgr.get_spell_cost("lightning"), "phase": "Attacks", "effect": "32 dmg + chain halving to adjacent enemies; range 3"},
-		{"name": "Global Vision", "cost": turn_mgr.get_spell_cost("global_vision"), "phase": "Spawns", "effect": "Reveal all explored tiles for 1 turn"}
+		{"name": "Global Vision", "cost": turn_mgr.get_spell_cost("global_vision"), "phase": "Spawns", "effect": "Reveal all explored tiles for 1 turn"},
+		{"name": "Targeted Vision", "cost": turn_mgr.get_spell_cost("targeted_vision"), "phase": "Spawns", "effect": "Ward-like vision for 1 turn; range 3"}
 	]
 	for i in range(spell_rows.size()):
 		var row = spell_rows[i]
@@ -1044,6 +1046,11 @@ func _get_spell_target_tiles(caster: Node, spell_type: String) -> Array:
 	var spell_range = int(turn_mgr.SPELL_RANGE)
 	if turn_mgr.has_method("get_spell_range"):
 		spell_range = int(turn_mgr.get_spell_range(caster))
+	if spell_type == turn_mgr.SPELL_TARGETED_VISION:
+		for cell in hex.used_cells:
+			if turn_mgr._hex_distance(caster.grid_pos, cell) <= spell_range:
+				tiles.append(cell)
+		return tiles
 	var seen := {}
 	var all_units = game_board.get_all_units_flat()
 	for unit in all_units:
@@ -2391,6 +2398,37 @@ func _draw_supports():
 					buff_icon.position = p2 - dir * icon_offset
 					buff_icon.z_index = ORDER_ICON_Z
 					root.add_child(buff_icon)
+			elif order["type"] == "spell" and str(order.get("spell_type", "")) == turn_mgr.SPELL_TARGETED_VISION:
+				var caster = unit_mgr.get_unit_by_net_id(order["unit_net_id"])
+				if not _should_draw_unit(caster):
+					continue
+				var target_tile = order.get("target_tile", Vector2i(-9999, -9999))
+				if typeof(target_tile) != TYPE_VECTOR2I:
+					continue
+				var root = Node2D.new()
+				support_arrows_node.add_child(root)
+				var p1 = hex.map_to_world(caster.grid_pos) + hex.tile_size * 0.5
+				var p2 = hex.map_to_world(target_tile) + hex.tile_size * 0.5
+				var arrow = SupportArrowScene.instantiate() as Sprite2D
+				var dir = (p2 - p1).normalized()
+				var tex_size = arrow.texture.get_size()
+				var distance: float = (p2 - p1).length()
+				var scale_x: float = distance / tex_size.x
+				arrow.scale = Vector2(scale_x, 1)
+				var half_length = tex_size.x * scale_x * 0.5
+				arrow.position = p1 + dir * half_length
+				arrow.rotation = (p2 - p1).angle()
+				arrow.z_index = 10
+				root.add_child(arrow)
+				var vision_icon = Sprite2D.new()
+				vision_icon.texture = GlobalVisionIcon
+				var vision_size = GlobalVisionIcon.get_size()
+				if vision_size.x > 0:
+					var scale = (hex.tile_size.x * 0.18) / vision_size.x
+					vision_icon.scale = Vector2(scale, scale)
+				vision_icon.position = p2
+				vision_icon.z_index = ORDER_ICON_Z
+				root.add_child(vision_icon)
 			elif order["type"] == "spell" and str(order.get("spell_type", "")) == turn_mgr.SPELL_GLOBAL_VISION:
 				var caster = unit_mgr.get_unit_by_net_id(order["unit_net_id"])
 				if not _should_draw_unit(caster):
@@ -3039,17 +3077,25 @@ func _unhandled_input(ev):
 
 	if action_mode == "spell" and spell_caster != null:
 		if cell in spell_tiles:
-			var target_unit = _spell_target_for_tile(cell, current_spell_type)
-			if target_unit == null:
-				action_mode = ""
-				return
-			NetworkManager.request_order(current_player, {
-				"unit_net_id": spell_caster.net_id,
-				"type": "spell",
-				"spell_type": current_spell_type,
-				"target_tile": cell,
-				"target_unit_net_id": target_unit.net_id
-			})
+			if current_spell_type == turn_mgr.SPELL_TARGETED_VISION:
+				NetworkManager.request_order(current_player, {
+					"unit_net_id": spell_caster.net_id,
+					"type": "spell",
+					"spell_type": current_spell_type,
+					"target_tile": cell
+				})
+			else:
+				var target_unit = _spell_target_for_tile(cell, current_spell_type)
+				if target_unit == null:
+					action_mode = ""
+					return
+				NetworkManager.request_order(current_player, {
+					"unit_net_id": spell_caster.net_id,
+					"type": "spell",
+					"spell_type": current_spell_type,
+					"target_tile": cell,
+					"target_unit_net_id": target_unit.net_id
+				})
 		action_mode = ""
 		current_spell_type = ""
 		spell_tiles = []
