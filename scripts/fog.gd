@@ -147,6 +147,11 @@ func _update_fog():
 			var ward_tiles = tm_root.get_ward_vision_tiles(player)
 			for cell in ward_tiles:
 				visiblity[player][cell] = 2
+		if tm_root != null and tm_root.has_method("has_global_vision"):
+			if tm_root.has_global_vision(player):
+				for cell in visiblity[player].keys():
+					if int(visiblity[player][cell]) == 1:
+						visiblity[player][cell] = 2
 		if tm_root != null and tm_root.has_method("update_structure_memory_for"):
 			tm_root.update_structure_memory_for(player, visiblity[player])
 		if tm_root != null and tm_root.has_method("update_neutral_tile_memory_for"):

@@ -105,6 +105,7 @@ const LookoutIcon = preload("res://assets/HK-Heightend Sensory Input v2/HSI - Ic
 const FireballIcon = preload("res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Geometric/HSI_icon_108.png")
 const BuffIcon = preload("res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Objects/HSI_icon_139.png")
 const LightningIcon = preload("res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Objects/HSI_icon_174.png")
+const GlobalVisionIcon = preload("res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Objects/HSI_icon_177.png")
 const SAVE_SLOT_COUNT_UI: int = 3
 const ORDER_ICON_Z: int = 12
 const DAMAGE_PANEL_MIN_SIZE: Vector2 = Vector2(220, 120)
@@ -144,12 +145,14 @@ const ACTION_WARD_VISION_ID: int = 15
 const ACTION_WARD_VISION_ALWAYS_ID: int = 16
 const ACTION_WARD_VISION_STOP_ID: int = 18
 const ACTION_LOOKOUT_ALWAYS_ID: int = 17
+const ACTION_SPELL_CANCEL_ID: int = 19
 
 const SPELL_OPTIONS = [
 	{"id": 0, "label": "Heal", "type": "heal"},
 	{"id": 1, "label": "Fireball", "type": "fireball"},
 	{"id": 2, "label": "Combat Buff", "type": "buff"},
-	{"id": 3, "label": "Lightning", "type": "lightning"}
+	{"id": 3, "label": "Lightning", "type": "lightning"},
+	{"id": 4, "label": "Global Vision", "type": "global_vision"}
 ]
 
 const ArcherScene = preload("res://scenes/Archer.tscn")
@@ -369,7 +372,8 @@ func _ready():
 		{"name": "Heal", "cost": turn_mgr.get_spell_cost("heal"), "phase": "Spells", "effect": "Heal 25; range 3"},
 		{"name": "Fireball", "cost": turn_mgr.get_spell_cost("fireball"), "phase": "Attacks", "effect": "50 dmg units; 10 dmg tower/base; range 3"},
 		{"name": "Combat Buff", "cost": turn_mgr.get_spell_cost("buff"), "phase": "Spells", "effect": "+5 melee/ranged for 1 turn; range 3"},
-		{"name": "Lightning", "cost": turn_mgr.get_spell_cost("lightning"), "phase": "Attacks", "effect": "32 dmg + chain halving to adjacent enemies; range 3"}
+		{"name": "Lightning", "cost": turn_mgr.get_spell_cost("lightning"), "phase": "Attacks", "effect": "32 dmg + chain halving to adjacent enemies; range 3"},
+		{"name": "Global Vision", "cost": turn_mgr.get_spell_cost("global_vision"), "phase": "Spawns", "effect": "Reveal all explored tiles for 1 turn"}
 	]
 	for i in range(spell_rows.size()):
 		var row = spell_rows[i]
@@ -1415,6 +1419,8 @@ func _order_error_message(reason: String) -> String:
 			msg = "[Order failed: not enough mana]"
 		"no_vision":
 			msg = "[Order failed: no vision]"
+		"no_spell_order":
+			msg = "[Order failed: no spell to cancel]"
 		_:
 			msg = "[Order failed]"
 	return _format_error_with_gold(msg)
@@ -1489,6 +1495,14 @@ func _on_order_result(player_id: String, unit_net_id: int, order: Dictionary, ok
 				if not state.is_empty() and str(state.get("type", "")) == turn_mgr.STRUCT_WARD and str(state.get("owner", "")) == current_player:
 					state["auto_ward"] = false
 					turn_mgr.buildable_structures[ward_tile] = state
+			_draw_all()
+			$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
+			_update_done_button_state()
+			_refresh_resource_labels()
+			return
+		if order.get("type", "") == "spell_cancel":
+			turn_mgr.player_orders[player_id].erase(unit_net_id)
+			NetworkManager.player_orders[player_id].erase(unit_net_id)
 			_draw_all()
 			$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
 			_update_done_button_state()
@@ -1761,6 +1775,10 @@ func _on_unit_selected(unit: Node) -> void:
 	action_menu.clear()
 	if unit.is_base or unit.is_tower:
 		action_menu.add_item("Cast Spell", ACTION_SPELL_ID)
+		var orders = turn_mgr.player_orders.get(current_player, {})
+		var existing = orders.get(unit.net_id, {})
+		if str(existing.get("type", "")) == "spell":
+			action_menu.add_item("Cancel Spell", ACTION_SPELL_CANCEL_ID)
 		return
 	if unit.just_purchased:
 		action_menu.add_item("Undo Buy", 0)
@@ -1836,6 +1854,16 @@ func _on_action_selected(id: int) -> void:
 		})
 		selected_structure_tile = Vector2i(-9999, -9999)
 		selected_structure_type = ""
+		action_menu.hide()
+		return
+	if id == ACTION_SPELL_CANCEL_ID:
+		if currently_selected_unit == null or not is_instance_valid(currently_selected_unit):
+			action_menu.hide()
+			return
+		NetworkManager.request_order(current_player, {
+			"unit_net_id": currently_selected_unit.net_id,
+			"type": "spell_cancel"
+		})
 		action_menu.hide()
 		return
 	if currently_selected_unit == null or not is_instance_valid(currently_selected_unit):
@@ -2363,6 +2391,21 @@ func _draw_supports():
 					buff_icon.position = p2 - dir * icon_offset
 					buff_icon.z_index = ORDER_ICON_Z
 					root.add_child(buff_icon)
+			elif order["type"] == "spell" and str(order.get("spell_type", "")) == turn_mgr.SPELL_GLOBAL_VISION:
+				var caster = unit_mgr.get_unit_by_net_id(order["unit_net_id"])
+				if not _should_draw_unit(caster):
+					continue
+				var root = Node2D.new()
+				support_arrows_node.add_child(root)
+				var icon = Sprite2D.new()
+				icon.texture = GlobalVisionIcon
+				var tex_size = GlobalVisionIcon.get_size()
+				if tex_size.x > 0:
+					var scale = (hex.tile_size.x * 0.18) / tex_size.x
+					icon.scale = Vector2(scale, scale)
+				icon.position = hex.map_to_world(caster.grid_pos) + (hex.tile_size * Vector2(0.5, 0.6))
+				icon.z_index = ORDER_ICON_Z
+				root.add_child(icon)
 
 func _draw_heals():
 	var heal_node = hex.get_node("HealingSprites")
@@ -2692,6 +2735,22 @@ func _on_spell_selected(id: int) -> void:
 			break
 	if spell_type == "":
 		spell_menu.hide()
+		return
+	if spell_type == turn_mgr.SPELL_GLOBAL_VISION:
+		NetworkManager.request_order(current_player, {
+			"unit_net_id": spell_caster.net_id,
+			"type": "spell",
+			"spell_type": spell_type
+		})
+		spell_menu.hide()
+		current_spell_type = ""
+		spell_tiles = []
+		spell_caster = null
+		game_board.clear_highlights()
+		_draw_all()
+		$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
+		_update_done_button_state()
+		_refresh_resource_labels()
 		return
 	action_mode = "spell"
 	current_spell_type = spell_type

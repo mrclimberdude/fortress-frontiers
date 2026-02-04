@@ -259,6 +259,7 @@ const SPELL_COST_HEAL: int = 15
 const SPELL_COST_FIREBALL: int = 40
 const SPELL_COST_BUFF: int = 25
 const SPELL_COST_LIGHTNING: int = 50
+const SPELL_COST_GLOBAL_VISION: int = 250
 const SPELL_HEAL_AMOUNT: int = 25
 const SPELL_FIREBALL_DAMAGE: int = 50
 const SPELL_FIREBALL_DRAGON_DAMAGE: int = 15
@@ -270,6 +271,7 @@ const SPELL_HEAL: String = "heal"
 const SPELL_FIREBALL: String = "fireball"
 const SPELL_BUFF: String = "buff"
 const SPELL_LIGHTNING: String = "lightning"
+const SPELL_GLOBAL_VISION: String = "global_vision"
 
 func get_spell_cost(spell_type: String) -> int:
 	var spell = str(spell_type).to_lower()
@@ -279,6 +281,8 @@ func get_spell_cost(spell_type: String) -> int:
 		return SPELL_COST_BUFF
 	if spell == SPELL_LIGHTNING:
 		return SPELL_COST_LIGHTNING
+	if spell == SPELL_GLOBAL_VISION:
+		return SPELL_COST_GLOBAL_VISION
 	return SPELL_COST_FIREBALL
 
 var camp_units := {}
@@ -297,6 +301,7 @@ var damage_log := { "player1": [], "player2": [] }
 var buildable_structures := {}
 var mana_pool_mines := {}
 var ward_vision_active := { "player1": {}, "player2": {} }
+var player_global_vision_until := { "player1": 0, "player2": 0 }
 var _next_ward_id: int = -1
 var spawn_tower_positions := { "player1": [], "player2": [] }
 var income_tower_positions := { "player1": [], "player2": [] }
@@ -372,6 +377,16 @@ func _prune_ward_visions() -> void:
 		for cell in active.keys():
 			if int(active.get(cell, 0)) <= turn_number:
 				active.erase(cell)
+
+func _prune_global_visions() -> void:
+	for player in ["player1", "player2"]:
+		if int(player_global_vision_until.get(player, 0)) <= turn_number:
+			player_global_vision_until[player] = 0
+
+func has_global_vision(player_id: String) -> bool:
+	if player_id == "":
+		return false
+	return int(player_global_vision_until.get(player_id, 0)) >= turn_number
 
 func _clear_ward_vision(tile: Vector2i) -> void:
 	for player in ["player1", "player2"]:
@@ -1630,6 +1645,7 @@ func _load_map_by_index(map_index: int) -> void:
 			hex_map.set_player_tile(tile, "dragon")
 	buildable_structures.clear()
 	ward_vision_active = { "player1": {}, "player2": {} }
+	player_global_vision_until = { "player1": 0, "player2": 0 }
 	_next_ward_id = -1
 	mana_pool_mines.clear()
 	spawn_tower_positions = { "player1": [], "player2": [] }
@@ -1788,6 +1804,7 @@ func _collect_state() -> Dictionary:
 		"buildable_structures": buildable_structures,
 		"mana_pool_mines": mana_pool_mines,
 		"ward_vision_active": ward_vision_active,
+		"player_global_vision_until": player_global_vision_until,
 		"next_ward_id": _next_ward_id,
 		"structure_memory": structure_memory,
 		"neutral_tile_memory": neutral_tile_memory,
@@ -2097,6 +2114,10 @@ func apply_state(state: Dictionary, force_host: bool = false) -> void:
 		ward_vision_active = state["ward_vision_active"]
 	else:
 		ward_vision_active = { "player1": {}, "player2": {} }
+	if state.has("player_global_vision_until"):
+		player_global_vision_until = state["player_global_vision_until"]
+	else:
+		player_global_vision_until = { "player1": 0, "player2": 0 }
 	_next_ward_id = int(state.get("next_ward_id", _next_ward_id))
 	_rebuild_ward_ids()
 	if state.has("structure_memory"):
@@ -2360,6 +2381,7 @@ func reset_to_lobby() -> void:
 	player_melee_bonus = { "player1": 0, "player2": 0 }
 	player_ranged_bonus = { "player1": 0, "player2": 0 }
 	player_mana_bonus = { "player1": 0, "player2": 0 }
+	player_global_vision_until = { "player1": 0, "player2": 0 }
 	damage_log = { "player1": [], "player2": [] }
 	player_orders = { "player1": {}, "player2": {} }
 	committed_orders = { "player1": {}, "player2": {} }
@@ -3177,6 +3199,15 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 	if unit.player_id != player_id:
 		result["reason"] = "not_owner"
 		return result
+	if order_type == "spell_cancel":
+		var existing = player_orders.get(player_id, {}).get(unit_net_id, {})
+		if str(existing.get("type", "")) != "spell":
+			result["reason"] = "no_spell_order"
+			return result
+		_remove_player_order(player_id, unit_net_id)
+		result["ok"] = true
+		result["order"] = {"unit_net_id": unit_net_id, "type": "spell_cancel"}
+		return result
 	if unit.is_base or unit.is_tower:
 		if order_type != "spell":
 			result["reason"] = "invalid_unit"
@@ -3322,53 +3353,63 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 			if not (unit.is_wizard or unit.is_base or unit.is_tower):
 				result["reason"] = "invalid_action"
 				return result
-			if not order.has("spell_type") or not order.has("target_tile") or not order.has("target_unit_net_id"):
+			if not order.has("spell_type"):
 				result["reason"] = "invalid_target"
 				return result
 			var spell_type = str(order.get("spell_type", "")).to_lower()
-			if spell_type not in [SPELL_HEAL, SPELL_FIREBALL, SPELL_BUFF, SPELL_LIGHTNING]:
+			if spell_type not in [SPELL_HEAL, SPELL_FIREBALL, SPELL_BUFF, SPELL_LIGHTNING, SPELL_GLOBAL_VISION]:
 				result["reason"] = "invalid_action"
 				return result
-			var target_tile = order.get("target_tile")
-			if typeof(target_tile) == TYPE_VECTOR2:
-				target_tile = Vector2i(int(round(target_tile.x)), int(round(target_tile.y)))
-			if typeof(target_tile) != TYPE_VECTOR2I:
-				result["reason"] = "invalid_target"
-				return result
-			if not _player_can_see_tile(player_id, target_tile):
-				result["reason"] = "no_vision"
-				return result
-			var target_id = int(order.get("target_unit_net_id", -1))
-			var target = unit_manager.get_unit_by_net_id(target_id)
-			if target == null or target.grid_pos != target_tile:
-				result["reason"] = "invalid_target"
-				return result
-			if is_unit_hidden_for_viewer(target, player_id):
-				result["reason"] = "no_vision"
-				return result
-			var struct = $GameBoardNode.get_structure_unit_at(target_tile)
-			if spell_type == SPELL_FIREBALL or spell_type == SPELL_LIGHTNING:
-				if struct != null and struct.player_id != player_id:
-					if spell_type == SPELL_FIREBALL:
-						target = struct
-						target_id = struct.net_id
-				if target.player_id == player_id:
-					result["reason"] = "invalid_target"
+			if spell_type == SPELL_GLOBAL_VISION:
+				var spell_cost = get_spell_cost(spell_type)
+				if player_mana.get(player_id, 0) < spell_cost:
+					result["reason"] = "not_enough_mana"
 					return result
+				sanitized["spell_type"] = spell_type
 			else:
-				if target.player_id != player_id:
+				if not order.has("target_tile") or not order.has("target_unit_net_id"):
 					result["reason"] = "invalid_target"
 					return result
-			if _hex_distance(unit.grid_pos, target_tile) > get_spell_range(unit):
-				result["reason"] = "out_of_range"
-				return result
-			var spell_cost = get_spell_cost(spell_type)
-			if player_mana.get(player_id, 0) < spell_cost:
-				result["reason"] = "not_enough_mana"
-				return result
-			sanitized["spell_type"] = spell_type
-			sanitized["target_tile"] = target_tile
-			sanitized["target_unit_net_id"] = target_id
+				var target_tile = order.get("target_tile")
+				if typeof(target_tile) == TYPE_VECTOR2:
+					target_tile = Vector2i(int(round(target_tile.x)), int(round(target_tile.y)))
+				if typeof(target_tile) != TYPE_VECTOR2I:
+					result["reason"] = "invalid_target"
+					return result
+				if not _player_can_see_tile(player_id, target_tile):
+					result["reason"] = "no_vision"
+					return result
+				var target_id = int(order.get("target_unit_net_id", -1))
+				var target = unit_manager.get_unit_by_net_id(target_id)
+				if target == null or target.grid_pos != target_tile:
+					result["reason"] = "invalid_target"
+					return result
+				if is_unit_hidden_for_viewer(target, player_id):
+					result["reason"] = "no_vision"
+					return result
+				var struct = $GameBoardNode.get_structure_unit_at(target_tile)
+				if spell_type == SPELL_FIREBALL or spell_type == SPELL_LIGHTNING:
+					if struct != null and struct.player_id != player_id:
+						if spell_type == SPELL_FIREBALL:
+							target = struct
+							target_id = struct.net_id
+					if target.player_id == player_id:
+						result["reason"] = "invalid_target"
+						return result
+				else:
+					if target.player_id != player_id:
+						result["reason"] = "invalid_target"
+						return result
+				if _hex_distance(unit.grid_pos, target_tile) > get_spell_range(unit):
+					result["reason"] = "out_of_range"
+					return result
+				var spell_cost = get_spell_cost(spell_type)
+				if player_mana.get(player_id, 0) < spell_cost:
+					result["reason"] = "not_enough_mana"
+					return result
+				sanitized["spell_type"] = spell_type
+				sanitized["target_tile"] = target_tile
+				sanitized["target_unit_net_id"] = target_id
 		"heal":
 			pass
 		"heal_until_full":
@@ -4017,6 +4058,7 @@ func _render_damage_log_for_local() -> void:
 func _process_spawns():
 	var spawn_orders = []
 	var ward_orders := []
+	var global_vision_orders := []
 	var orders_source = committed_orders
 	for player_id in orders_source.keys():
 		for order in orders_source[player_id].values():
@@ -4024,6 +4066,12 @@ func _process_spawns():
 				spawn_orders.append(order)
 			elif str(order.get("type", "")) == "ward_vision":
 				ward_orders.append({
+					"player": player_id,
+					"unit_net_id": int(order.get("unit_net_id", -1)),
+					"order": order
+				})
+			elif str(order.get("type", "")) == "spell" and str(order.get("spell_type", "")) == SPELL_GLOBAL_VISION:
+				global_vision_orders.append({
 					"player": player_id,
 					"unit_net_id": int(order.get("unit_net_id", -1)),
 					"order": order
@@ -4072,6 +4120,23 @@ func _process_spawns():
 		ward_vision_active[player_id][ward_tile] = turn_number + 1
 		orders_source[player_id].erase(unit_net_id)
 		_remove_player_order(player_id, unit_net_id)
+	for entry in global_vision_orders:
+		var player_id = entry["player"]
+		var unit_net_id = int(entry.get("unit_net_id", -1))
+		var caster = unit_manager.get_unit_by_net_id(unit_net_id)
+		if caster == null or caster.curr_health <= 0:
+			orders_source[player_id].erase(unit_net_id)
+			_remove_player_order(player_id, unit_net_id)
+			continue
+		var spell_cost = get_spell_cost(SPELL_GLOBAL_VISION)
+		if player_mana.get(player_id, 0) < spell_cost:
+			orders_source[player_id].erase(unit_net_id)
+			_remove_player_order(player_id, unit_net_id)
+			continue
+		player_mana[player_id] -= spell_cost
+		player_global_vision_until[player_id] = turn_number + 1
+		orders_source[player_id].erase(unit_net_id)
+		_remove_player_order(player_id, unit_net_id)
 	
 	for player in ["player1", "player2"]:
 		var unit_ids = orders_source[player].keys()
@@ -4113,7 +4178,7 @@ func _process_spells() -> void:
 			var order = player_orders[player][unit_net_id]
 			if str(order.get("type", "")) != "spell":
 				continue
-			if str(order.get("spell_type", "")) in [SPELL_FIREBALL, SPELL_LIGHTNING]:
+			if str(order.get("spell_type", "")) in [SPELL_FIREBALL, SPELL_LIGHTNING, SPELL_GLOBAL_VISION]:
 				continue
 			spell_orders.append({"player": player, "unit_net_id": unit_net_id, "order": order})
 	for entry in spell_orders:
@@ -5426,6 +5491,7 @@ func _do_execution() -> void:
 	current_phase = Phase.EXECUTION
 	print("Executing orders...")
 	_prune_ward_visions()
+	_prune_global_visions()
 	for unit in $GameBoardNode.get_all_units_flat():
 		if unit != null:
 			unit.is_looking_out = false
