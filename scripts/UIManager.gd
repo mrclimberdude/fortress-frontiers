@@ -74,6 +74,7 @@ var _default_camera_zoom: Vector2 = Vector2.ZERO
 @onready var done_button = $Panel/VBoxContainer/DoneButton as Button
 @onready var next_unordered_button = $Panel/VBoxContainer/NextUnorderedButton as Button
 @onready var cancel_done_button = $CancelDoneButton as Button
+@onready var confirm_done_dialog = $ConfirmDoneDialog as ConfirmationDialog
 @onready var dev_mode_toggle = get_node(dev_mode_toggle_path) as CheckButton
 @onready var dev_panel = $DevPanel
 @onready var respawn_timers_toggle = $DevPanel/VBoxContainer/RespawnTimersCheckButton as CheckButton
@@ -227,6 +228,9 @@ func _ready():
 	if buff_mana_cancel != null:
 		buff_mana_cancel.connect("pressed",
 					Callable(self, "_on_buff_mana_cancel"))
+	if confirm_done_dialog != null:
+		confirm_done_dialog.connect("confirmed",
+					Callable(self, "_on_done_confirmed"))
 	if damage_resize_handle != null:
 		damage_resize_handle.connect("gui_input",
 					Callable(self, "_on_damage_resize_input"))
@@ -2210,15 +2214,24 @@ func _reset_ui_for_snapshot() -> void:
 	_clear_all_drawings()
 	_hide_build_hover()
 
-func _on_done_pressed():
+func _submit_orders() -> void:
 	game_board.clear_highlights()
-	#_clear_all_drawings()
 	$Panel.visible = false
 	cancel_done_button.visible = true
 	NetworkManager.submit_orders(current_player, [])
 	# prevent further clicks
 	placing_unit = ""
 	allow_clicks = false
+
+func _on_done_pressed():
+	if _has_unordered_units(current_player):
+		if confirm_done_dialog != null:
+			confirm_done_dialog.popup_centered()
+			return
+	_submit_orders()
+
+func _on_done_confirmed() -> void:
+	_submit_orders()
 
 func _on_cancel_pressed():
 	NetworkManager.cancel_orders(current_player)
