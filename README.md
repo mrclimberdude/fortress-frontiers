@@ -118,6 +118,8 @@ Terrain data comes from the tileset custom data:
   - Rail (building): base_cost * 0.5
   - Rail (intact): base_cost * 0.25
 - Scouts treat forest tiles as cost 1 instead of 2.
+- Unexplored tiles are treated as cost 1 during Orders; the real cost is enforced at Execution and may trim the move.
+- Cavalry may move one extra tile if it continues in a straight line and the extra tile's cost fits within a +1 budget.
 
 ### Movement Rules
 - Mountains are impassable.
@@ -233,7 +235,7 @@ Default stats (unless overridden by a unit scene):
 | Crystal Miner | 50 | 1 | 0 | 2 | 0 | 2 | 15 | +10 mana/turn on controlled mine. |
 | Builder | 50 | 3 | 0 | 2 | 0 | 2 | 10 | Builds, repairs, sabotages; queues roads/rails. |
 | Phalanx | 100 | 15 | 0 | 2 | 0 | 2 | 10 | Defend bonus; no multi-def penalty; adjacent ally +2. |
-| Cavalry | 125 | 25 | 0 | 3 | 0 | 3 | 10 | Fast melee unit. |
+| Cavalry | 125 | 25 | 0 | 3 | 0 | 3 | 10 | Straight-line bonus: +1 move if extra tile cost fits within +1 budget. |
 | Wizard | 150 | 4 | 0 | 2 | 0 | 2 | 10 | Spellcaster. |
 | Tower | - | 40 | 0 | 0 | 0 | 2 | 0 | Structure; no passive regen. |
 | Base | - | 45 | 0 | 0 | 0 | 2 | 0 | Structure; losing it ends the game. |

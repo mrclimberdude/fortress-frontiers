@@ -131,7 +131,9 @@ tile_set = SubResource("TileSet_xh13x")
 script = ExtResource("11_cac7a")
 
 [node name="HighlightMap" type="TileMapLayer" parent="GameBoardNode"]
-self_modulate = Color(1, 1, 1, 0.588235)
+self_modulate = Color(1, 1, 1, 0.4)
+top_level = true
+z_index = 101
 tile_set = SubResource("TileSet_xh13x")
 script = ExtResource("3_xh13x")
 
