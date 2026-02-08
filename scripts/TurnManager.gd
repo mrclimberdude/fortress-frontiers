@@ -341,6 +341,15 @@ func _terrain_type(cell: Vector2i) -> String:
 	var val = td.get_custom_data("terrain")
 	return "" if val == null else str(val)
 
+func _step_dir_index(prev: Vector2i, step: Vector2i) -> int:
+	var neighbors = $GameBoardNode.get_offset_neighbors(prev)
+	return neighbors.find(step)
+
+func _is_cavalry_unit(unit) -> bool:
+	if unit == null:
+		return false
+	return str(unit.unit_type).to_lower() == "cavalry"
+
 func _is_open_terrain(cell: Vector2i) -> bool:
 	var t = _terrain_type(cell)
 	if t == "":
@@ -2953,24 +2962,39 @@ func _move_queue_next_order(unit, player_id: String) -> Dictionary:
 	var budget = float(unit.move_range)
 	var segment: Array = [unit.grid_pos]
 	var prev = unit.grid_pos
+	var dir_idx = -1
+	var straight = true
+	var bonus_used = false
 	for i in range(idx + 1, path.size()):
 		var step = path[i]
 		if typeof(step) != TYPE_VECTOR2I:
 			return {}
-		if not step in $GameBoardNode.get_offset_neighbors(prev):
+		var step_dir = _step_dir_index(prev, step)
+		if step_dir == -1:
 			return {}
+		if dir_idx == -1:
+			dir_idx = step_dir
+		elif step_dir != dir_idx:
+			straight = false
 		if $GameBoardNode._terrain_is_impassable(step):
 			return {}
 		if $GameBoardNode.is_enemy_structure_tile(step, player_id) and i != path.size() - 1:
 			return {}
 		var cost = float($GameBoardNode.get_move_cost(step, unit))
 		if cost > budget + 0.001:
+			var can_bonus = _is_cavalry_unit(unit) and straight and not bonus_used and cost <= budget + 1.0 + 0.001
+			if not can_bonus:
+				break
+			segment.append(step)
+			bonus_used = true
+			prev = step
 			break
-		budget -= cost
-		segment.append(step)
-		prev = step
-		if $GameBoardNode.is_enemy_structure_tile(step, player_id):
-			break
+		else:
+			budget -= cost
+			segment.append(step)
+			prev = step
+			if $GameBoardNode.is_enemy_structure_tile(step, player_id):
+				break
 	if segment.size() < 2:
 		return {}
 	return {
@@ -3311,15 +3335,24 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 				result["reason"] = "invalid_path"
 				return result
 			var total_cost: float = 0.0
+			var dir_idx = -1
+			var straight = true
+			var bonus_used = false
+			var max_budget = float(unit.move_range)
 			for i in range(1, path.size()):
 				var prev = path[i - 1]
 				var step = path[i]
 				if not $GameBoardNode/HexTileMap.is_cell_valid(step):
 					result["reason"] = "invalid_path"
 					return result
-				if not step in $GameBoardNode.get_offset_neighbors(prev):
+				var step_dir = _step_dir_index(prev, step)
+				if step_dir == -1:
 					result["reason"] = "invalid_path"
 					return result
+				if dir_idx == -1:
+					dir_idx = step_dir
+				elif step_dir != dir_idx:
+					straight = false
 				if $GameBoardNode._terrain_is_impassable(step):
 					result["reason"] = "invalid_path"
 					return result
@@ -3327,10 +3360,20 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 					if i != path.size() - 1:
 						result["reason"] = "invalid_path"
 						return result
-				total_cost += float($GameBoardNode.get_move_cost(step, unit))
-				if total_cost > float(unit.move_range):
+				var step_cost = float($GameBoardNode.get_move_cost(step, unit))
+				var next_total = total_cost + step_cost
+				if next_total > max_budget + 1.0 + 0.001:
 					result["reason"] = "invalid_path"
 					return result
+				if next_total > max_budget + 0.001:
+					var can_bonus = _is_cavalry_unit(unit) and straight and not bonus_used and i == path.size() - 1
+					if not can_bonus or step_cost > (max_budget - total_cost) + 1.0 + 0.001:
+						result["reason"] = "invalid_path"
+						return result
+					bonus_used = true
+					total_cost = next_total
+				else:
+					total_cost = next_total
 			sanitized["path"] = path
 			sanitized["priority"] = int(order.get("priority", 0))
 		"move_to":

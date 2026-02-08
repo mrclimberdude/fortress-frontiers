@@ -17,6 +17,10 @@ var enemy_tiles: Array = []
 var support_tiles = []
 var current_path: Array = []
 var remaining_moves: float = 0.0
+var cavalry_bonus_available: bool = false
+var cavalry_bonus_used: bool = false
+var cavalry_bonus_tile: Vector2i = Vector2i(-9999, -9999)
+var cavalry_bonus_paths: Dictionary = {}
 var repair_tiles: Array = []
 var action_mode:       String   = ""     # "move", "move_to", "ranged", "melee", "support", "hold", "repair", "build_road_to", "build_rail_to"
 var move_priority: int = 0
@@ -2208,8 +2212,10 @@ func _on_action_selected(id: int) -> void:
 			action_mode = "move"
 			current_path = [currently_selected_unit.grid_pos]
 			remaining_moves = float(currently_selected_unit.move_range)
+			_reset_cavalry_bonus_state()
 			var result = game_board.get_reachable_tiles(currently_selected_unit.grid_pos, currently_selected_unit.move_range, action_mode, currently_selected_unit)
 			var tiles = result["tiles"].slice(1)
+			_append_cavalry_bonus_highlights(currently_selected_unit.grid_pos, result, tiles)
 			game_board.show_highlights(tiles)
 			current_reachable = result
 			print("Move selected for %s" % currently_selected_unit.name)
@@ -2389,6 +2395,7 @@ func _reset_ui_for_snapshot() -> void:
 	selected_structure_tile = Vector2i(-9999, -9999)
 	selected_structure_type = ""
 	remaining_moves = 0.0
+	_reset_cavalry_bonus_state()
 	game_board.clear_highlights()
 	_clear_all_drawings()
 	_hide_build_hover()
@@ -2423,6 +2430,7 @@ func _on_cancel_pressed():
 	spell_tiles = []
 	spell_caster = null
 	remaining_moves = 0
+	_reset_cavalry_bonus_state()
 	finish_move_button.visible = false
 	game_board.clear_highlights()
 	allow_clicks = true
@@ -3209,6 +3217,131 @@ func _get_build_road_reachable(start: Vector2i) -> Dictionary:
 		return {"tiles": [], "prev": {}}
 	return game_board.get_reachable_tiles(start, currently_selected_unit.move_range, "move", currently_selected_unit)
 
+func _reset_cavalry_bonus_state() -> void:
+	cavalry_bonus_available = false
+	cavalry_bonus_used = false
+	cavalry_bonus_tile = Vector2i(-9999, -9999)
+	cavalry_bonus_paths.clear()
+
+func _is_cavalry_unit(unit: Node) -> bool:
+	if unit == null:
+		return false
+	return str(unit.unit_type).to_lower() == "cavalry"
+
+func _append_cavalry_bonus_highlights(start: Vector2i, reachable: Dictionary, tiles: Array) -> void:
+	cavalry_bonus_paths.clear()
+	if not _is_cavalry_unit(currently_selected_unit):
+		return
+	var max_budget = float(currently_selected_unit.move_range)
+	var base_tiles = reachable.get("tiles", [])
+	for dir_idx in range(6):
+		var path := [start]
+		var prev = start
+		var cost := 0.0
+		while true:
+			var neighbors = game_board.get_offset_neighbors(prev)
+			if dir_idx < 0 or dir_idx >= neighbors.size():
+				break
+			var step = neighbors[dir_idx]
+			if not hex.is_cell_valid(step):
+				break
+			if game_board._terrain_is_impassable(step):
+				break
+			var step_cost = float(game_board.get_move_cost(step, currently_selected_unit))
+			var new_cost = cost + step_cost
+			if new_cost > max_budget + 1.0 + 0.001:
+				break
+			if new_cost > max_budget + 0.001:
+				if step_cost <= (max_budget - cost) + 1.0 + 0.001:
+					if step not in base_tiles:
+						var bonus_path = path.duplicate()
+						bonus_path.append(step)
+						cavalry_bonus_paths[step] = bonus_path
+						base_tiles.append(step)
+						if not tiles.has(step):
+							tiles.append(step)
+				break
+			if game_board.is_enemy_structure_tile(step, current_player):
+				break
+			cost = new_cost
+			path.append(step)
+			prev = step
+
+func _append_cavalry_bonus_step(cell: Vector2i, remaining: float, reachable: Dictionary, tiles: Array) -> void:
+	if not _is_cavalry_unit(currently_selected_unit):
+		return
+	if cavalry_bonus_used:
+		return
+	var dir_idx = _cavalry_straight_dir(current_path)
+	if dir_idx == -1:
+		return
+	var neighbors = game_board.get_offset_neighbors(cell)
+	if dir_idx < 0 or dir_idx >= neighbors.size():
+		return
+	var bonus = neighbors[dir_idx]
+	if not hex.is_cell_valid(bonus):
+		return
+	if game_board._terrain_is_impassable(bonus):
+		return
+	var bonus_cost = float(game_board.get_move_cost(bonus, currently_selected_unit))
+	if bonus_cost <= remaining + 0.001:
+		return
+	if bonus_cost > remaining + 1.0 + 0.001:
+		return
+	var reach_tiles = reachable.get("tiles", [])
+	if not reach_tiles.has(bonus):
+		reach_tiles.append(bonus)
+		tiles.append(bonus)
+	var prev_map = reachable.get("prev", {})
+	prev_map[bonus] = cell
+	reachable["prev"] = prev_map
+
+func _cavalry_straight_dir(path: Array) -> int:
+	if path.size() < 2:
+		return -1
+	var dir_idx = -1
+	for i in range(1, path.size()):
+		var prev = path[i - 1]
+		var step = path[i]
+		if typeof(prev) != TYPE_VECTOR2I or typeof(step) != TYPE_VECTOR2I:
+			return -1
+		var neighbors = game_board.get_offset_neighbors(prev)
+		var step_dir = neighbors.find(step)
+		if step_dir == -1:
+			return -1
+		if dir_idx == -1:
+			dir_idx = step_dir
+		elif step_dir != dir_idx:
+			return -1
+	return dir_idx
+
+func _set_cavalry_bonus_reachable(button_pos: Vector2) -> bool:
+	_reset_cavalry_bonus_state()
+	if not _is_cavalry_unit(currently_selected_unit):
+		return false
+	var dir_idx = _cavalry_straight_dir(current_path)
+	if dir_idx == -1:
+		return false
+	var last = current_path[current_path.size() - 1]
+	var neighbors = game_board.get_offset_neighbors(last)
+	if dir_idx < 0 or dir_idx >= neighbors.size():
+		return false
+	var bonus_tile: Vector2i = neighbors[dir_idx]
+	if not hex.is_cell_valid(bonus_tile):
+		return false
+	if game_board._terrain_is_impassable(bonus_tile):
+		return false
+	var bonus_cost = float(game_board.get_move_cost(bonus_tile, currently_selected_unit))
+	if bonus_cost > 1.0 + 0.001:
+		return false
+	cavalry_bonus_available = true
+	cavalry_bonus_tile = bonus_tile
+	current_reachable = {"tiles": [bonus_tile], "prev": {bonus_tile: last}}
+	game_board.show_highlights([bonus_tile])
+	finish_move_button.set_position(button_pos)
+	finish_move_button.visible = true
+	return true
+
 func _start_move_to() -> void:
 	action_mode = "move_to"
 	current_path = [currently_selected_unit.grid_pos]
@@ -3306,6 +3439,7 @@ func finish_move_to_path():
 func finish_current_path():
 	if current_path.size() == 1:
 		action_mode = ""
+		_reset_cavalry_bonus_state()
 		return
 	move_priority +=1
 	NetworkManager.request_order(current_player, {
@@ -3322,6 +3456,7 @@ func finish_current_path():
 	action_mode = ""
 	current_path = []
 	remaining_moves = 0
+	_reset_cavalry_bonus_state()
 	game_board.clear_highlights()
 	$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
 	_update_done_button_state()
@@ -3422,11 +3557,19 @@ func _unhandled_input(ev):
 			finish_current_path()
 			return
 		var path = []
-		var prev = current_reachable["prev"]
-		var cur = cell
-		while cur in prev:
-			path.insert(0, cur)
-			cur = prev[cur]
+		if current_path.size() == 1 and cavalry_bonus_paths.has(cell):
+			path = cavalry_bonus_paths[cell].slice(1)
+			cavalry_bonus_used = true
+			cavalry_bonus_available = false
+			cavalry_bonus_paths.clear()
+		else:
+			var prev = current_reachable["prev"]
+			var cur = cell
+			while cur in prev:
+				path.insert(0, cur)
+				cur = prev[cur]
+			if current_path.size() == 1:
+				cavalry_bonus_paths.clear()
 		if path.is_empty():
 			var tiles = current_reachable.get("tiles", []).duplicate()
 			if tiles.has(currently_selected_unit.grid_pos):
@@ -3436,13 +3579,18 @@ func _unhandled_input(ev):
 			return
 		
 		current_path += path
+		if cavalry_bonus_available and cell == cavalry_bonus_tile:
+			cavalry_bonus_used = true
+			cavalry_bonus_available = false
 		var cost_used: float = 0.0
 		for step_cell in path:
 			cost_used += game_board.get_move_cost(step_cell, currently_selected_unit)
 		remaining_moves -= cost_used
+		if remaining_moves < -0.001:
+			cavalry_bonus_used = true
 		
 		_draw_partial_path()
-		if remaining_moves <= 0.001:
+		if cavalry_bonus_used:
 			finish_current_path()
 			return
 		
@@ -3450,6 +3598,7 @@ func _unhandled_input(ev):
 		var tiles = result["tiles"]
 		if tiles.has(cell):
 			tiles.erase(cell)
+		_append_cavalry_bonus_step(cell, remaining_moves, result, tiles)
 		if tiles.size() == 0:
 			finish_current_path()
 			return
