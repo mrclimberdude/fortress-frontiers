@@ -199,6 +199,7 @@ const DRAGON_RESPAWN_DISPLAY_TURNS: int = 5
 @export var dragon_melee_bonus: int = 3
 @export var dragon_ranged_bonus: int = 3
 @export var dragon_mana_bonus: int = 10
+@export var dragon_mana_cap_bonus: int = 100
 @export var camp_archer_range: int = 2
 @export var dragon_fire_range: int = 3
 @export var dragon_cleave_targets: int = 3
@@ -228,7 +229,7 @@ const ROAD_COST_PER_TURN: int = 5
 const RAIL_COST_PER_TURN: int = 10
 const FORT_COST_PER_TURN: int = 15
 const TRAP_COST_PER_TURN: int = 15
-const TOWER_COST_PER_TURN: int = 25
+const TOWER_COST_PER_TURN: int = 20
 const MANA_POOL_COST_PER_TURN: int = 10
 const MANA_PUMP_COST_PER_TURN: int = 20
 const WARD_COST_PER_TURN: int = 10
@@ -303,6 +304,7 @@ var show_respawn_timers_override: bool = false
 var player_melee_bonus := { "player1": 0, "player2": 0 }
 var player_ranged_bonus := { "player1": 0, "player2": 0 }
 var player_mana_bonus := { "player1": 0, "player2": 0 }
+var player_mana_cap_bonus := { "player1": 0, "player2": 0 }
 var damage_log := { "player1": [], "player2": [] }
 
 var buildable_structures := {}
@@ -600,7 +602,8 @@ func _recalculate_mana_caps() -> void:
 			if str(state.get("status", "")) != STRUCT_STATUS_INTACT:
 				continue
 			pools += 1
-		player_mana_cap[player] = BASE_MANA_CAP + pools * MANA_POOL_CAP_BONUS
+		var cap_bonus = player_mana_cap_bonus.get(player, 0)
+		player_mana_cap[player] = BASE_MANA_CAP + pools * MANA_POOL_CAP_BONUS + cap_bonus
 		if player_mana[player] > player_mana_cap[player]:
 			player_mana[player] = player_mana_cap[player]
 
@@ -1849,6 +1852,7 @@ func _collect_state() -> Dictionary:
 		"player_melee_bonus": player_melee_bonus,
 		"player_ranged_bonus": player_ranged_bonus,
 		"player_mana_bonus": player_mana_bonus,
+		"player_mana_cap_bonus": player_mana_cap_bonus,
 		"camp_respawns": camp_respawns,
 		"dragon_respawns": dragon_respawns,
 		"camp_respawn_counts": camp_respawn_counts,
@@ -2202,6 +2206,7 @@ func apply_state(state: Dictionary, force_host: bool = false) -> void:
 	player_mana_income = state.get("player_mana_income", player_mana_income)
 	player_mana_cap = state.get("player_mana_cap", player_mana_cap)
 	player_mana_bonus = state.get("player_mana_bonus", player_mana_bonus)
+	player_mana_cap_bonus = state.get("player_mana_cap_bonus", player_mana_cap_bonus)
 	player_melee_bonus = state.get("player_melee_bonus", player_melee_bonus)
 	player_ranged_bonus = state.get("player_ranged_bonus", player_ranged_bonus)
 	camp_respawns = state.get("camp_respawns", camp_respawns)
@@ -2442,6 +2447,7 @@ func reset_to_lobby() -> void:
 	player_melee_bonus = { "player1": 0, "player2": 0 }
 	player_ranged_bonus = { "player1": 0, "player2": 0 }
 	player_mana_bonus = { "player1": 0, "player2": 0 }
+	player_mana_cap_bonus = { "player1": 0, "player2": 0 }
 	player_global_vision_until = { "player1": 0, "player2": 0 }
 	targeted_vision_active = { "player1": {}, "player2": {} }
 	damage_log = { "player1": [], "player2": [] }
@@ -3689,6 +3695,13 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 						if $GameBoardNode._terrain_is_impassable(target_tile) and terrain != "lake":
 							result["reason"] = "invalid_tile"
 							return result
+					elif struct_type == STRUCT_MANA_POOL:
+						if terrain in ["mountain", "river", "lake"]:
+							result["reason"] = "invalid_tile"
+							return result
+						if $GameBoardNode._terrain_is_impassable(target_tile):
+							result["reason"] = "invalid_tile"
+							return result
 					elif struct_type == STRUCT_MANA_PUMP:
 						if terrain == "mountain":
 							result["reason"] = "invalid_tile"
@@ -4012,6 +4025,8 @@ func _grant_dragon_reward(player_id: String, pos: Vector2i) -> void:
 			player_ranged_bonus[player_id] += dragon_ranged_bonus
 		DRAGON_REWARD_MANA:
 			player_mana_bonus[player_id] += dragon_mana_bonus
+			player_mana_cap_bonus[player_id] += dragon_mana_cap_bonus
+			_recalculate_mana_caps()
 
 func _handle_neutral_death(unit) -> void:
 	if unit == null:
@@ -4045,7 +4060,10 @@ func _handle_neutral_death(unit) -> void:
 				DRAGON_REWARD_RANGED:
 					_reward_report(killer, "Dragon defeated: +%d ranged strength" % dragon_ranged_bonus)
 				DRAGON_REWARD_MANA:
-					_reward_report(killer, "Dragon defeated: +%d mana/turn" % dragon_mana_bonus)
+					_reward_report(
+						killer,
+						"Dragon defeated: +%d mana/turn, +%d max mana" % [dragon_mana_bonus, dragon_mana_cap_bonus]
+					)
 	update_neutral_markers()
 
 func _cleanup_dead_unit(unit) -> void:

@@ -82,9 +82,9 @@ Gold is gained during Upkeep:
 Mana is gained during Upkeep:
 - Crystal Miner on a controlled mine: +10 mana.
 - Mana Pump: +5 mana if its paired mine or base is controlled and its mana pool is intact.
-- Dragon mana reward: +10 mana per turn.
+- Dragon mana reward: +10 mana per turn and +100 max mana.
 
-Mana is capped. Base cap is 0; each intact mana pool adds +100 to the cap. If the cap drops below current mana (e.g., a pool is sabotaged), excess mana is lost.
+Mana is capped. Base cap is 0; each intact mana pool adds +100 to the cap. Dragon mana rewards add +100 max mana. If the cap drops below current mana (e.g., a pool is sabotaged), excess mana is lost.
 
 ## Terrain Rules
 
@@ -191,7 +191,7 @@ Damage is symmetric and exponential:
 - Multi-attack penalty: defender loses multi_def_penalty per additional attacker (does not apply to neutral units).
 - Phalanx defending bonus: +20 and negates multi-attack penalty for the phalanx.
 - Adjacent defending phalanx: +2 melee and +2 ranged.
-- Spell buff: +5 melee and +5 ranged for one turn.
+- Spell buff: +0.1 melee and +0.1 ranged per mana spent for one turn.
 
 ## Spells
 
@@ -205,7 +205,7 @@ Spell rules:
 
 Spells:
 - Heal: 15 mana, heal 25 on a friendly unit.
-- Combat Buff: 25 mana, +5 melee/+5 ranged for 1 turn on a friendly unit.
+- Combat Buff: 5-100 mana, +0.1 melee/+0.1 ranged per mana for 1 turn on a friendly unit.
 - Fireball: 40 mana, 50 damage to units, 10 to bases/towers, 15 to dragons.
 - Lightning: 50 mana, 32 damage to the primary target, then chains to adjacent enemy units with damage halving each hop (each unit hit once).
 
@@ -227,7 +227,7 @@ Default stats (unless overridden by a unit scene):
 | Unit | Cost | Melee | Ranged | Move | Range | Sight | Regen | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Archer | 100 | 15 | 30 | 2 | 2 | 2 | 10 | Ranged unit. |
-| Soldier | 75 | 30 | 0 | 2 | 0 | 2 | 10 | Melee unit. |
+| Soldier | 85 | 28 | 0 | 2 | 0 | 2 | 10 | Melee unit. |
 | Scout | 50 | 4 | 0 | 3 | 0 | 3 | 15 | Lookout; forest move cost 1. |
 | Miner | 75 | 1 | 0 | 2 | 0 | 2 | 15 | +15 gold/turn on controlled mine. |
 | Crystal Miner | 50 | 1 | 0 | 2 | 0 | 2 | 15 | +10 mana/turn on controlled mine. |
@@ -254,10 +254,10 @@ Builders construct structures over multiple turns. Costs are paid per build step
 | Fortification | 2 | 15 | Open terrain only | +3 melee, +3 ranged on tile. |
 | Road | 2 | 5 | Can cross forest and river | Movement cost x0.5. |
 | Railroad | 2 | 10 | Must upgrade an intact road | Movement cost x0.25. |
-| Spawn Tower | 6 | 25 | Open terrain only; requires road/rail connection to start building | Adds a new spawn point (no extra gold). |
+| Spawn Tower | 6 | 20 | Open terrain only; requires road/rail connection to start building | Adds a new spawn point (no extra gold). |
 | Trap | 2 | 15 | Open terrain or forest | Hidden; triggers on entry. |
 | Ward | 2 | 10 | Open terrain, forest, or lake | Hidden (except to wizards); can spend mana for vision. |
-| Mana Pool | 3 | 10 | Open terrain only; adjacent to mine or base | +100 mana cap; one per mine/base. |
+| Mana Pool | 3 | 10 | Open terrain or forest; adjacent to mine or base | +100 mana cap; one per mine/base. |
 | Mana Pump | 3 | 20 | Open/forest/river/lake; triangle with mine/base and pool | +5 mana/turn if mine/base controlled & pool intact. |
 
 Roads and rails built on river tiles take +1 additional turn.
@@ -331,7 +331,7 @@ Targets are weighted by distance and health:
   - Gold +1000
   - Melee +3 (stacking)
   - Ranged +3 (stacking)
-  - Mana +10 per turn
+  - Mana +10 per turn +100 max mana
 - Respawn timers are only shown when close to respawn (3 turns for camps, 5 for dragons) unless dev override is enabled.
 
 ## Multiplayer
