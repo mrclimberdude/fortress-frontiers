@@ -187,8 +187,14 @@ func _terrain_blocks_sight(cell: Vector2i) -> bool:
 	return bool(td.get_custom_data("blocks_sight"))
 
 func get_move_cost(cell: Vector2i, unit = null) -> float:
-	var cost = float(_terrain_move_cost_for_unit(cell, unit))
 	var tm = $".."
+	if tm != null and unit != null and tm.current_phase == tm.Phase.ORDERS:
+		var fog = get_node_or_null("FogOfWar")
+		if fog != null and fog.visiblity.has(unit.player_id):
+			var vis = int(fog.visiblity[unit.player_id].get(cell, 0))
+			if vis == 0:
+				return 1.0
+	var cost = float(_terrain_move_cost_for_unit(cell, unit))
 	if tm != null and tm.has_method("get_structure_move_cost"):
 		cost = float(tm.get_structure_move_cost(cell, cost))
 	return cost

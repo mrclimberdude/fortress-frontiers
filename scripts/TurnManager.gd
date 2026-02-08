@@ -350,6 +350,89 @@ func _is_cavalry_unit(unit) -> bool:
 		return false
 	return str(unit.unit_type).to_lower() == "cavalry"
 
+func _trim_move_order_to_budget(unit, order: Dictionary, player_id: String) -> Array:
+	if unit == null:
+		return []
+	var path = order.get("path", [])
+	if not (path is Array) or path.size() < 2:
+		return []
+	if path[0] != unit.grid_pos:
+		return []
+	var total_cost: float = 0.0
+	var dir_idx = -1
+	var straight = true
+	var bonus_used = false
+	var max_budget = float(unit.move_range)
+	var trimmed: Array = [path[0]]
+	for i in range(1, path.size()):
+		var prev = path[i - 1]
+		var step = path[i]
+		if not $GameBoardNode/HexTileMap.is_cell_valid(step):
+			break
+		var step_dir = _step_dir_index(prev, step)
+		if step_dir == -1:
+			break
+		if dir_idx == -1:
+			dir_idx = step_dir
+		elif step_dir != dir_idx:
+			straight = false
+		if $GameBoardNode._terrain_is_impassable(step):
+			break
+		var step_cost = float($GameBoardNode.get_move_cost(step, unit))
+		var next_total = total_cost + step_cost
+		if next_total > max_budget + 1.0 + 0.001:
+			break
+		if next_total > max_budget + 0.001:
+			var can_bonus = _is_cavalry_unit(unit) and straight and not bonus_used
+			if not can_bonus or step_cost > (max_budget - total_cost) + 1.0 + 0.001:
+				break
+			bonus_used = true
+			total_cost = next_total
+			trimmed.append(step)
+			break
+		total_cost = next_total
+		trimmed.append(step)
+		if $GameBoardNode.is_enemy_structure_tile(step, player_id):
+			break
+	if trimmed.size() < 2:
+		return []
+	return trimmed
+
+func _prune_invalid_move_orders_for_execution() -> void:
+	for player_id in ["player1", "player2"]:
+		var orders = NetworkManager.player_orders.get(player_id, {})
+		var committed = committed_orders.get(player_id, {})
+		var to_remove := []
+		for unit_id in orders.keys():
+			var ord = orders[unit_id]
+			if ord.get("type", "") != "move":
+				continue
+			var unit = unit_manager.get_unit_by_net_id(int(unit_id))
+			if unit == null:
+				to_remove.append(unit_id)
+				continue
+			var trimmed = _trim_move_order_to_budget(unit, ord, player_id)
+			if trimmed.is_empty():
+				to_remove.append(unit_id)
+				if unit.is_moving:
+					unit.is_moving = false
+					unit.moving_to = unit.grid_pos
+				continue
+			var original_path = ord.get("path", [])
+			if trimmed.size() != original_path.size():
+				ord["path"] = trimmed
+				orders[unit_id] = ord
+				if committed.has(unit_id):
+					committed[unit_id]["path"] = trimmed.duplicate()
+			if unit.is_moving and trimmed.size() > 1:
+				unit.moving_to = trimmed[1]
+		for unit_id in to_remove:
+			orders.erase(unit_id)
+			committed.erase(unit_id)
+		NetworkManager.player_orders[player_id] = orders
+		player_orders[player_id] = orders
+		committed_orders[player_id] = committed
+
 func _is_open_terrain(cell: Vector2i) -> bool:
 	var t = _terrain_type(cell)
 	if t == "":
@@ -5688,6 +5771,7 @@ func _do_execution() -> void:
 	_prune_ward_visions()
 	_prune_global_visions()
 	_prune_targeted_visions()
+	_prune_invalid_move_orders_for_execution()
 	for unit in $GameBoardNode.get_all_units_flat():
 		if unit != null:
 			unit.is_looking_out = false
