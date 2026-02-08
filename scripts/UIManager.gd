@@ -59,6 +59,7 @@ var _default_camera_zoom: Vector2 = Vector2.ZERO
 @onready var resource_panel = $ResourcePanel as Panel
 @onready var gold_resource_lbl = $ResourcePanel/VBoxContainer/GoldResourceLabel as Label
 @onready var mana_resource_lbl = $ResourcePanel/VBoxContainer/ManaResourceLabel as Label
+@onready var dragon_buff_lbl = $ResourcePanel/VBoxContainer/DragonBuffLabel as Label
 @onready var buff_mana_panel = $BuffManaPanel as Panel
 @onready var buff_mana_slider = $BuffManaPanel/VBoxContainer/ValueRow/BuffManaSlider as HSlider
 @onready var buff_mana_input = $BuffManaPanel/VBoxContainer/ValueRow/ValueInput as LineEdit
@@ -127,6 +128,7 @@ const MENU_ID_BUILDING_STATS: int = 11
 const MENU_ID_SPELL_STATS: int = 12
 const MENU_ID_DEV_MODE: int = 13
 const MENU_ID_QUIT: int = 14
+const MENU_ID_TERRAIN_STATS: int = 20
 const MENU_ID_SLOT_BASE: int = 100
 const MAP_SELECT_RANDOM_ANY: int = 1000
 const MAP_SELECT_RANDOM_NORMAL: int = 1001
@@ -292,12 +294,20 @@ func _ready():
 					Callable(self, "_on_building_stats_toggled"))
 	$SpellStatsCheckButton.connect("toggled",
 					Callable(self, "_on_spell_stats_toggled"))
-	$StatsPanel/CloseButton.connect("pressed",
+	$TerrainStatsCheckButton.connect("toggled",
+					Callable(self, "_on_terrain_stats_toggled"))
+	if $StatsPanel.has_signal("close_requested"):
+		$StatsPanel.connect("close_requested",
 					Callable(self, "_on_unit_stats_close_pressed"))
-	$BuildingStatsPanel/CloseButton.connect("pressed",
+	if $BuildingStatsPanel.has_signal("close_requested"):
+		$BuildingStatsPanel.connect("close_requested",
 					Callable(self, "_on_building_stats_close_pressed"))
-	$SpellStatsPanel/CloseButton.connect("pressed",
+	if $SpellStatsPanel.has_signal("close_requested"):
+		$SpellStatsPanel.connect("close_requested",
 					Callable(self, "_on_spell_stats_close_pressed"))
+	if $TerrainStatsPanel.has_signal("close_requested"):
+		$TerrainStatsPanel.connect("close_requested",
+					Callable(self, "_on_terrain_stats_close_pressed"))
 	$Panel/FinishMoveButton.connect("pressed",
 					Callable(self, "_on_finish_move_button_pressed"))
 	
@@ -325,25 +335,32 @@ func _ready():
 							$Panel/VBoxContainer/WizardButton,
 							$Panel/VBoxContainer/PhalanxButton,
 							$Panel/VBoxContainer/CavalryButton]
-	var unit_container = $StatsPanel/VBoxContainer
-	var unit_col_widths = [80.0, 60.0, 60.0, 60.0, 60.0]
-	_add_unit_stats_row(unit_container, ["Unit", "Melee", "Ranged", "Move", "Regen", "Special"], unit_col_widths, base_font, true, true)
+	var unit_tree = $StatsPanel/Tree
+	var unit_col_widths = [170.0, 70.0, 70.0, 60.0, 60.0, 90.0, 280.0]
+	var unit_headers = ["Unit", "Melee", "Ranged", "Move", "Regen", "Road Spawn", "Special"]
+	var unit_root = _setup_stats_tree(unit_tree, unit_headers, unit_col_widths, false, base_font)
+	var road_spawn_units = turn_mgr.SPAWN_TOWER_ROAD_UNITS
+	var unit_rows := []
 	var temp
 	for i in range(unit_scenes.size()):
 		temp = unit_scenes[i].instantiate()
 		unit_buy_buttons[i].text = "Buy %s (%dG)" % [unit_names[i], temp.cost]
 		var special_text = unit_specials[i] if i < unit_specials.size() else temp.special_skills
-		_add_unit_stats_row(
-			unit_container,
-			[unit_names[i], str(temp.melee_strength), str(temp.ranged_strength), str(temp.move_range), str(temp.regen), special_text],
-			unit_col_widths,
-			base_font,
-			true,
-			i < unit_scenes.size() - 1
+		var unit_key = unit_names[i].to_lower().replace(" ", "_")
+		var road_spawn = "Yes" if unit_key in road_spawn_units else "No"
+		var row = [unit_names[i], str(temp.melee_strength), str(temp.ranged_strength), str(temp.move_range), str(temp.regen), road_spawn, special_text]
+		_add_stats_tree_row(
+			unit_tree,
+			unit_root,
+			row,
+			false
 		)
+		unit_rows.append(row)
 	temp.free()
 
-	_add_unit_stats_row(unit_container, ["Neutral Units", "", "", "", "", ""], unit_col_widths, base_font, true, true)
+	var neutral_header = ["Neutral Units", "", "", "", "", "", ""]
+	_add_stats_tree_row(unit_tree, unit_root, neutral_header, false)
+	unit_rows.append(neutral_header)
 	var neutral_scenes = [CampArcherScene, DragonScene]
 	var neutral_names = ["Camp\nArcher", "Dragon"]
 	var neutral_specials = ["Ranged range 2", "Fire range 3; cleave adj up to 3"]
@@ -352,49 +369,53 @@ func _ready():
 		var special_text = neutral_specials[i]
 		if special_text == "":
 			special_text = temp.special_skills
-		_add_unit_stats_row(
-			unit_container,
-			[neutral_names[i], str(temp.melee_strength), str(temp.ranged_strength), str(temp.move_range), str(temp.regen), special_text],
-			unit_col_widths,
-			base_font,
-			true,
-			i < neutral_scenes.size() - 1
+		var row = [neutral_names[i], str(temp.melee_strength), str(temp.ranged_strength), str(temp.move_range), str(temp.regen), "N/A", special_text]
+		_add_stats_tree_row(
+			unit_tree,
+			unit_root,
+			row,
+			false
 		)
+		unit_rows.append(row)
 		temp.free()
+	_autosize_tree_columns(unit_tree, unit_headers, unit_rows, base_font)
 
-	var build_container = $BuildingStatsPanel/VBoxContainer
-	var build_col_widths = [140.0, 90.0, 60.0]
-	_add_build_stats_row(build_container, ["Building", "Cost", "Turns", "Effect"], build_col_widths, base_font, true, true)
+	var build_tree = $BuildingStatsPanel/Tree
+	var build_col_widths = [150.0, 80.0, 55.0, 60.0, 60.0, 60.0, 320.0]
+	var build_headers = ["Building", "Cost/step", "Turns", "Forest", "River", "Lake", "Effect"]
+	var build_root = _setup_stats_tree(build_tree, build_headers, build_col_widths, false, base_font)
 	var short_turns = int(turn_mgr.BUILD_TURNS_SHORT)
 	var tower_turns = int(turn_mgr.BUILD_TURNS_TOWER)
 	var mana_turns = int(turn_mgr.BUILD_TURNS_MANA_POOL)
 	var pump_turns = int(turn_mgr.BUILD_TURNS_MANA_PUMP)
 	var fort_bonus = "%d/%d" % [turn_mgr.fort_melee_bonus, turn_mgr.fort_ranged_bonus]
 	var build_rows = [
-		{"name": "Fortification", "cost": turn_mgr.get_build_turn_cost("fortification"), "turns": short_turns, "effect": "+%s melee/ranged (atk/def)" % fort_bonus},
-		{"name": "Road", "cost": turn_mgr.get_build_turn_cost("road"), "turns": short_turns, "effect": "Move x0.5; +1 turn on river; mines +10 if connected"},
-		{"name": "Railroad", "cost": turn_mgr.get_build_turn_cost("rail"), "turns": short_turns, "effect": "Move x0.25; upgrade intact road; rail build counts as road; +1 turn on river; mines +20 if connected"},
-		{"name": "Mana Pool", "cost": turn_mgr.get_build_turn_cost("mana_pool"), "turns": mana_turns, "effect": "Adjacent to mine or base; +100 mana cap; one per mine/base"},
-		{"name": "Mana Pump", "cost": turn_mgr.get_build_turn_cost("mana_pump"), "turns": pump_turns, "effect": "Triangle with mine/base + pool; +5 mana/turn if source controlled & pool intact"},
-		{"name": "Ward", "cost": turn_mgr.get_build_turn_cost("ward"), "turns": short_turns, "effect": "Hidden from enemies except wizards; spend 5 mana for vision radius 2; sees through forests"},
-		{"name": "Spawn Tower", "cost": turn_mgr.get_build_turn_cost("spawn_tower"), "turns": tower_turns, "effect": "Spawn point; tower bonuses; no income; needs road/rail link"},
-		{"name": "Trap", "cost": turn_mgr.get_build_turn_cost("trap"), "turns": short_turns, "effect": "Hidden from enemies; triggers to disable, stop movement, deal 30 dmg"}
+		{"name": "Fortification", "cost": turn_mgr.get_build_turn_cost("fortification"), "turns": short_turns, "forest": "No", "river": "No", "lake": "No", "effect": "+%s melee/ranged (atk/def)" % fort_bonus},
+		{"name": "Road", "cost": turn_mgr.get_build_turn_cost("road"), "turns": short_turns, "forest": "Yes", "river": "Yes", "lake": "No", "effect": "Move x0.5; +1 turn on river; mines +10 if connected"},
+		{"name": "Railroad", "cost": turn_mgr.get_build_turn_cost("rail"), "turns": short_turns, "forest": "Yes", "river": "Yes", "lake": "No", "effect": "Move x0.25; upgrade intact road; rail build counts as road; +1 turn on river; mines +20 if connected"},
+		{"name": "Mana Pool", "cost": turn_mgr.get_build_turn_cost("mana_pool"), "turns": mana_turns, "forest": "No", "river": "No", "lake": "No", "effect": "Adjacent to mine or base; +100 mana cap; one per mine/base"},
+		{"name": "Mana Pump", "cost": turn_mgr.get_build_turn_cost("mana_pump"), "turns": pump_turns, "forest": "Yes", "river": "Yes", "lake": "Yes", "effect": "Triangle with mine/base + pool; +5 mana/turn if source controlled & pool intact"},
+		{"name": "Ward", "cost": turn_mgr.get_build_turn_cost("ward"), "turns": short_turns, "forest": "Yes", "river": "No", "lake": "Yes", "effect": "Hidden from enemies except wizards; spend 5 mana for vision radius 2; sees through forests"},
+		{"name": "Spawn Tower", "cost": turn_mgr.get_build_turn_cost("spawn_tower"), "turns": tower_turns, "forest": "No", "river": "No", "lake": "No", "effect": "Spawn point; tower bonuses; no income; needs road/rail link"},
+		{"name": "Trap", "cost": turn_mgr.get_build_turn_cost("trap"), "turns": short_turns, "forest": "Yes", "river": "Yes", "lake": "No", "effect": "Hidden from enemies; triggers to disable, stop movement, deal 30 dmg"}
 	]
+	var build_rows_values := []
 	for i in range(build_rows.size()):
 		var row = build_rows[i]
-		var add_sep = i < build_rows.size() - 1
-		_add_build_stats_row(
-			build_container,
-			[row["name"], "%dg/step" % int(row["cost"]), str(row["turns"]), row["effect"]],
-			build_col_widths,
-			base_font,
-			true,
-			add_sep
+		var row_values = [row["name"], "%dg" % int(row["cost"]), str(row["turns"]), row["forest"], row["river"], row["lake"], row["effect"]]
+		_add_stats_tree_row(
+			build_tree,
+			build_root,
+			row_values,
+			false
 		)
+		build_rows_values.append(row_values)
+	_autosize_tree_columns(build_tree, build_headers, build_rows_values, base_font)
 	
-	var spell_container = $SpellStatsPanel/VBoxContainer
-	var spell_col_widths = [120.0, 80.0, 80.0]
-	_add_build_stats_row(spell_container, ["Spell", "Cost", "Phase", "Effect"], spell_col_widths, base_font, true, true)
+	var spell_tree = $SpellStatsPanel/Tree
+	var spell_col_widths = [140.0, 80.0, 80.0, 320.0]
+	var spell_headers = ["Spell", "Cost", "Phase", "Effect"]
+	var spell_root = _setup_stats_tree(spell_tree, spell_headers, spell_col_widths, false, base_font)
 	var spell_rows = [
 		{"name": "Heal", "cost": turn_mgr.get_spell_cost("heal"), "phase": "Spells", "effect": "Heal 25; range 3"},
 		{"name": "Fireball", "cost": turn_mgr.get_spell_cost("fireball"), "phase": "Attacks", "effect": "50 dmg units; 10 dmg tower/base; range 3"},
@@ -403,17 +424,45 @@ func _ready():
 		{"name": "Global Vision", "cost": turn_mgr.get_spell_cost("global_vision"), "phase": "Spawns", "effect": "Reveal all explored tiles for 1 turn"},
 		{"name": "Targeted Vision", "cost": turn_mgr.get_spell_cost("targeted_vision"), "phase": "Spawns", "effect": "Ward vision radius 2 for 1 turn; cast range 3"}
 	]
+	var spell_rows_values := []
 	for i in range(spell_rows.size()):
 		var row = spell_rows[i]
-		var add_sep = i < spell_rows.size() - 1
-		_add_build_stats_row(
-			spell_container,
-			[row["name"], "%d mana" % int(row["cost"]), row["phase"], row["effect"]],
-			spell_col_widths,
-			base_font,
-			true,
-			add_sep
+		var cost_text = "%d mana" % int(row["cost"])
+		if row["name"] == "Combat Buff":
+			cost_text = "%s mana" % str(row["cost"])
+		var row_values = [row["name"], cost_text, row["phase"], row["effect"]]
+		_add_stats_tree_row(
+			spell_tree,
+			spell_root,
+			row_values,
+			false
 		)
+		spell_rows_values.append(row_values)
+	_autosize_tree_columns(spell_tree, spell_headers, spell_rows_values, base_font)
+
+	var terrain_tree = $TerrainStatsPanel/Tree
+	var terrain_col_widths = [100.0, 70.0, 90.0, 90.0, 75.0, 80.0, 90.0]
+	var terrain_headers = ["Terrain", "Move", "Blocks LOS", "Impassable", "Melee Atk", "Melee Def", "Ranged Def"]
+	var terrain_root = _setup_stats_tree(terrain_tree, terrain_headers, terrain_col_widths, false, base_font)
+	var terrain_rows = [
+		{"name": "Open", "move": "1", "blocks": "No", "impass": "No", "atk": "0", "melee_def": "0", "ranged_def": "0"},
+		{"name": "Forest", "move": "2", "blocks": "Yes", "impass": "No", "atk": "0", "melee_def": "+2", "ranged_def": "+2"},
+		{"name": "River", "move": "2", "blocks": "No", "impass": "No", "atk": "-2", "melee_def": "-2", "ranged_def": "-2"},
+		{"name": "Lake", "move": "2", "blocks": "No", "impass": "No", "atk": "-2", "melee_def": "+3", "ranged_def": "-3"},
+		{"name": "Mountain", "move": "Imp", "blocks": "Yes", "impass": "Yes", "atk": "0", "melee_def": "0", "ranged_def": "0"}
+	]
+	var terrain_rows_values := []
+	for i in range(terrain_rows.size()):
+		var row = terrain_rows[i]
+		var row_values = [row["name"], row["move"], row["blocks"], row["impass"], row["atk"], row["melee_def"], row["ranged_def"]]
+		_add_stats_tree_row(
+			terrain_tree,
+			terrain_root,
+			row_values,
+			false
+		)
+		terrain_rows_values.append(row_values)
+	_autosize_tree_columns(terrain_tree, terrain_headers, terrain_rows_values, base_font)
 	
 	# unit order menu
 	action_menu.connect("id_pressed", Callable(self, "_on_action_selected"))
@@ -448,6 +497,7 @@ func _init_menu() -> void:
 	menu_popup.add_check_item("Unit Stats", MENU_ID_UNIT_STATS)
 	menu_popup.add_check_item("Building Stats", MENU_ID_BUILDING_STATS)
 	menu_popup.add_check_item("Spell Stats", MENU_ID_SPELL_STATS)
+	menu_popup.add_check_item("Terrain Stats", MENU_ID_TERRAIN_STATS)
 	menu_popup.add_check_item("Dev Mode", MENU_ID_DEV_MODE)
 	menu_popup.add_separator()
 	for i in range(SAVE_SLOT_COUNT_UI):
@@ -793,6 +843,7 @@ func _sync_menu_checks() -> void:
 	_set_menu_checked(MENU_ID_UNIT_STATS, $StatsPanel.visible)
 	_set_menu_checked(MENU_ID_BUILDING_STATS, $BuildingStatsPanel.visible)
 	_set_menu_checked(MENU_ID_SPELL_STATS, $SpellStatsPanel.visible)
+	_set_menu_checked(MENU_ID_TERRAIN_STATS, $TerrainStatsPanel.visible)
 	_set_menu_checked(MENU_ID_DEV_MODE, dev_mode_toggle.button_pressed)
 	for i in range(SAVE_SLOT_COUNT_UI):
 		_set_menu_checked(MENU_ID_SLOT_BASE + i, i == save_slot_index)
@@ -845,6 +896,14 @@ func _on_menu_id_pressed(id: int) -> void:
 			$SpellStatsCheckButton.button_pressed = next
 		_on_spell_stats_toggled(next)
 		return
+	if id == MENU_ID_TERRAIN_STATS:
+		var next = not $TerrainStatsPanel.visible
+		if $TerrainStatsCheckButton.has_method("set_pressed_no_signal"):
+			$TerrainStatsCheckButton.set_pressed_no_signal(next)
+		else:
+			$TerrainStatsCheckButton.button_pressed = next
+		_on_terrain_stats_toggled(next)
+		return
 	if id == MENU_ID_DEV_MODE:
 		var next = not dev_mode_toggle.button_pressed
 		if dev_mode_toggle.has_method("set_pressed_no_signal"):
@@ -868,6 +927,7 @@ func _add_build_stats_row(container: VBoxContainer, columns: Array, widths: Arra
 	for i in range(columns.size()):
 		var col_label = Label.new()
 		col_label.add_theme_font_override("font", font)
+		col_label.add_theme_color_override("font_color", Color(0.95, 0.95, 0.95))
 		col_label.text = str(columns[i])
 		if i == columns.size() - 1 and wrap_last:
 			col_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -882,6 +942,87 @@ func _add_build_stats_row(container: VBoxContainer, columns: Array, widths: Arra
 		sep.custom_minimum_size = Vector2(0.0, 2.0)
 		container.add_child(sep)
 
+func _setup_stats_tree(tree: Tree, columns: Array, widths: Array, expand_last: bool, font: FontFile) -> TreeItem:
+	if tree == null:
+		return null
+	tree.clear()
+	tree.columns = columns.size()
+	tree.hide_root = true
+	if tree.has_method("set_column_titles_visible"):
+		tree.set_column_titles_visible(true)
+	else:
+		tree.column_titles_visible = true
+	if tree.has_method("set_scroll_horizontal_enabled"):
+		tree.set_scroll_horizontal_enabled(true)
+	else:
+		tree.scroll_horizontal_enabled = true
+	if tree.has_method("set_scroll_vertical_enabled"):
+		tree.set_scroll_vertical_enabled(true)
+	if font != null:
+		tree.add_theme_font_override("font", font)
+	tree.add_theme_color_override("font_color", Color(0.08, 0.08, 0.08))
+	tree.add_theme_color_override("font_color_selected", Color(0.08, 0.08, 0.08))
+	tree.add_theme_color_override("font_color_title", Color(0.08, 0.08, 0.08))
+	var panel_style := StyleBoxFlat.new()
+	panel_style.bg_color = Color(0.86, 0.86, 0.86)
+	tree.add_theme_stylebox_override("panel", panel_style)
+	var selected_style := StyleBoxFlat.new()
+	selected_style.bg_color = Color(0.76, 0.76, 0.76)
+	tree.add_theme_stylebox_override("selected", selected_style)
+	tree.add_theme_stylebox_override("selected_focus", selected_style)
+	for i in range(columns.size()):
+		tree.set_column_title(i, str(columns[i]))
+		if i < widths.size():
+			if tree.has_method("set_column_custom_minimum_width"):
+				tree.set_column_custom_minimum_width(i, int(widths[i]))
+			elif tree.has_method("set_column_min_width"):
+				tree.set_column_min_width(i, int(widths[i]))
+		if tree.has_method("set_column_expand"):
+			tree.set_column_expand(i, expand_last and i == columns.size() - 1)
+		if tree.has_method("set_column_title_alignment"):
+			tree.set_column_title_alignment(i, HORIZONTAL_ALIGNMENT_LEFT)
+	var root = tree.create_item()
+	return root
+
+func _add_stats_tree_row(tree: Tree, root: TreeItem, columns: Array, selectable: bool) -> void:
+	if tree == null or root == null:
+		return
+	var item = tree.create_item(root)
+	for i in range(columns.size()):
+		item.set_text(i, str(columns[i]))
+		item.set_selectable(i, selectable)
+
+func _autosize_tree_column(tree: Tree, column_index: int, header: String, values: Array, font: FontFile) -> void:
+	if tree == null or font == null:
+		return
+	var max_width = font.get_string_size(header).x
+	for value in values:
+		var width = font.get_string_size(str(value)).x
+		if width > max_width:
+			max_width = width
+	max_width += 20.0
+	if tree.has_method("set_column_custom_minimum_width"):
+		tree.set_column_custom_minimum_width(column_index, int(ceil(max_width)))
+	elif tree.has_method("set_column_min_width"):
+		tree.set_column_min_width(column_index, int(ceil(max_width)))
+
+func _autosize_tree_columns(tree: Tree, headers: Array, rows: Array, font: FontFile) -> void:
+	if tree == null or font == null:
+		return
+	if headers.is_empty():
+		return
+	var col_count = headers.size()
+	var value_lists := []
+	value_lists.resize(col_count)
+	for i in range(col_count):
+		value_lists[i] = []
+	for row in rows:
+		if row is Array:
+			for i in range(min(col_count, row.size())):
+				value_lists[i].append(row[i])
+	for i in range(col_count):
+		_autosize_tree_column(tree, i, str(headers[i]), value_lists[i], font)
+
 func _add_unit_stats_row(container: VBoxContainer, columns: Array, widths: Array, font: FontFile, wrap_last: bool, add_separator: bool = true) -> void:
 	var row = HBoxContainer.new()
 	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -889,6 +1030,7 @@ func _add_unit_stats_row(container: VBoxContainer, columns: Array, widths: Array
 	for i in range(columns.size()):
 		var col_label = Label.new()
 		col_label.add_theme_font_override("font", font)
+		col_label.add_theme_color_override("font_color", Color(0.95, 0.95, 0.95))
 		col_label.text = str(columns[i])
 		if i == columns.size() - 1 and wrap_last:
 			col_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -1604,6 +1746,10 @@ func _refresh_resource_labels() -> void:
 		gold_resource_lbl.text = "Gold: %d  Spend: %d  Income: +%d" % [gold, int(spend["gold"]), income]
 	if mana_resource_lbl != null:
 		mana_resource_lbl.text = "Mana: %d/%d  Spend: %d  Income: +%d" % [mana, cap, int(spend["mana"]), mana_income]
+	if dragon_buff_lbl != null:
+		var melee_bonus = int(turn_mgr.player_melee_bonus.get(current_player, 0))
+		var ranged_bonus = int(turn_mgr.player_ranged_bonus.get(current_player, 0))
+		dragon_buff_lbl.text = "Dragon Buffs: +%d melee / +%d ranged" % [melee_bonus, ranged_bonus]
 
 func _on_buy_result(player_id: String, unit_type: String, grid_pos: Vector2i, ok: bool, reason: String, cost: int) -> void:
 	if player_id != turn_mgr.local_player_id:
@@ -1762,6 +1908,7 @@ func _on_cancel_game_pressed():
 	_on_stats_toggled(false)
 	_on_building_stats_toggled(false)
 	_on_spell_stats_toggled(false)
+	_on_terrain_stats_toggled(false)
 	_update_done_button_state()
 	NetworkManager.close_connection()
 
@@ -1778,7 +1925,10 @@ func _on_finish_move_button_pressed():
 func _on_stats_toggled(toggled):
 	if toggled:
 		_close_other_stats_panels("unit")
-		$StatsPanel.visible = true
+		if $StatsPanel.has_method("popup"):
+			$StatsPanel.popup()
+		else:
+			$StatsPanel.visible = true
 	else:
 		$StatsPanel.visible = false
 	_set_menu_checked(MENU_ID_UNIT_STATS, toggled)
@@ -1786,7 +1936,10 @@ func _on_stats_toggled(toggled):
 func _on_building_stats_toggled(toggled):
 	if toggled:
 		_close_other_stats_panels("building")
-		$BuildingStatsPanel.visible = true
+		if $BuildingStatsPanel.has_method("popup"):
+			$BuildingStatsPanel.popup()
+		else:
+			$BuildingStatsPanel.visible = true
 	else:
 		$BuildingStatsPanel.visible = false
 	_set_menu_checked(MENU_ID_BUILDING_STATS, toggled)
@@ -1794,10 +1947,24 @@ func _on_building_stats_toggled(toggled):
 func _on_spell_stats_toggled(toggled):
 	if toggled:
 		_close_other_stats_panels("spell")
-		$SpellStatsPanel.visible = true
+		if $SpellStatsPanel.has_method("popup"):
+			$SpellStatsPanel.popup()
+		else:
+			$SpellStatsPanel.visible = true
 	else:
 		$SpellStatsPanel.visible = false
 	_set_menu_checked(MENU_ID_SPELL_STATS, toggled)
+
+func _on_terrain_stats_toggled(toggled):
+	if toggled:
+		_close_other_stats_panels("terrain")
+		if $TerrainStatsPanel.has_method("popup"):
+			$TerrainStatsPanel.popup()
+		else:
+			$TerrainStatsPanel.visible = true
+	else:
+		$TerrainStatsPanel.visible = false
+	_set_menu_checked(MENU_ID_TERRAIN_STATS, toggled)
 
 func _on_unit_stats_close_pressed() -> void:
 	$StatsPanel.visible = false
@@ -1813,6 +1980,11 @@ func _on_spell_stats_close_pressed() -> void:
 	$SpellStatsPanel.visible = false
 	$SpellStatsCheckButton.button_pressed = false
 	_set_menu_checked(MENU_ID_SPELL_STATS, false)
+
+func _on_terrain_stats_close_pressed() -> void:
+	$TerrainStatsPanel.visible = false
+	$TerrainStatsCheckButton.button_pressed = false
+	_set_menu_checked(MENU_ID_TERRAIN_STATS, false)
 
 func _close_other_stats_panels(active_panel: String) -> void:
 	if active_panel != "unit" and $StatsPanel.visible:
@@ -1836,6 +2008,13 @@ func _close_other_stats_panels(active_panel: String) -> void:
 		else:
 			$SpellStatsCheckButton.button_pressed = false
 		_set_menu_checked(MENU_ID_SPELL_STATS, false)
+	if active_panel != "terrain" and $TerrainStatsPanel.visible:
+		$TerrainStatsPanel.visible = false
+		if $TerrainStatsCheckButton.has_method("set_pressed_no_signal"):
+			$TerrainStatsCheckButton.set_pressed_no_signal(false)
+		else:
+			$TerrainStatsCheckButton.button_pressed = false
+		_set_menu_checked(MENU_ID_TERRAIN_STATS, false)
 
 func _get_next_unordered_unit() -> Node:
 	var units = game_board.get_all_units().get(current_player, [])
@@ -2426,6 +2605,27 @@ func _draw_attacks():
 		players.append(current_player)
 	else:
 		players = ["player1", "player2"]
+	var attack_counts := {}
+	var buff_by_target := {}
+	for player in players:
+		var all_orders = turn_mgr.get_all_orders_for_phase(player)
+		for order in all_orders:
+			var order_type = str(order.get("type", ""))
+			if order_type == "ranged" or order_type == "melee":
+				var target_id = int(order.get("target_unit_net_id", -1))
+				if target_id != -1:
+					attack_counts[target_id] = int(attack_counts.get(target_id, 0)) + 1
+			elif order_type == "spell" and str(order.get("spell_type", "")) == turn_mgr.SPELL_BUFF:
+				var buff_target = int(order.get("target_unit_net_id", -1))
+				if buff_target == -1:
+					continue
+				var mana_spent = int(order.get("mana_spent", 0))
+				if mana_spent < turn_mgr.SPELL_BUFF_MIN or mana_spent > turn_mgr.SPELL_BUFF_MAX:
+					continue
+				if mana_spent % turn_mgr.SPELL_BUFF_STEP != 0:
+					continue
+				var buff_amount = snappedf(float(mana_spent) * 0.1, 0.1)
+				buff_by_target[buff_target] = buff_amount
 	for player in players:
 		var all_orders = turn_mgr.get_all_orders_for_phase(player)
 		for order in all_orders:
@@ -2456,7 +2656,42 @@ func _draw_attacks():
 				arrow.z_index = 10
 				root.add_child(arrow)
 				if is_attack:
-					var dmg = $"..".calculate_damage(attacker, target, order["type"], 1)
+					var num_attackers = int(attack_counts.get(target.net_id, 1))
+					if num_attackers < 1:
+						num_attackers = 1
+					var atk_override = buff_by_target.has(attacker.net_id)
+					var def_override = buff_by_target.has(target.net_id)
+					var atk_buff_orig_melee = 0.0
+					var atk_buff_orig_ranged = 0.0
+					var atk_buff_orig_turns = 0
+					if atk_override:
+						atk_buff_orig_melee = float(attacker.spell_buff_melee)
+						atk_buff_orig_ranged = float(attacker.spell_buff_ranged)
+						atk_buff_orig_turns = int(attacker.spell_buff_turns)
+						var atk_buff_amt = float(buff_by_target[attacker.net_id])
+						attacker.spell_buff_melee = atk_buff_amt
+						attacker.spell_buff_ranged = atk_buff_amt
+						attacker.spell_buff_turns = 1
+					var def_buff_orig_melee = 0.0
+					var def_buff_orig_ranged = 0.0
+					var def_buff_orig_turns = 0
+					if def_override:
+						def_buff_orig_melee = float(target.spell_buff_melee)
+						def_buff_orig_ranged = float(target.spell_buff_ranged)
+						def_buff_orig_turns = int(target.spell_buff_turns)
+						var def_buff_amt = float(buff_by_target[target.net_id])
+						target.spell_buff_melee = def_buff_amt
+						target.spell_buff_ranged = def_buff_amt
+						target.spell_buff_turns = 1
+					var dmg = $"..".calculate_damage(attacker, target, order["type"], num_attackers)
+					if atk_override:
+						attacker.spell_buff_melee = atk_buff_orig_melee
+						attacker.spell_buff_ranged = atk_buff_orig_ranged
+						attacker.spell_buff_turns = atk_buff_orig_turns
+					if def_override:
+						target.spell_buff_melee = def_buff_orig_melee
+						target.spell_buff_ranged = def_buff_orig_ranged
+						target.spell_buff_turns = def_buff_orig_turns
 					var dmg_label = Label.new()
 					dmg_label.text = "%d (%d)" % [dmg[1], dmg[0]]
 					dmg_label.add_theme_color_override("font_color", Color(0.96, 0.96, 0.08))

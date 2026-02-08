@@ -447,20 +447,23 @@ text = "Finalize move"
 
 [node name="ResourcePanel" type="Panel" parent="UI"]
 visible = false
-custom_minimum_size = Vector2(260, 70)
+custom_minimum_size = Vector2(260, 90)
 offset_left = 235.0
 offset_right = 505.0
-offset_bottom = 80.0
+offset_bottom = 100.0
 
 [node name="VBoxContainer" type="VBoxContainer" parent="UI/ResourcePanel"]
 layout_mode = 0
 offset_right = 260.0
-offset_bottom = 70.0
+offset_bottom = 90.0
 
 [node name="GoldResourceLabel" type="Label" parent="UI/ResourcePanel/VBoxContainer"]
 layout_mode = 2
 
 [node name="ManaResourceLabel" type="Label" parent="UI/ResourcePanel/VBoxContainer"]
+layout_mode = 2
+
+[node name="DragonBuffLabel" type="Label" parent="UI/ResourcePanel/VBoxContainer"]
 layout_mode = 2
 
 [node name="BuffManaPanel" type="Panel" parent="UI"]
@@ -532,6 +535,14 @@ offset_right = 684.0
 offset_bottom = 32.0
 text = "Spell Stats"
 
+[node name="TerrainStatsCheckButton" type="CheckButton" parent="UI"]
+visible = false
+offset_left = 690.0
+offset_top = 1.0
+offset_right = 848.0
+offset_bottom = 32.0
+text = "Terrain Stats"
+
 [node name="MenuButton" type="MenuButton" parent="UI"]
 anchors_preset = 1
 anchor_left = 1.0
@@ -542,80 +553,73 @@ offset_right = -10.0
 offset_bottom = 32.0
 text = "Menu"
 
-[node name="StatsPanel" type="Panel" parent="UI"]
+[node name="StatsPanel" type="Window" parent="UI"]
+title = "Unit Stats"
+position = Vector2i(213, 27)
+size = Vector2i(601, 530)
 visible = false
-offset_left = 213.0
-offset_top = 27.0
-offset_right = 814.0
-offset_bottom = 557.0
 
-[node name="VBoxContainer" type="VBoxContainer" parent="UI/StatsPanel"]
-layout_mode = 0
-offset_left = -2.0
-offset_top = 1.0
-offset_right = 591.0
-offset_bottom = 450.0
-
-[node name="CloseButton" type="Button" parent="UI/StatsPanel"]
-z_index = 1
-layout_mode = 0
-anchor_left = 1.0
+[node name="Tree" type="Tree" parent="UI/StatsPanel"]
+anchors_preset = 15
 anchor_right = 1.0
-offset_left = -26.0
-offset_top = 4.0
-offset_right = -4.0
-offset_bottom = 24.0
-text = "X"
+anchor_bottom = 1.0
+offset_left = 8.0
+offset_top = 8.0
+offset_right = -8.0
+offset_bottom = -8.0
+size_flags_horizontal = 3
+size_flags_vertical = 3
 
-[node name="BuildingStatsPanel" type="Panel" parent="UI"]
+[node name="BuildingStatsPanel" type="Window" parent="UI"]
+title = "Building Stats"
+position = Vector2i(213, 27)
+size = Vector2i(687, 263)
 visible = false
-offset_left = 213.0
-offset_top = 27.0
-offset_right = 900.0
-offset_bottom = 290.0
 
-[node name="VBoxContainer" type="VBoxContainer" parent="UI/BuildingStatsPanel"]
-layout_mode = 0
-offset_left = -2.0
-offset_top = 1.0
-offset_right = 683.0
-offset_bottom = 250.0
-
-[node name="CloseButton" type="Button" parent="UI/BuildingStatsPanel"]
-z_index = 1
-layout_mode = 0
-anchor_left = 1.0
+[node name="Tree" type="Tree" parent="UI/BuildingStatsPanel"]
+anchors_preset = 15
 anchor_right = 1.0
-offset_left = -26.0
-offset_top = 4.0
-offset_right = -4.0
-offset_bottom = 24.0
-text = "X"
+anchor_bottom = 1.0
+offset_left = 8.0
+offset_top = 8.0
+offset_right = -8.0
+offset_bottom = -8.0
+size_flags_horizontal = 3
+size_flags_vertical = 3
 
-[node name="SpellStatsPanel" type="Panel" parent="UI"]
+[node name="SpellStatsPanel" type="Window" parent="UI"]
+title = "Spell Stats"
+position = Vector2i(213, 27)
+size = Vector2i(687, 263)
 visible = false
-offset_left = 213.0
-offset_top = 27.0
-offset_right = 900.0
-offset_bottom = 290.0
 
-[node name="VBoxContainer" type="VBoxContainer" parent="UI/SpellStatsPanel"]
-layout_mode = 0
-offset_left = -2.0
-offset_top = 1.0
-offset_right = 683.0
-offset_bottom = 250.0
-
-[node name="CloseButton" type="Button" parent="UI/SpellStatsPanel"]
-z_index = 1
-layout_mode = 0
-anchor_left = 1.0
+[node name="Tree" type="Tree" parent="UI/SpellStatsPanel"]
+anchors_preset = 15
 anchor_right = 1.0
-offset_left = -26.0
-offset_top = 4.0
-offset_right = -4.0
-offset_bottom = 24.0
-text = "X"
+anchor_bottom = 1.0
+offset_left = 8.0
+offset_top = 8.0
+offset_right = -8.0
+offset_bottom = -8.0
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="TerrainStatsPanel" type="Window" parent="UI"]
+title = "Terrain Stats"
+position = Vector2i(213, 27)
+size = Vector2i(687, 263)
+visible = false
+
+[node name="Tree" type="Tree" parent="UI/TerrainStatsPanel"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 8.0
+offset_top = 8.0
+offset_right = -8.0
+offset_bottom = -8.0
+size_flags_horizontal = 3
+size_flags_vertical = 3
 
 [node name="ExecutionPanel" type="PanelContainer" parent="UI"]
 visible = false
