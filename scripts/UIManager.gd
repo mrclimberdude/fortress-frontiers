@@ -1859,7 +1859,7 @@ func _on_host_pressed():
 		turn_mgr._reset_map_state()
 	var port = $"PortLineEdit".text.strip_edges()
 	NetworkManager.host_game(int(port))
-	turn_mgr.local_player_id = "player1"
+	turn_mgr.set_local_player_id("player1")
 	$HostButton.visible = false
 	$JoinButton.visible = false
 	$IPLineEdit.visible = false
@@ -1877,7 +1877,7 @@ func _on_join_pressed():
 	var port = $"PortLineEdit".text.strip_edges()
 	print("[UI] Joining game at %s:%d" % [ip, port])
 	NetworkManager.join_game(ip, int(port))
-	turn_mgr.local_player_id = "player2"
+	turn_mgr.set_local_player_id("player2")
 	$HostButton.visible = false
 	$JoinButton.visible = false
 	$IPLineEdit.visible = false

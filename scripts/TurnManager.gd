@@ -32,6 +32,10 @@ const MapGenerator = preload("res://scripts/MapGenerator.gd")
 var terrain_overlay: TileMapLayer
 var rng := RandomNumberGenerator.new()
 var current_map_index: int = -1
+var dev_log_path: String = ""
+var dev_log_file: FileAccess = null
+var last_snapshot_turn: int = -1
+const DEV_LOG_VERSION: int = 1
 
 func _map_category_for(md: MapData) -> String:
 	if md == null:
@@ -78,6 +82,122 @@ func _apply_custom_proc_params(md: MapData, params: Dictionary) -> void:
 	if params.has("proc_dragon_count"):
 		md.proc_dragon_count = int(params["proc_dragon_count"])
 
+func _devlog_timestamp() -> String:
+	var dt = Time.get_datetime_dict_from_system()
+	return "%04d%02d%02d_%02d%02d%02d" % [dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second]
+
+func _devlog_player_id() -> String:
+	var pid = str(local_player_id).strip_edges()
+	if pid == "":
+		if _is_host():
+			return "player1"
+		return "player2"
+	return pid
+
+func _ensure_dev_log_open() -> void:
+	if dev_log_file != null:
+		return
+	dev_log_path = "user://dev_log_%s_%s.jsonl" % [_devlog_timestamp(), _devlog_player_id()]
+	dev_log_file = FileAccess.open(dev_log_path, FileAccess.WRITE)
+	if dev_log_file == null:
+		push_error("Dev log: failed to open %s" % dev_log_path)
+		return
+	_devlog({
+		"type": "log_start",
+		"version": DEV_LOG_VERSION,
+		"player_id": _devlog_player_id()
+	})
+
+func _close_dev_log() -> void:
+	if dev_log_file != null:
+		dev_log_file.flush()
+		dev_log_file.close()
+	dev_log_file = null
+	dev_log_path = ""
+
+func _devlog_encode(value):
+	if value is Vector2i:
+		return [value.x, value.y]
+	if value is Vector2:
+		return [value.x, value.y]
+	if value is Dictionary:
+		var out := {}
+		for k in value.keys():
+			out[str(k)] = _devlog_encode(value[k])
+		return out
+	if value is Array:
+		var arr := []
+		for v in value:
+			arr.append(_devlog_encode(v))
+		return arr
+	return value
+
+func _devlog(event: Dictionary) -> void:
+	if dev_log_file == null:
+		return
+	var payload = event.duplicate(true)
+	payload["ts"] = int(Time.get_unix_time_from_system())
+	payload["turn"] = int(turn_number)
+	payload["phase"] = int(current_phase)
+	payload["step"] = int(step_index)
+	dev_log_file.store_line(JSON.stringify(_devlog_encode(payload)))
+	dev_log_file.flush()
+
+func _log_order_result(player_id: String, order: Dictionary, result: Dictionary) -> Dictionary:
+	_devlog({
+		"type": "order_result",
+		"player": player_id,
+		"request": order,
+		"result": result
+	})
+	return result
+
+func _log_buy_result(player_id: String, unit_type: String, grid_pos: Vector2i, result: Dictionary) -> Dictionary:
+	_devlog({
+		"type": "buy_unit_result",
+		"player": player_id,
+		"unit_type": unit_type,
+		"grid_pos": grid_pos,
+		"result": result
+	})
+	return result
+
+func _log_undo_buy_result(player_id: String, unit_net_id: int, result: Dictionary) -> Dictionary:
+	_devlog({
+		"type": "undo_buy_result",
+		"player": player_id,
+		"unit_net_id": unit_net_id,
+		"result": result
+	})
+	return result
+
+func _devlog_snapshot(reason: String, extra: Dictionary = {}) -> void:
+	var payload := {
+		"type": "state_snapshot",
+		"reason": reason,
+		"state": get_state_snapshot(true)
+	}
+	for key in extra.keys():
+		payload[key] = extra[key]
+	last_snapshot_turn = int(turn_number)
+	_devlog(payload)
+
+func set_local_player_id(player_id: String) -> void:
+	local_player_id = player_id
+	var desired_suffix = "_%s.jsonl" % _devlog_player_id()
+	if dev_log_file != null and dev_log_path.find(desired_suffix) == -1:
+		_devlog({
+			"type": "log_rotate",
+			"reason": "player_id_set",
+			"player_id": _devlog_player_id()
+		})
+		_close_dev_log()
+	_ensure_dev_log_open()
+	_devlog({
+		"type": "player_id_set",
+		"player_id": _devlog_player_id()
+	})
+
 func _pick_random_map_index(mode: String) -> int:
 	if map_data.size() == 0:
 		return -1
@@ -105,8 +225,12 @@ func _pick_random_map_index(mode: String) -> int:
 			continue
 		candidates.append(i)
 	if candidates.size() == 0:
-		return rng.randi_range(0, map_data.size() - 1)
-	return candidates[rng.randi_range(0, candidates.size() - 1)]
+		var fallback = rng.randi_range(0, map_data.size() - 1)
+		_devlog({"type": "map_pick", "mode": normalized, "candidates": map_data.size(), "choice": fallback})
+		return fallback
+	var choice = candidates[rng.randi_range(0, candidates.size() - 1)]
+	_devlog({"type": "map_pick", "mode": normalized, "candidates": candidates.size(), "choice": choice})
+	return choice
 
 const SAVE_VERSION: int = 1
 const SAVE_DEFAULT_PATH: String = "user://save_game.json"
@@ -409,10 +533,24 @@ func _prune_invalid_move_orders_for_execution() -> void:
 				continue
 			var unit = unit_manager.get_unit_by_net_id(int(unit_id))
 			if unit == null:
+				_devlog({
+					"type": "move_order_pruned",
+					"player": player_id,
+					"unit_net_id": int(unit_id),
+					"reason": "unit_missing",
+					"original_path": ord.get("path", [])
+				})
 				to_remove.append(unit_id)
 				continue
 			var trimmed = _trim_move_order_to_budget(unit, ord, player_id)
 			if trimmed.is_empty():
+				_devlog({
+					"type": "move_order_pruned",
+					"player": player_id,
+					"unit_net_id": int(unit_id),
+					"reason": "trimmed_empty",
+					"original_path": ord.get("path", [])
+				})
 				to_remove.append(unit_id)
 				if unit.is_moving:
 					unit.is_moving = false
@@ -420,6 +558,13 @@ func _prune_invalid_move_orders_for_execution() -> void:
 				continue
 			var original_path = ord.get("path", [])
 			if trimmed.size() != original_path.size():
+				_devlog({
+					"type": "move_order_trimmed",
+					"player": player_id,
+					"unit_net_id": int(unit_id),
+					"original_path": original_path,
+					"trimmed_path": trimmed
+				})
 				ord["path"] = trimmed
 				orders[unit_id] = ord
 				if committed.has(unit_id):
@@ -1409,9 +1554,19 @@ func _pick_weighted_index(weights: Array) -> int:
 	if total <= 0.0:
 		return -1
 	var roll = rng.randf() * total
+	_devlog({
+		"type": "rng_weighted_pick",
+		"weights": weights,
+		"total": total,
+		"roll": roll
+	})
 	for i in range(weights.size()):
 		roll -= float(weights[i])
 		if roll <= 0.0:
+			_devlog({
+				"type": "rng_weighted_pick_result",
+				"index": i
+			})
 			return i
 	return weights.size() - 1
 
@@ -1635,10 +1790,24 @@ func _camp_gold_reward(pos: Vector2i) -> int:
 	return min_val + (abs(seed) % steps) * 5
 
 func _roll_camp_respawn() -> int:
-	return rng.randi_range(camp_respawn_min, camp_respawn_max)
+	var roll = rng.randi_range(camp_respawn_min, camp_respawn_max)
+	_devlog({
+		"type": "rng_camp_respawn",
+		"min": camp_respawn_min,
+		"max": camp_respawn_max,
+		"result": roll
+	})
+	return roll
 
 func _roll_dragon_respawn() -> int:
-	return rng.randi_range(dragon_respawn_min, dragon_respawn_max)
+	var roll = rng.randi_range(dragon_respawn_min, dragon_respawn_max)
+	_devlog({
+		"type": "rng_dragon_respawn",
+		"min": dragon_respawn_min,
+		"max": dragon_respawn_max,
+		"result": roll
+	})
+	return roll
 
 func _reward_report(player_id: String, text: String) -> void:
 	if not damage_log.has(player_id):
@@ -1701,6 +1870,14 @@ func _ready():
 		if NetworkManager.match_seed < 0:
 			NetworkManager.match_seed = rng.randi_range(1, 2147483646)
 		map_index = NetworkManager.selected_map_index
+		_ensure_dev_log_open()
+		_devlog({
+			"type": "match_init",
+			"map_selection_mode": NetworkManager.map_selection_mode,
+			"selected_map_index": NetworkManager.selected_map_index,
+			"match_seed": NetworkManager.match_seed,
+			"custom_proc_params": NetworkManager.custom_proc_params
+		})
 	else:
 		if NetworkManager.selected_map_index < 0:
 			await NetworkManager.map_index_received
@@ -1726,6 +1903,13 @@ func _load_map_by_index(map_index: int) -> void:
 	if md.procedural and NetworkManager.custom_proc_params.size() > 0:
 		_apply_custom_proc_params(md, NetworkManager.custom_proc_params)
 	print("loaded map: ", md.map_name)
+	_devlog({
+		"type": "map_load",
+		"map_index": idx,
+		"map_name": md.map_name,
+		"procedural": md.procedural,
+		"map_size": md.map_size
+	})
 	var inst: Node = md.terrain_scene.instantiate()
 	var bounds_cells: Array = []
 	var bounds_ref = inst.get_node_or_null("UnderlyingReference")
@@ -1750,6 +1934,11 @@ func _load_map_by_index(map_index: int) -> void:
 		if seed_val <= 0:
 			seed_val = rng.randi_range(1, 2147483646)
 		gen_rng.seed = seed_val + idx * 7919
+		_devlog({
+			"type": "map_generate",
+			"seed": seed_val,
+			"derived_seed": gen_rng.seed
+		})
 		generated = MapGenerator.generate(md, gen_rng)
 		if generated.has("bounds"):
 			bounds_cells = generated["bounds"]
@@ -2072,10 +2261,17 @@ func load_game(path: String = SAVE_DEFAULT_PATH) -> bool:
 	NetworkManager.selected_map_index = map_index
 	if match_seed > 0:
 		NetworkManager.match_seed = match_seed
+	_ensure_dev_log_open()
 	_reset_map_state()
 	_load_map_by_index(map_index)
 	apply_state(state, true)
 	_rebuild_orders_after_load()
+	_devlog({
+		"type": "game_loaded",
+		"path": path,
+		"map_index": map_index
+	})
+	_devlog_snapshot("load")
 	call_deferred("_refresh_fog_after_load")
 	NetworkManager._orders_submitted = { "player1": false, "player2": false }
 	NetworkManager._step_ready_counts = {}
@@ -2334,6 +2530,9 @@ func apply_state(state: Dictionary, force_host: bool = false) -> void:
 	refresh_mine_tiles()
 	_render_damage_log_for_local()
 	emit_signal("state_applied")
+	if turn_number % 5 == 0 and last_snapshot_turn != int(turn_number):
+		_ensure_dev_log_open()
+		_devlog_snapshot("turn_interval", {"interval": 5, "source": "state_apply"})
 
 func _reset_map_state() -> void:
 	if terrain_overlay != null:
@@ -2427,6 +2626,12 @@ func _spawn_dragon_at(pos: Vector2i) -> Node:
 	unit.just_purchased = false
 	var spawn_count = dragon_spawn_counts.get(pos, 0)
 	var reward = _dragon_reward_for_pos(pos, spawn_count)
+	_devlog({
+		"type": "dragon_spawn",
+		"pos": pos,
+		"spawn_count": spawn_count,
+		"reward": reward
+	})
 	dragon_spawn_counts[pos] = spawn_count + 1
 	dragon_rewards[pos] = reward
 	_apply_dragon_reward_color(unit, reward)
@@ -2523,6 +2728,10 @@ func end_game(player_id: String) -> void:
 	print("the game has ended")
 
 func reset_to_lobby() -> void:
+	_devlog({
+		"type": "match_end"
+	})
+	_close_dev_log()
 	_reset_map_state()
 	current_map_index = -1
 	turn_number = 0
@@ -2531,6 +2740,7 @@ func reset_to_lobby() -> void:
 	exec_steps = []
 	step_index = 0
 	neutral_step_index = -1
+	last_snapshot_turn = -1
 	player_gold = { "player1": 25, "player2": 25 }
 	player_income = { "player1": 0, "player2": 0 }
 	player_mana = { "player1": 0, "player2": 0 }
@@ -2564,6 +2774,12 @@ func _game_loop() -> void:
 	turn_number += 1
 	print("\n===== TURN %d =====" % turn_number)
 	rng.seed = turn_number
+	_devlog({
+		"type": "turn_start",
+		"rng_seed": rng.seed
+	})
+	if turn_number % 5 == 0:
+		_devlog_snapshot("turn_interval", {"interval": 5})
 	save_game_slot(-1, true)
 	NetworkManager._orders_submitted = { "player1": false, "player2": false }
 	player_orders = NetworkManager.player_orders
@@ -2578,6 +2794,7 @@ func _game_loop() -> void:
 func _ensure_map_loaded() -> void:
 	if current_map_index >= 0 and terrain_overlay != null:
 		return
+	_ensure_dev_log_open()
 	if map_data.size() == 0:
 		push_error("TurnManager: map_data is empty.")
 		return
@@ -2600,6 +2817,10 @@ func _do_upkeep() -> void:
 	current_phase = Phase.UPKEEP
 	NetworkManager._step_ready_counts = {}
 	print("--- Upkeep Phase ---")
+	_devlog({
+		"type": "phase_start",
+		"phase_name": "UPKEEP"
+	})
 	_recalculate_mana_caps()
 	for player in ["player1", "player2"]:
 		var income = 0
@@ -3199,6 +3420,10 @@ func _do_orders() -> void:
 	# start with player1
 	var me = local_player_id
 	print("--- Orders Phase for %s ---" % me.capitalize())
+	_devlog({
+		"type": "phase_start",
+		"phase_name": "ORDERS"
+	})
 	emit_signal("orders_phase_begin", me)
 	_broadcast_state()
 	if has_node("UI"):
@@ -3208,6 +3433,13 @@ func _do_orders() -> void:
 
 	# wait until both players have submitted
 	await NetworkManager.orders_ready
+	_devlog({
+		"type": "orders_ready",
+		"counts": {
+			"player1": player_orders.get("player1", {}).size(),
+			"player2": player_orders.get("player2", {}).size()
+		}
+	})
 	print("→ Both players submitted orders: %s" % player_orders)
 
 # Called by UIManager to add orders
@@ -3301,13 +3533,13 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 	}
 	if not _is_host():
 		result["reason"] = "not_host"
-		return result
+		return _log_order_result(player_id, order, result)
 	if current_phase != Phase.ORDERS:
 		result["reason"] = "wrong_phase"
-		return result
+		return _log_order_result(player_id, order, result)
 	if not order.has("type"):
 		result["reason"] = "invalid_order"
-		return result
+		return _log_order_result(player_id, order, result)
 	var order_type = str(order.get("type", ""))
 	if order_type == "ward_vision" or order_type == "ward_vision_always" or order_type == "ward_vision_stop":
 		var ward_raw = order.get("ward_tile", Vector2i(-9999, -9999))
@@ -3318,17 +3550,17 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 			ward_tile = Vector2i(int(round(ward_raw.x)), int(round(ward_raw.y)))
 		else:
 			result["reason"] = "invalid_target"
-			return result
+			return _log_order_result(player_id, order, result)
 		var ward_state = _structure_state(ward_tile)
 		if ward_state.is_empty() or str(ward_state.get("type", "")) != STRUCT_WARD:
 			result["reason"] = "invalid_structure"
-			return result
+			return _log_order_result(player_id, order, result)
 		if str(ward_state.get("owner", "")) != player_id:
 			result["reason"] = "not_owner"
-			return result
+			return _log_order_result(player_id, order, result)
 		if str(ward_state.get("status", "")) != STRUCT_STATUS_INTACT:
 			result["reason"] = "invalid_structure"
-			return result
+			return _log_order_result(player_id, order, result)
 		var ward_id = _ensure_ward_id(ward_state, ward_tile)
 		if order_type == "ward_vision_stop":
 			ward_state["auto_ward"] = false
@@ -3340,10 +3572,10 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 				"ward_tile": ward_tile
 			}
 			result["unit_net_id"] = ward_id
-			return result
+			return _log_order_result(player_id, order, result)
 		if player_mana.get(player_id, 0) < WARD_VISION_MANA_COST:
 			result["reason"] = "not_enough_mana"
-			return result
+			return _log_order_result(player_id, order, result)
 		if order_type == "ward_vision_always":
 			ward_state["auto_ward"] = true
 		var sanitized := {
@@ -3358,41 +3590,41 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 		result["ok"] = true
 		result["order"] = sanitized
 		result["unit_net_id"] = ward_id
-		return result
+		return _log_order_result(player_id, order, result)
 	if not order.has("unit_net_id"):
 		result["reason"] = "invalid_order"
-		return result
+		return _log_order_result(player_id, order, result)
 	var unit_net_id = int(order.get("unit_net_id", -1))
 	result["unit_net_id"] = unit_net_id
 	if unit_net_id < 0:
 		result["reason"] = "invalid_order"
-		return result
+		return _log_order_result(player_id, order, result)
 	var unit = unit_manager.get_unit_by_net_id(unit_net_id)
 	if unit == null:
 		result["reason"] = "unit_missing"
-		return result
+		return _log_order_result(player_id, order, result)
 	if unit.player_id != player_id:
 		result["reason"] = "not_owner"
-		return result
+		return _log_order_result(player_id, order, result)
 	if order_type == "spell_cancel":
 		var existing = player_orders.get(player_id, {}).get(unit_net_id, {})
 		if str(existing.get("type", "")) != "spell":
 			result["reason"] = "no_spell_order"
-			return result
+			return _log_order_result(player_id, order, result)
 		_remove_player_order(player_id, unit_net_id)
 		result["ok"] = true
 		result["order"] = {"unit_net_id": unit_net_id, "type": "spell_cancel"}
-		return result
+		return _log_order_result(player_id, order, result)
 	if unit.is_base or unit.is_tower:
 		if order_type != "spell":
 			result["reason"] = "invalid_unit"
-			return result
+			return _log_order_result(player_id, order, result)
 	if unit.just_purchased and order_type not in ["move", "move_to"]:
 		result["reason"] = "not_ready"
-		return result
+		return _log_order_result(player_id, order, result)
 	if unit.just_purchased and order_type in ["move", "move_to"] and not unit.first_turn_move:
 		result["reason"] = "not_ready"
-		return result
+		return _log_order_result(player_id, order, result)
 	if order_type != "heal_until_full" and order_type != "heal":
 		unit.auto_heal = false
 	if order_type != "defend_always" and order_type != "defend":
@@ -3413,10 +3645,10 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 			var path = order.get("path", [])
 			if not (path is Array) or path.size() < 2:
 				result["reason"] = "invalid_path"
-				return result
+				return _log_order_result(player_id, order, result)
 			if path[0] != unit.grid_pos:
 				result["reason"] = "invalid_path"
-				return result
+				return _log_order_result(player_id, order, result)
 			var total_cost: float = 0.0
 			var dir_idx = -1
 			var straight = true
@@ -3427,32 +3659,32 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 				var step = path[i]
 				if not $GameBoardNode/HexTileMap.is_cell_valid(step):
 					result["reason"] = "invalid_path"
-					return result
+					return _log_order_result(player_id, order, result)
 				var step_dir = _step_dir_index(prev, step)
 				if step_dir == -1:
 					result["reason"] = "invalid_path"
-					return result
+					return _log_order_result(player_id, order, result)
 				if dir_idx == -1:
 					dir_idx = step_dir
 				elif step_dir != dir_idx:
 					straight = false
 				if $GameBoardNode._terrain_is_impassable(step):
 					result["reason"] = "invalid_path"
-					return result
+					return _log_order_result(player_id, order, result)
 				if $GameBoardNode.is_enemy_structure_tile(step, unit.player_id):
 					if i != path.size() - 1:
 						result["reason"] = "invalid_path"
-						return result
+						return _log_order_result(player_id, order, result)
 				var step_cost = float($GameBoardNode.get_move_cost(step, unit))
 				var next_total = total_cost + step_cost
 				if next_total > max_budget + 1.0 + 0.001:
 					result["reason"] = "invalid_path"
-					return result
+					return _log_order_result(player_id, order, result)
 				if next_total > max_budget + 0.001:
 					var can_bonus = _is_cavalry_unit(unit) and straight and not bonus_used and i == path.size() - 1
 					if not can_bonus or step_cost > (max_budget - total_cost) + 1.0 + 0.001:
 						result["reason"] = "invalid_path"
-						return result
+						return _log_order_result(player_id, order, result)
 					bonus_used = true
 					total_cost = next_total
 				else:
@@ -3463,28 +3695,28 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 			var path = order.get("path", [])
 			if not (path is Array) or path.size() < 2:
 				result["reason"] = "invalid_path"
-				return result
+				return _log_order_result(player_id, order, result)
 			if path[0] != unit.grid_pos:
 				result["reason"] = "invalid_path"
-				return result
+				return _log_order_result(player_id, order, result)
 			for i in range(1, path.size()):
 				var prev = path[i - 1]
 				var step = path[i]
 				if typeof(step) != TYPE_VECTOR2I:
 					result["reason"] = "invalid_path"
-					return result
+					return _log_order_result(player_id, order, result)
 				if not $GameBoardNode/HexTileMap.is_cell_valid(step):
 					result["reason"] = "invalid_path"
-					return result
+					return _log_order_result(player_id, order, result)
 				if not step in $GameBoardNode.get_offset_neighbors(prev):
 					result["reason"] = "invalid_path"
-					return result
+					return _log_order_result(player_id, order, result)
 				if $GameBoardNode._terrain_is_impassable(step):
 					result["reason"] = "invalid_path"
-					return result
+					return _log_order_result(player_id, order, result)
 				if $GameBoardNode.is_enemy_structure_tile(step, player_id) and i != path.size() - 1:
 					result["reason"] = "invalid_path"
-					return result
+					return _log_order_result(player_id, order, result)
 			_clear_move_queue(unit)
 			unit.move_queue = path
 			unit.move_queue_last_target = Vector2i(-9999, -9999)
@@ -3492,117 +3724,117 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 			if queued.is_empty():
 				_clear_move_queue(unit)
 				result["reason"] = "invalid_path"
-				return result
+				return _log_order_result(player_id, order, result)
 			sanitized = queued
 			sanitized["move_queue_path"] = path
 			_record_move_queue_last_order(unit, queued)
 		"ranged":
 			if not unit.is_ranged:
 				result["reason"] = "invalid_action"
-				return result
+				return _log_order_result(player_id, order, result)
 			if not order.has("target_tile") or not order.has("target_unit_net_id"):
 				result["reason"] = "invalid_target"
-				return result
+				return _log_order_result(player_id, order, result)
 			var target_tile = order.get("target_tile")
 			var target_id = int(order.get("target_unit_net_id", -1))
 			var target = unit_manager.get_unit_by_net_id(target_id)
 			if target == null or target.player_id == player_id:
 				result["reason"] = "invalid_target"
-				return result
+				return _log_order_result(player_id, order, result)
 			if target.grid_pos != target_tile:
 				result["reason"] = "invalid_target"
-				return result
+				return _log_order_result(player_id, order, result)
 			var ranged_range = get_effective_ranged_range(unit)
 			var ranged_tiles = $GameBoardNode.get_reachable_tiles(unit.grid_pos, ranged_range, "ranged")["tiles"]
 			if target_tile not in ranged_tiles:
 				result["reason"] = "out_of_range"
-				return result
+				return _log_order_result(player_id, order, result)
 			sanitized["target_tile"] = target_tile
 			sanitized["target_unit_net_id"] = target_id
 			sanitized["priority"] = int(order.get("priority", 0))
 		"melee":
 			if not unit.can_melee:
 				result["reason"] = "invalid_action"
-				return result
+				return _log_order_result(player_id, order, result)
 			if not order.has("target_tile") or not order.has("target_unit_net_id"):
 				result["reason"] = "invalid_target"
-				return result
+				return _log_order_result(player_id, order, result)
 			var melee_tile = order.get("target_tile")
 			var melee_target_id = int(order.get("target_unit_net_id", -1))
 			var melee_target = unit_manager.get_unit_by_net_id(melee_target_id)
 			if melee_target == null or melee_target.player_id == player_id:
 				result["reason"] = "invalid_target"
-				return result
+				return _log_order_result(player_id, order, result)
 			if melee_target.grid_pos != melee_tile:
 				result["reason"] = "invalid_target"
-				return result
+				return _log_order_result(player_id, order, result)
 			var melee_tiles = $GameBoardNode.get_reachable_tiles(unit.grid_pos, 1, "melee")["tiles"]
 			if melee_tile not in melee_tiles:
 				result["reason"] = "out_of_range"
-				return result
+				return _log_order_result(player_id, order, result)
 			sanitized["target_tile"] = melee_tile
 			sanitized["target_unit_net_id"] = melee_target_id
 			sanitized["priority"] = int(order.get("priority", 0))
 		"spell":
 			if not (unit.is_wizard or unit.is_base or unit.is_tower):
 				result["reason"] = "invalid_action"
-				return result
+				return _log_order_result(player_id, order, result)
 			if not order.has("spell_type"):
 				result["reason"] = "invalid_target"
-				return result
+				return _log_order_result(player_id, order, result)
 			var spell_type = str(order.get("spell_type", "")).to_lower()
 			if spell_type not in [SPELL_HEAL, SPELL_FIREBALL, SPELL_BUFF, SPELL_LIGHTNING, SPELL_GLOBAL_VISION, SPELL_TARGETED_VISION]:
 				result["reason"] = "invalid_action"
-				return result
+				return _log_order_result(player_id, order, result)
 			if spell_type == SPELL_GLOBAL_VISION:
 				var spell_cost = get_spell_cost(spell_type)
 				if player_mana.get(player_id, 0) < spell_cost:
 					result["reason"] = "not_enough_mana"
-					return result
+					return _log_order_result(player_id, order, result)
 				sanitized["spell_type"] = spell_type
 			elif spell_type == SPELL_TARGETED_VISION:
 				if not order.has("target_tile"):
 					result["reason"] = "invalid_target"
-					return result
+					return _log_order_result(player_id, order, result)
 				var target_tile = order.get("target_tile")
 				if typeof(target_tile) == TYPE_VECTOR2:
 					target_tile = Vector2i(int(round(target_tile.x)), int(round(target_tile.y)))
 				if typeof(target_tile) != TYPE_VECTOR2I:
 					result["reason"] = "invalid_target"
-					return result
+					return _log_order_result(player_id, order, result)
 				if not $GameBoardNode/HexTileMap.is_cell_valid(target_tile):
 					result["reason"] = "invalid_target"
-					return result
+					return _log_order_result(player_id, order, result)
 				if _hex_distance(unit.grid_pos, target_tile) > get_spell_range(unit):
 					result["reason"] = "out_of_range"
-					return result
+					return _log_order_result(player_id, order, result)
 				var spell_cost = get_spell_cost(spell_type)
 				if player_mana.get(player_id, 0) < spell_cost:
 					result["reason"] = "not_enough_mana"
-					return result
+					return _log_order_result(player_id, order, result)
 				sanitized["spell_type"] = spell_type
 				sanitized["target_tile"] = target_tile
 			else:
 				if not order.has("target_tile") or not order.has("target_unit_net_id"):
 					result["reason"] = "invalid_target"
-					return result
+					return _log_order_result(player_id, order, result)
 				var target_tile = order.get("target_tile")
 				if typeof(target_tile) == TYPE_VECTOR2:
 					target_tile = Vector2i(int(round(target_tile.x)), int(round(target_tile.y)))
 				if typeof(target_tile) != TYPE_VECTOR2I:
 					result["reason"] = "invalid_target"
-					return result
+					return _log_order_result(player_id, order, result)
 				if not _player_can_see_tile(player_id, target_tile):
 					result["reason"] = "no_vision"
-					return result
+					return _log_order_result(player_id, order, result)
 				var target_id = int(order.get("target_unit_net_id", -1))
 				var target = unit_manager.get_unit_by_net_id(target_id)
 				if target == null or target.grid_pos != target_tile:
 					result["reason"] = "invalid_target"
-					return result
+					return _log_order_result(player_id, order, result)
 				if is_unit_hidden_for_viewer(target, player_id):
 					result["reason"] = "no_vision"
-					return result
+					return _log_order_result(player_id, order, result)
 				var struct = $GameBoardNode.get_structure_unit_at(target_tile)
 				if spell_type == SPELL_FIREBALL or spell_type == SPELL_LIGHTNING:
 					if struct != null and struct.player_id != player_id:
@@ -3611,28 +3843,28 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 							target_id = struct.net_id
 					if target.player_id == player_id:
 						result["reason"] = "invalid_target"
-						return result
+						return _log_order_result(player_id, order, result)
 				else:
 					if target.player_id != player_id:
 						result["reason"] = "invalid_target"
-						return result
+						return _log_order_result(player_id, order, result)
 				if _hex_distance(unit.grid_pos, target_tile) > get_spell_range(unit):
 					result["reason"] = "out_of_range"
-					return result
+					return _log_order_result(player_id, order, result)
 				var spell_cost = get_spell_cost(spell_type)
 				if spell_type == SPELL_BUFF:
 					var mana_spent = int(order.get("mana_spent", 0))
 					if mana_spent < SPELL_BUFF_MIN or mana_spent > SPELL_BUFF_MAX:
 						result["reason"] = "invalid_target"
-						return result
+						return _log_order_result(player_id, order, result)
 					if mana_spent % SPELL_BUFF_STEP != 0:
 						result["reason"] = "invalid_target"
-						return result
+						return _log_order_result(player_id, order, result)
 					spell_cost = mana_spent
 					sanitized["mana_spent"] = mana_spent
 				if player_mana.get(player_id, 0) < spell_cost:
 					result["reason"] = "not_enough_mana"
-					return result
+					return _log_order_result(player_id, order, result)
 				sanitized["spell_type"] = spell_type
 				sanitized["target_tile"] = target_tile
 				sanitized["target_unit_net_id"] = target_id
@@ -3652,49 +3884,49 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 			var unit_type = str(unit.unit_type).to_lower()
 			if unit_type != "scout":
 				result["reason"] = "invalid_action"
-				return result
+				return _log_order_result(player_id, order, result)
 		"lookout_always":
 			var unit_type = str(unit.unit_type).to_lower()
 			if unit_type != "scout":
 				result["reason"] = "invalid_action"
-				return result
+				return _log_order_result(player_id, order, result)
 			unit.auto_lookout = true
 			sanitized["type"] = "lookout"
 			sanitized["auto_lookout"] = true
 		"build_road_to":
 			if not unit.is_builder:
 				result["reason"] = "not_builder"
-				return result
+				return _log_order_result(player_id, order, result)
 			var path = order.get("path", [])
 			if not (path is Array) or path.size() < 2:
 				result["reason"] = "invalid_path"
-				return result
+				return _log_order_result(player_id, order, result)
 			if path[0] != unit.grid_pos:
 				result["reason"] = "invalid_path"
-				return result
+				return _log_order_result(player_id, order, result)
 			var has_build := false
 			for i in range(path.size()):
 				var step = path[i]
 				if typeof(step) != TYPE_VECTOR2I:
 					result["reason"] = "invalid_path"
-					return result
+					return _log_order_result(player_id, order, result)
 				if i > 0:
 					var prev = path[i - 1]
 					if not step in $GameBoardNode.get_offset_neighbors(prev):
 						result["reason"] = "invalid_path"
-						return result
+						return _log_order_result(player_id, order, result)
 				if $GameBoardNode.is_enemy_structure_tile(step, player_id):
 					result["reason"] = "invalid_path"
-					return result
+					return _log_order_result(player_id, order, result)
 				var status = _road_queue_tile_status(step, player_id, i == 0)
 				if status == "invalid":
 					result["reason"] = "invalid_path"
-					return result
+					return _log_order_result(player_id, order, result)
 				if status == "build":
 					has_build = true
 			if not has_build:
 				result["reason"] = "invalid_path"
-				return result
+				return _log_order_result(player_id, order, result)
 			_clear_build_queue(unit)
 			unit.build_queue = path
 			unit.build_queue_type = STRUCT_ROAD
@@ -3705,11 +3937,11 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 			if queued.is_empty():
 				_clear_build_queue(unit)
 				result["reason"] = "invalid_path"
-				return result
+				return _log_order_result(player_id, order, result)
 			if queued.has("_queue_fail"):
 				_clear_build_queue(unit)
 				result["reason"] = str(queued.get("_queue_fail"))
-				return result
+				return _log_order_result(player_id, order, result)
 			sanitized = queued
 			sanitized["queue_path"] = path
 			sanitized["queue_type"] = STRUCT_ROAD
@@ -3717,34 +3949,34 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 		"build_rail_to":
 			if not unit.is_builder:
 				result["reason"] = "not_builder"
-				return result
+				return _log_order_result(player_id, order, result)
 			var rail_path = order.get("path", [])
 			if not (rail_path is Array) or rail_path.size() < 2:
 				result["reason"] = "invalid_path"
-				return result
+				return _log_order_result(player_id, order, result)
 			if rail_path[0] != unit.grid_pos:
 				result["reason"] = "invalid_path"
-				return result
+				return _log_order_result(player_id, order, result)
 			for i in range(rail_path.size()):
 				var step = rail_path[i]
 				if typeof(step) != TYPE_VECTOR2I:
 					result["reason"] = "invalid_path"
-					return result
+					return _log_order_result(player_id, order, result)
 				if i > 0:
 					var prev = rail_path[i - 1]
 					if not step in $GameBoardNode.get_offset_neighbors(prev):
 						result["reason"] = "invalid_path"
-						return result
+						return _log_order_result(player_id, order, result)
 				if $GameBoardNode._terrain_is_impassable(step):
 					result["reason"] = "invalid_path"
-					return result
+					return _log_order_result(player_id, order, result)
 				if $GameBoardNode.is_enemy_structure_tile(step, player_id):
 					result["reason"] = "invalid_path"
-					return result
+					return _log_order_result(player_id, order, result)
 				var status = _road_queue_tile_status(step, player_id, i == 0)
 				if status == "invalid":
 					result["reason"] = "invalid_path"
-					return result
+					return _log_order_result(player_id, order, result)
 			_clear_build_queue(unit)
 			unit.build_queue = rail_path
 			unit.build_queue_type = STRUCT_RAIL
@@ -3755,11 +3987,11 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 			if rail_queued.is_empty():
 				_clear_build_queue(unit)
 				result["reason"] = "invalid_path"
-				return result
+				return _log_order_result(player_id, order, result)
 			if rail_queued.has("_queue_fail"):
 				_clear_build_queue(unit)
 				result["reason"] = str(rail_queued.get("_queue_fail"))
-				return result
+				return _log_order_result(player_id, order, result)
 			sanitized = rail_queued
 			sanitized["queue_path"] = rail_path
 			sanitized["queue_type"] = STRUCT_RAIL
@@ -3767,107 +3999,107 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 		"build":
 			if not unit.is_builder:
 				result["reason"] = "not_builder"
-				return result
+				return _log_order_result(player_id, order, result)
 			if not order.has("structure_type"):
 				result["reason"] = "invalid_structure"
-				return result
+				return _log_order_result(player_id, order, result)
 			var target_raw = order.get("target_tile", unit.grid_pos)
 			if typeof(target_raw) != TYPE_VECTOR2I:
 				result["reason"] = "invalid_tile"
-				return result
+				return _log_order_result(player_id, order, result)
 			var target_tile: Vector2i = target_raw
 			if target_tile != unit.grid_pos:
 				result["reason"] = "invalid_tile"
-				return result
+				return _log_order_result(player_id, order, result)
 			var struct_type = str(order.get("structure_type", ""))
 			if struct_type == "":
 				result["reason"] = "invalid_structure"
-				return result
+				return _log_order_result(player_id, order, result)
 			if struct_type not in [STRUCT_FORTIFICATION, STRUCT_ROAD, STRUCT_RAIL, STRUCT_TRAP, STRUCT_WARD, STRUCT_MANA_POOL, STRUCT_MANA_PUMP, STRUCT_SPAWN_TOWER]:
 				result["reason"] = "invalid_structure"
-				return result
+				return _log_order_result(player_id, order, result)
 			var state = _structure_state(target_tile)
 			if state.is_empty():
 				if $GameBoardNode.is_occupied(target_tile) and $GameBoardNode.get_unit_at(target_tile) != unit:
 					result["reason"] = "invalid_tile"
-					return result
+					return _log_order_result(player_id, order, result)
 				if target_tile in camps["basic"] or target_tile in camps["dragon"]:
 					result["reason"] = "invalid_tile"
-					return result
+					return _log_order_result(player_id, order, result)
 				if target_tile in structure_positions:
 					result["reason"] = "invalid_tile"
-					return result
+					return _log_order_result(player_id, order, result)
 				if struct_type == STRUCT_RAIL:
 					result["reason"] = "invalid_structure"
-					return result
+					return _log_order_result(player_id, order, result)
 				if struct_type in [STRUCT_ROAD, STRUCT_RAIL]:
 					if $GameBoardNode._terrain_is_impassable(target_tile):
 						result["reason"] = "invalid_tile"
-						return result
+						return _log_order_result(player_id, order, result)
 					var terrain = _terrain_type(target_tile)
 					if terrain in ["mountain", "lake"]:
 						result["reason"] = "invalid_tile"
-						return result
+						return _log_order_result(player_id, order, result)
 				else:
 					var terrain = _terrain_type(target_tile)
 					if struct_type == STRUCT_TRAP:
 						if terrain in ["mountain", "lake"] or $GameBoardNode._terrain_is_impassable(target_tile):
 							result["reason"] = "invalid_tile"
-							return result
+							return _log_order_result(player_id, order, result)
 					elif struct_type == STRUCT_WARD:
 						if terrain in ["mountain", "river"]:
 							result["reason"] = "invalid_tile"
-							return result
+							return _log_order_result(player_id, order, result)
 						if $GameBoardNode._terrain_is_impassable(target_tile) and terrain != "lake":
 							result["reason"] = "invalid_tile"
-							return result
+							return _log_order_result(player_id, order, result)
 					elif struct_type == STRUCT_MANA_POOL:
 						if terrain in ["mountain", "river", "lake"]:
 							result["reason"] = "invalid_tile"
-							return result
+							return _log_order_result(player_id, order, result)
 						if $GameBoardNode._terrain_is_impassable(target_tile):
 							result["reason"] = "invalid_tile"
-							return result
+							return _log_order_result(player_id, order, result)
 					elif struct_type == STRUCT_MANA_PUMP:
 						if terrain == "mountain":
 							result["reason"] = "invalid_tile"
-							return result
+							return _log_order_result(player_id, order, result)
 						if $GameBoardNode._terrain_is_impassable(target_tile) and terrain not in ["river", "lake"]:
 							result["reason"] = "invalid_tile"
-							return result
+							return _log_order_result(player_id, order, result)
 					elif not _is_open_terrain(target_tile) or $GameBoardNode._terrain_is_impassable(target_tile):
 						result["reason"] = "invalid_tile"
-						return result
+						return _log_order_result(player_id, order, result)
 				if struct_type == STRUCT_MANA_POOL:
 					var mine_choice = _pick_mana_pool_mine(target_tile, player_id, unit_net_id)
 					if mine_choice == Vector2i(-9999, -9999):
 						result["reason"] = "invalid_structure"
-						return result
+						return _log_order_result(player_id, order, result)
 					sanitized["mana_mine"] = mine_choice
 				if struct_type == STRUCT_MANA_PUMP:
 					var pump_pair = _pick_mana_pump_pair(target_tile, player_id)
 					if pump_pair.is_empty():
 						result["reason"] = "invalid_structure"
-						return result
+						return _log_order_result(player_id, order, result)
 					sanitized["pump_mine"] = pump_pair["mine"]
 					sanitized["pump_pool"] = pump_pair["pool"]
 				if struct_type == STRUCT_SPAWN_TOWER and not _spawn_tower_has_connected_road(target_tile, player_id):
 					result["reason"] = "invalid_structure"
-					return result
+					return _log_order_result(player_id, order, result)
 			else:
 				var existing_type = str(state.get("type", ""))
 				var existing_status = str(state.get("status", ""))
 				var existing_owner = str(state.get("owner", ""))
 				if existing_owner != player_id:
 					result["reason"] = "not_owner"
-					return result
+					return _log_order_result(player_id, order, result)
 				if existing_status == STRUCT_STATUS_DISABLED:
 					result["reason"] = "invalid_structure"
-					return result
+					return _log_order_result(player_id, order, result)
 				if existing_status == STRUCT_STATUS_BUILDING:
 					if existing_type != struct_type:
 						result["reason"] = "invalid_structure"
-						return result
+						return _log_order_result(player_id, order, result)
 					if struct_type == STRUCT_MANA_POOL:
 						var existing_mine = state.get("mana_mine", Vector2i(-9999, -9999))
 						if typeof(existing_mine) == TYPE_VECTOR2I:
@@ -3882,11 +4114,11 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 				elif existing_status == STRUCT_STATUS_INTACT:
 					if not (struct_type == STRUCT_RAIL and existing_type == STRUCT_ROAD):
 						result["reason"] = "invalid_structure"
-						return result
+						return _log_order_result(player_id, order, result)
 			var turn_cost = _structure_turn_cost(struct_type)
 			if turn_cost > 0 and player_gold[player_id] < turn_cost:
 				result["reason"] = "not_enough_gold"
-				return result
+				return _log_order_result(player_id, order, result)
 			unit.auto_build = true
 			unit.auto_build_type = struct_type
 			sanitized["target_tile"] = target_tile
@@ -3894,49 +4126,49 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 		"repair":
 			if not unit.is_builder:
 				result["reason"] = "not_builder"
-				return result
+				return _log_order_result(player_id, order, result)
 			if not order.has("target_tile"):
 				result["reason"] = "invalid_target"
-				return result
+				return _log_order_result(player_id, order, result)
 			var repair_raw = order.get("target_tile")
 			if typeof(repair_raw) != TYPE_VECTOR2I:
 				result["reason"] = "invalid_target"
-				return result
+				return _log_order_result(player_id, order, result)
 			var repair_tile: Vector2i = repair_raw
 			if repair_tile == unit.grid_pos:
 				var repair_state = _structure_state(repair_tile)
 				if not repair_state.is_empty():
 					if str(repair_state.get("owner", "")) != player_id:
 						result["reason"] = "not_owner"
-						return result
+						return _log_order_result(player_id, order, result)
 					if str(repair_state.get("status", "")) != STRUCT_STATUS_DISABLED:
 						result["reason"] = "invalid_target"
-						return result
+						return _log_order_result(player_id, order, result)
 				else:
 					var same_tile = $GameBoardNode.get_structure_unit_at(repair_tile)
 					if same_tile == null or not (same_tile.is_base or same_tile.is_tower):
 						result["reason"] = "invalid_target"
-						return result
+						return _log_order_result(player_id, order, result)
 					if same_tile.player_id != player_id:
 						result["reason"] = "not_owner"
-						return result
+						return _log_order_result(player_id, order, result)
 					if same_tile.curr_health >= same_tile.max_health:
 						result["reason"] = "invalid_target"
-						return result
+						return _log_order_result(player_id, order, result)
 			else:
 				if _hex_distance(unit.grid_pos, repair_tile) != 1:
 					result["reason"] = "invalid_target"
-					return result
+					return _log_order_result(player_id, order, result)
 				var target_unit = $GameBoardNode.get_structure_unit_at(repair_tile)
 				if target_unit == null or not (target_unit.is_base or target_unit.is_tower):
 					result["reason"] = "invalid_target"
-					return result
+					return _log_order_result(player_id, order, result)
 				if target_unit.player_id != player_id:
 					result["reason"] = "not_owner"
-					return result
+					return _log_order_result(player_id, order, result)
 				if target_unit.curr_health >= target_unit.max_health:
 					result["reason"] = "invalid_target"
-					return result
+					return _log_order_result(player_id, order, result)
 			sanitized["target_tile"] = repair_tile
 		"sabotage":
 			var sabotage_raw = order.get("target_tile", unit.grid_pos)
@@ -3947,28 +4179,28 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 				sabotage_tile = Vector2i(int(round(sabotage_raw.x)), int(round(sabotage_raw.y)))
 			else:
 				result["reason"] = "invalid_target"
-				return result
+				return _log_order_result(player_id, order, result)
 			if sabotage_tile != unit.grid_pos:
 				result["reason"] = "invalid_target"
-				return result
+				return _log_order_result(player_id, order, result)
 			var sab_state = _structure_state(sabotage_tile)
 			var sab_owner = str(sab_state.get("owner", ""))
 			var sab_status = str(sab_state.get("status", ""))
 			var sab_type = str(sab_state.get("type", ""))
 			if sab_type == STRUCT_SPAWN_TOWER and sab_status != STRUCT_STATUS_BUILDING:
 				result["reason"] = "invalid_target"
-				return result
+				return _log_order_result(player_id, order, result)
 			sanitized["target_tile"] = sabotage_tile
 		_:
 			result["reason"] = "invalid_action"
-			return result
+			return _log_order_result(player_id, order, result)
 
 	player_orders[player_id][unit_net_id] = sanitized
 	NetworkManager.player_orders[player_id][unit_net_id] = sanitized
 	_apply_order_flags(unit, sanitized)
 	result["ok"] = true
 	result["order"] = sanitized
-	return result
+	return _log_order_result(player_id, order, result)
 
 func get_order(player:String, unit_net_id:int) -> Dictionary:
 	return player_orders[player].get(unit_net_id,{})
@@ -4138,6 +4370,12 @@ func _assign_last_damaged_by(target, dmg_map: Dictionary, target_net_id: int) ->
 		return
 	# TODO: Replace random tie-break with deterministic logic.
 	var idx = rng.randi_range(0, tied.size() - 1)
+	_devlog({
+		"type": "rng_damage_tie_break",
+		"candidates": tied,
+		"choice_index": idx,
+		"choice": tied[idx]
+	})
 	target.last_damaged_by = tied[idx]
 
 func _grant_dragon_reward(player_id: String, pos: Vector2i) -> void:
@@ -4168,6 +4406,12 @@ func _handle_neutral_death(unit) -> void:
 		if killer in ["player1", "player2"]:
 			var reward = _camp_gold_reward(pos)
 			player_gold[killer] += reward
+			_devlog({
+				"type": "camp_reward",
+				"pos": pos,
+				"player": killer,
+				"gold": reward
+			})
 			_reward_report(killer, "Camp defeated: +%d gold" % reward)
 		camp_respawn_counts[pos] = camp_respawn_counts.get(pos, 0) + 1
 	elif unit.unit_type == DRAGON_TYPE:
@@ -4178,6 +4422,12 @@ func _handle_neutral_death(unit) -> void:
 		if killer in ["player1", "player2"]:
 			var reward = dragon_rewards.get(pos, DRAGON_REWARD_GOLD)
 			_grant_dragon_reward(killer, pos)
+			_devlog({
+				"type": "dragon_reward",
+				"pos": pos,
+				"player": killer,
+				"reward": reward
+			})
 			match reward:
 				DRAGON_REWARD_GOLD:
 					_reward_report(killer, "Dragon defeated: +%d gold" % dragon_gold_bonus)
@@ -5768,6 +6018,10 @@ func _process_move():
 func _do_execution() -> void:
 	current_phase = Phase.EXECUTION
 	print("Executing orders...")
+	_devlog({
+		"type": "phase_start",
+		"phase_name": "EXECUTION"
+	})
 	_prune_ward_visions()
 	_prune_global_visions()
 	_prune_targeted_visions()
@@ -5861,7 +6115,7 @@ func buy_unit(player: String, unit_type: String, grid_pos: Vector2i) -> Dictiona
 	}
 	if not _is_host():
 		result["reason"] = "not_host"
-		return result
+		return _log_buy_result(player, unit_type, grid_pos, result)
 	var scene: PackedScene = null
 	if unit_type.to_lower() == "archer":
 		scene = archer_scene
@@ -5885,16 +6139,16 @@ func buy_unit(player: String, unit_type: String, grid_pos: Vector2i) -> Dictiona
 		push_error("Unknown unit type '%s'" % unit_type)
 		print("Unknown unit type '%s'" % unit_type)
 		result["reason"] = "unknown_unit"
-		return result
+		return _log_buy_result(player, unit_type, grid_pos, result)
 	if scene == null:
 		push_error("Unit scene for '%s' not assigned in Inspector" % unit_type)
 		print("Unit scene for '%s' not assigned in Inspector" % unit_type)
 		result["reason"] = "unknown_unit"
-		return result
+		return _log_buy_result(player, unit_type, grid_pos, result)
 	var spawn_limit = _spawn_limit_for_tile(player, grid_pos)
 	if spawn_limit == "road" and unit_type.to_lower() not in SPAWN_TOWER_ROAD_UNITS:
 		result["reason"] = "invalid_tile"
-		return result
+		return _log_buy_result(player, unit_type, grid_pos, result)
 
 	# check cost
 	var tmp_unit = scene.instantiate()
@@ -5904,7 +6158,7 @@ func buy_unit(player: String, unit_type: String, grid_pos: Vector2i) -> Dictiona
 	if player_gold[player] < cost:
 		print("%s cannot afford a %s (needs %d gold)" % [player, unit_type, cost])
 		result["reason"] = "not_enough_gold"
-		return result
+		return _log_buy_result(player, unit_type, grid_pos, result)
 
 	# deduct gold & spawn
 	player_gold[player] -= cost
@@ -5913,7 +6167,7 @@ func buy_unit(player: String, unit_type: String, grid_pos: Vector2i) -> Dictiona
 	print("%s bought a %s at %s for %d gold" % [player, unit_type, grid_pos, cost])
 	result["ok"] = true
 	result["unit_net_id"] = unit.net_id
-	return result
+	return _log_buy_result(player, unit_type, grid_pos, result)
 
 func undo_buy_unit(player_id: String, unit_net_id: int) -> Dictionary:
 	var result := {
@@ -5923,20 +6177,20 @@ func undo_buy_unit(player_id: String, unit_net_id: int) -> Dictionary:
 	}
 	if not _is_host():
 		result["reason"] = "not_host"
-		return result
+		return _log_undo_buy_result(player_id, unit_net_id, result)
 	var unit = unit_manager.get_unit_by_net_id(unit_net_id)
 	if unit == null:
 		result["reason"] = "not_found"
-		return result
+		return _log_undo_buy_result(player_id, unit_net_id, result)
 	if unit.player_id != player_id:
 		result["reason"] = "not_owner"
-		return result
+		return _log_undo_buy_result(player_id, unit_net_id, result)
 	if unit.is_base or unit.is_tower:
 		result["reason"] = "invalid_unit"
-		return result
+		return _log_undo_buy_result(player_id, unit_net_id, result)
 	if not unit.just_purchased:
 		result["reason"] = "not_just_purchased"
-		return result
+		return _log_undo_buy_result(player_id, unit_net_id, result)
 	var refund = int(unit.cost)
 	player_gold[player_id] += refund
 	result["refund"] = refund
@@ -5947,7 +6201,7 @@ func undo_buy_unit(player_id: String, unit_net_id: int) -> Dictionary:
 	unit_manager.unit_by_net_id.erase(unit.net_id)
 	unit.queue_free()
 	result["ok"] = true
-	return result
+	return _log_undo_buy_result(player_id, unit_net_id, result)
 
 # --------------------------------------------------------
 # Stub: determine if a player controls a given tile
