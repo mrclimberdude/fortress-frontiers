@@ -256,12 +256,12 @@ Builders construct structures over multiple turns. Costs are paid per build step
 | --- | --- | --- | --- | --- |
 | Fortification | 2 | 15 | Open terrain only | +3 melee, +3 ranged on tile. |
 | Road | 2 | 5 | Can cross forest and river | Movement cost x0.5. |
-| Railroad | 2 | 10 | Must upgrade an intact road | Movement cost x0.25. |
+| Railroad | 2 | 5 | Must upgrade an intact road | Movement cost x0.25. |
 | Spawn Tower | 6 | 20 | Open terrain only; requires road/rail connection to start building | Adds a new spawn point (no extra gold). |
 | Trap | 2 | 15 | Open terrain or forest | Hidden; triggers on entry. |
 | Ward | 2 | 10 | Open terrain, forest, or lake | Hidden (except to wizards); can spend mana for vision. |
 | Mana Pool | 3 | 10 | Open terrain or forest; adjacent to mine or base | +100 mana cap; one per mine/base. |
-| Mana Pump | 3 | 20 | Open/forest/river/lake; triangle with mine/base and pool | +5 mana/turn if mine/base controlled & pool intact. |
+| Mana Pump | 3 | 10 | Open/forest/river/lake; triangle with mine/base and pool | +5 mana/turn if mine/base controlled & pool intact. |
 
 Roads and rails built on river tiles take +1 additional turn.
 
