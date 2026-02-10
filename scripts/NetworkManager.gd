@@ -17,6 +17,8 @@ var custom_proc_params: Dictionary = {}
 
 
 var _step_ready_counts := {}
+var _incoming_replay: Dictionary = {}
+const REPLAY_CHUNK_SIZE: int = 200000
 
 signal orders_ready(all_orders: Dictionary)
 signal orders_cancelled(player_id: String)
@@ -27,7 +29,7 @@ signal state_snapshot_received(state: Dictionary)
 signal execution_paused_received(step_idx: int, neutral_step_idx: int)
 signal execution_complete_received()
 signal game_over_received(player_id: String)
-signal buy_result(player_id: String, unit_type: String, grid_pos: Vector2i, ok: bool, reason: String, cost: int)
+signal buy_result(player_id: String, unit_type: String, grid_pos: Vector2i, ok: bool, reason: String, cost: int, unit_net_id: int)
 signal undo_result(player_id: String, unit_net_id: int, ok: bool, reason: String, refund: int)
 signal order_result(player_id: String, unit_net_id: int, order: Dictionary, ok: bool, reason: String)
 
@@ -38,6 +40,9 @@ func _ready() -> void:
 	mp.connect("peer_disconnected", Callable(self, "_on_peer_disconnected"))
 	if mp.is_server():
 		server_peer_id = mp.get_unique_id()
+
+func _ignore_rpc_in_replay() -> bool:
+	return turn_mgr != null and bool(turn_mgr.get("replay_mode"))
 
 func host_game(port: int) -> void:
 	#print("NetworkManager.host_game called with port:", port)
@@ -87,16 +92,26 @@ func map_sync(id) -> void:
 
 @rpc("any_peer", "reliable")
 func rpc_set_map_index(map_index: int) -> void:
+	if _ignore_rpc_in_replay():
+		return
 	selected_map_index = map_index
 	emit_signal("map_index_received", map_index)
+	if turn_mgr != null and turn_mgr.has_method("_maybe_log_match_init"):
+		turn_mgr._maybe_log_match_init()
 
 @rpc("any_peer", "reliable")
 func rpc_set_match_seed(seed_value: int) -> void:
+	if _ignore_rpc_in_replay():
+		return
 	match_seed = seed_value
 	emit_signal("match_seed_received", seed_value)
+	if turn_mgr != null and turn_mgr.has_method("_maybe_log_match_init"):
+		turn_mgr._maybe_log_match_init()
 
 @rpc("any_peer", "reliable")
 func rpc_set_custom_proc_params(params: Dictionary) -> void:
+	if _ignore_rpc_in_replay():
+		return
 	custom_proc_params = params.duplicate(true)
 	emit_signal("custom_proc_params_received", custom_proc_params)
 
@@ -108,6 +123,8 @@ func set_custom_proc_params(params: Dictionary) -> void:
 
 @rpc("any_peer", "reliable")
 func rpc_state_snapshot(state: Dictionary) -> void:
+	if _ignore_rpc_in_replay():
+		return
 	var mp = get_tree().get_multiplayer()
 	if mp.is_server():
 		return
@@ -115,6 +132,8 @@ func rpc_state_snapshot(state: Dictionary) -> void:
 
 @rpc("any_peer", "reliable")
 func rpc_request_state() -> void:
+	if _ignore_rpc_in_replay():
+		return
 	var mp = get_tree().get_multiplayer()
 	if not mp.is_server():
 		return
@@ -129,6 +148,8 @@ func rpc_request_state() -> void:
 
 @rpc("any_peer", "reliable")
 func rpc_request_buy_unit(player_id: String, unit_type: String, grid_pos: Vector2i) -> void:
+	if _ignore_rpc_in_replay():
+		return
 	var mp = get_tree().get_multiplayer()
 	if not mp.is_server():
 		return
@@ -140,10 +161,12 @@ func rpc_request_buy_unit(player_id: String, unit_type: String, grid_pos: Vector
 			% [player_id, sender, expected_player])
 			return
 	var result = _handle_buy_request(player_id, unit_type, grid_pos)
-	rpc_id(sender, "rpc_buy_result", player_id, unit_type, grid_pos, result["ok"], result["reason"], result["cost"])
+	rpc_id(sender, "rpc_buy_result", player_id, unit_type, grid_pos, result["ok"], result["reason"], result["cost"], result["unit_net_id"])
 
 @rpc("any_peer", "reliable")
 func rpc_request_undo_buy(player_id: String, unit_net_id: int) -> void:
+	if _ignore_rpc_in_replay():
+		return
 	var mp = get_tree().get_multiplayer()
 	if not mp.is_server():
 		return
@@ -159,6 +182,8 @@ func rpc_request_undo_buy(player_id: String, unit_net_id: int) -> void:
 
 @rpc("any_peer", "reliable")
 func rpc_request_order(player_id: String, order: Dictionary) -> void:
+	if _ignore_rpc_in_replay():
+		return
 	var mp = get_tree().get_multiplayer()
 	if not mp.is_server():
 		return
@@ -173,17 +198,21 @@ func rpc_request_order(player_id: String, order: Dictionary) -> void:
 	rpc_id(sender, "rpc_order_result", player_id, result["unit_net_id"], result["order"], result["ok"], result["reason"])
 
 @rpc("any_peer", "reliable")
-func rpc_buy_result(player_id: String, unit_type: String, grid_pos: Vector2i, ok: bool, reason: String, cost: int) -> void:
+func rpc_buy_result(player_id: String, unit_type: String, grid_pos: Vector2i, ok: bool, reason: String, cost: int, unit_net_id: int) -> void:
 	var mp = get_tree().get_multiplayer()
 	if mp.is_server():
 		return
-	emit_signal("buy_result", player_id, unit_type, grid_pos, ok, reason, cost)
+	if turn_mgr != null and turn_mgr.has_method("log_remote_buy_result"):
+		turn_mgr.log_remote_buy_result(player_id, unit_type, grid_pos, ok, reason, cost, unit_net_id)
+	emit_signal("buy_result", player_id, unit_type, grid_pos, ok, reason, cost, unit_net_id)
 
 @rpc("any_peer", "reliable")
 func rpc_undo_buy_result(player_id: String, unit_net_id: int, ok: bool, reason: String, refund: int) -> void:
 	var mp = get_tree().get_multiplayer()
 	if mp.is_server():
 		return
+	if turn_mgr != null and turn_mgr.has_method("log_remote_undo_buy_result"):
+		turn_mgr.log_remote_undo_buy_result(player_id, unit_net_id, ok, reason, refund)
 	emit_signal("undo_result", player_id, unit_net_id, ok, reason, refund)
 
 @rpc("any_peer", "reliable")
@@ -191,10 +220,14 @@ func rpc_order_result(player_id: String, unit_net_id: int, order: Dictionary, ok
 	var mp = get_tree().get_multiplayer()
 	if mp.is_server():
 		return
+	if turn_mgr != null and turn_mgr.has_method("log_remote_order_result"):
+		turn_mgr.log_remote_order_result(player_id, unit_net_id, order, ok, reason)
 	emit_signal("order_result", player_id, unit_net_id, order, ok, reason)
 
 @rpc("any_peer", "reliable")
 func rpc_execution_paused(step_idx: int, neutral_step_idx: int) -> void:
+	if _ignore_rpc_in_replay():
+		return
 	var mp = get_tree().get_multiplayer()
 	if mp.is_server():
 		return
@@ -202,6 +235,8 @@ func rpc_execution_paused(step_idx: int, neutral_step_idx: int) -> void:
 
 @rpc("any_peer", "reliable")
 func rpc_execution_complete() -> void:
+	if _ignore_rpc_in_replay():
+		return
 	var mp = get_tree().get_multiplayer()
 	if mp.is_server():
 		return
@@ -227,6 +262,8 @@ func _apply_map_data() -> void:
 # RPC to receive phase start notifications
 @rpc("any_peer", "reliable")
 func phase_started(phase_name: String) -> void:
+	if _ignore_rpc_in_replay():
+		return
 	print("[NetworkManager] phase_started received: %s" % phase_name)
 	# Call into your TurnManager to start the phase locally
 	turn_mgr.start_phase_locally(phase_name)
@@ -270,7 +307,7 @@ func request_buy_unit(player_id: String, unit_type: String, grid_pos: Vector2i) 
 	var is_host = mp == null or mp.multiplayer_peer == null or mp.is_server()
 	if is_host:
 		var result = _handle_buy_request(player_id, unit_type, grid_pos)
-		emit_signal("buy_result", player_id, unit_type, grid_pos, result["ok"], result["reason"], result["cost"])
+		emit_signal("buy_result", player_id, unit_type, grid_pos, result["ok"], result["reason"], result["cost"], result["unit_net_id"])
 		return bool(result["ok"])
 	rpc_id(server_peer_id, "rpc_request_buy_unit", player_id, unit_type, grid_pos)
 	return false
@@ -310,6 +347,10 @@ func _handle_undo_buy_request(player_id: String, unit_net_id: int) -> Dictionary
 func _handle_order_request(player_id: String, order: Dictionary) -> Dictionary:
 	return turn_mgr.validate_and_add_order(player_id, order)
 
+func _handle_concede_request(player_id: String) -> void:
+	if turn_mgr != null and turn_mgr.has_method("concede"):
+		turn_mgr.concede(player_id)
+
 func _handle_cancel_request(player_id: String) -> void:
 	print("[NetworkManager] Player ", player_id, " cancelled their orders.")
 	_orders_submitted[player_id] = false
@@ -342,6 +383,8 @@ func broadcast_game_over(player_id: String) -> void:
 
 @rpc("any_peer", "reliable")
 func rpc_game_over(player_id: String) -> void:
+	if _ignore_rpc_in_replay():
+		return
 	var mp = get_tree().get_multiplayer()
 	if mp.is_server():
 		return
@@ -349,8 +392,204 @@ func rpc_game_over(player_id: String) -> void:
 		turn_mgr._show_game_over(player_id)
 	emit_signal("game_over_received", player_id)
 
+func send_replay_log_to_client(path: String) -> void:
+	var mp = get_tree().get_multiplayer()
+	if mp == null or mp.multiplayer_peer == null:
+		return
+	if not mp.is_server():
+		return
+	if client_peer_id <= 0:
+		return
+	if path == "":
+		return
+	var raw: PackedByteArray = FileAccess.get_file_as_bytes(path)
+	if raw.size() == 0:
+		return
+	var compressed: PackedByteArray = _compress_bytes_gzip(raw, _tmp_replay_path("send", path))
+	if compressed.size() == 0:
+		return
+	var base_name = _replay_filename_from_path(path)
+	var total_chunks = int((compressed.size() + REPLAY_CHUNK_SIZE - 1) / REPLAY_CHUNK_SIZE)
+	rpc_id(client_peer_id, "rpc_replay_log_begin", base_name, total_chunks, raw.size())
+	for idx in range(total_chunks):
+		var start = idx * REPLAY_CHUNK_SIZE
+		var end = min(start + REPLAY_CHUNK_SIZE, compressed.size())
+		var chunk = compressed.slice(start, end)
+		rpc_id(client_peer_id, "rpc_replay_log_chunk", base_name, idx, chunk)
+	rpc_id(client_peer_id, "rpc_replay_log_end", base_name)
+
+@rpc("any_peer", "reliable")
+func rpc_replay_log_begin(name: String, total_chunks: int, original_size: int) -> void:
+	if _ignore_rpc_in_replay():
+		return
+	var mp = get_tree().get_multiplayer()
+	if mp.is_server():
+		return
+	if total_chunks <= 0:
+		return
+	var safe_name = _sanitize_replay_name(name)
+	var chunks: Array = []
+	chunks.resize(total_chunks)
+	_incoming_replay = {
+		"name": safe_name,
+		"total": total_chunks,
+		"original_size": original_size,
+		"chunks": chunks,
+		"received": 0
+	}
+
+@rpc("any_peer", "reliable")
+func rpc_replay_log_chunk(name: String, idx: int, data: PackedByteArray) -> void:
+	if _ignore_rpc_in_replay():
+		return
+	var mp = get_tree().get_multiplayer()
+	if mp.is_server():
+		return
+	if _incoming_replay.is_empty():
+		return
+	if _incoming_replay.get("name", "") != _sanitize_replay_name(name):
+		return
+	var chunks: Array = _incoming_replay.get("chunks", [])
+	if idx < 0 or idx >= chunks.size():
+		return
+	if chunks[idx] == null:
+		_incoming_replay["received"] = int(_incoming_replay.get("received", 0)) + 1
+	chunks[idx] = data
+	_incoming_replay["chunks"] = chunks
+
+@rpc("any_peer", "reliable")
+func rpc_replay_log_end(name: String) -> void:
+	if _ignore_rpc_in_replay():
+		return
+	var mp = get_tree().get_multiplayer()
+	if mp.is_server():
+		return
+	if _incoming_replay.is_empty():
+		return
+	var safe_name = _sanitize_replay_name(name)
+	if _incoming_replay.get("name", "") != safe_name:
+		return
+	var total = int(_incoming_replay.get("total", 0))
+	if int(_incoming_replay.get("received", 0)) < total:
+		_send_replay_ack(safe_name, false, "missing_chunks")
+		_incoming_replay = {}
+		return
+	var compressed := PackedByteArray()
+	for chunk in _incoming_replay.get("chunks", []):
+		if chunk == null:
+			_send_replay_ack(safe_name, false, "missing_chunks")
+			_incoming_replay = {}
+			return
+		compressed.append_array(chunk)
+	var original_size = int(_incoming_replay.get("original_size", 0))
+	var decompressed: PackedByteArray = _decompress_bytes_gzip(compressed, original_size, _tmp_replay_path("recv", safe_name))
+	if decompressed.size() == 0 or decompressed.size() != original_size:
+		_send_replay_ack(safe_name, false, "decompress_failed")
+		_incoming_replay = {}
+		return
+	var path = _unique_replay_path(safe_name)
+	var file = FileAccess.open(path, FileAccess.WRITE)
+	if file == null:
+		_send_replay_ack(safe_name, false, "write_failed")
+		_incoming_replay = {}
+		return
+	file.store_buffer(decompressed)
+	file.close()
+	if turn_mgr != null and turn_mgr.has_method("set_host_replay_log_path"):
+		turn_mgr.set_host_replay_log_path(path)
+	_send_replay_ack(safe_name, true, path)
+	_incoming_replay = {}
+
+@rpc("any_peer", "reliable")
+func rpc_replay_log_ack(name: String, ok: bool, saved_path: String) -> void:
+	var mp = get_tree().get_multiplayer()
+	if not mp.is_server():
+		return
+	print("[NetworkManager] Replay log transfer:", name, ok, saved_path)
+
+func _send_replay_ack(name: String, ok: bool, info: String) -> void:
+	if server_peer_id <= 0:
+		return
+	rpc_id(server_peer_id, "rpc_replay_log_ack", name, ok, info)
+
+func _sanitize_replay_name(name: String) -> String:
+	var base = name.get_file()
+	if base == "":
+		base = "dev_log_replay.jsonl"
+	if not base.ends_with(".jsonl"):
+		base += ".jsonl"
+	return base
+
+func _replay_filename_from_path(path: String) -> String:
+	var base = path.get_file()
+	if base == "":
+		return "dev_log_replay.jsonl"
+	var suffix = "_replay"
+	if base.ends_with(".jsonl"):
+		base = base.substr(0, base.length() - 6)
+	return "%s%s.jsonl" % [base, suffix]
+
+func _unique_replay_path(base_name: String) -> String:
+	var name = _sanitize_replay_name(base_name)
+	var path = "user://%s" % name
+	if not FileAccess.file_exists(path):
+		return path
+	var stem = name.substr(0, name.length() - 6)
+	var idx = 1
+	while true:
+		var candidate = "user://%s_%d.jsonl" % [stem, idx]
+		if not FileAccess.file_exists(candidate):
+			return candidate
+		idx += 1
+	return path
+
+func _tmp_replay_path(prefix: String, name: String) -> String:
+	var safe = name.get_file()
+	if safe == "":
+		safe = "dev_log.jsonl"
+	safe = safe.replace(".jsonl", "").replace(".gz", "")
+	return "user://_tmp_%s_%s.gz" % [prefix, safe]
+
+func _compress_bytes_gzip(raw: PackedByteArray, tmp_path: String) -> PackedByteArray:
+	if tmp_path == "":
+		return PackedByteArray()
+	var writer = FileAccess.open_compressed(tmp_path, FileAccess.WRITE, FileAccess.COMPRESSION_GZIP)
+	if writer == null:
+		return PackedByteArray()
+	writer.store_buffer(raw)
+	writer.close()
+	var compressed = FileAccess.get_file_as_bytes(tmp_path)
+	_dir_remove_if_exists(tmp_path)
+	return compressed
+
+func _decompress_bytes_gzip(compressed: PackedByteArray, expected_size: int, tmp_path: String) -> PackedByteArray:
+	if tmp_path == "":
+		return PackedByteArray()
+	var raw_writer = FileAccess.open(tmp_path, FileAccess.WRITE)
+	if raw_writer == null:
+		return PackedByteArray()
+	raw_writer.store_buffer(compressed)
+	raw_writer.close()
+	var reader = FileAccess.open_compressed(tmp_path, FileAccess.READ, FileAccess.COMPRESSION_GZIP)
+	if reader == null:
+		_dir_remove_if_exists(tmp_path)
+		return PackedByteArray()
+	var data = reader.get_buffer(expected_size)
+	reader.close()
+	_dir_remove_if_exists(tmp_path)
+	return data
+
+func _dir_remove_if_exists(path: String) -> void:
+	if not FileAccess.file_exists(path):
+		return
+	var dir = DirAccess.open("user://")
+	if dir != null:
+		dir.remove(path.get_file())
+
 @rpc("any_peer", "reliable")
 func rpc_submit_orders(player_id: String, orders: Array) -> void:
+	if _ignore_rpc_in_replay():
+		return
 	var mp = get_tree().get_multiplayer()
 	if not mp.is_server():
 		return
@@ -368,6 +607,13 @@ func submit_orders(player_id: String, orders: Array) -> void:
 	else:
 		print("[NM] Client sending orders for %s to host peer %d" % [player_id, server_peer_id])
 		rpc_id(server_peer_id, "rpc_submit_orders", player_id, [])
+
+func request_concede(player_id: String) -> void:
+	var mp = get_tree().get_multiplayer()
+	if mp.is_server():
+		_handle_concede_request(player_id)
+	else:
+		rpc_id(server_peer_id, "rpc_request_concede", player_id)
 
 func _buffer_orders(player_id:String, orders:Array) -> void:
 	print("[NM] _record_orders() called with player_id=%s, sender=%d" % [player_id, multiplayer.get_remote_sender_id()])
@@ -392,6 +638,8 @@ func _buffer_orders(player_id:String, orders:Array) -> void:
 
 @rpc("any_peer", "reliable")
 func rpc_orders_ready(all_orders: Dictionary) -> void:
+	if _ignore_rpc_in_replay():
+		return
 	player_orders = all_orders
 	print("[NM] rpc_orders_ready received with keys:", all_orders.keys())
 	emit_signal("orders_ready", all_orders)
@@ -404,6 +652,8 @@ func cancel_orders(player_id: String):
 
 @rpc("any_peer", "reliable")
 func rpc_request_cancel_orders(player_id: String) -> void:
+	if _ignore_rpc_in_replay():
+		return
 	var mp := get_tree().get_multiplayer()
 	if not mp.is_server():
 		return
@@ -417,8 +667,26 @@ func rpc_request_cancel_orders(player_id: String) -> void:
 	_handle_cancel_request(player_id)
 	rpc("rpc_orders_cancelled", player_id)
 
+@rpc("any_peer", "reliable")
+func rpc_request_concede(player_id: String) -> void:
+	if _ignore_rpc_in_replay():
+		return
+	var mp := get_tree().get_multiplayer()
+	if not mp.is_server():
+		return
+	var sender = multiplayer.get_remote_sender_id()
+	if sender != 0:
+		var expected_player := _peer_id_to_player_id(sender)
+		if player_id != expected_player:
+			push_error("Concede request owner mismatch: got '%s' from peer %d (expected '%s')" 
+			% [player_id, sender, expected_player])
+			return
+	_handle_concede_request(player_id)
+
 @rpc("any_peer", "call_local")
 func rpc_orders_cancelled(player_id: String):
+	if _ignore_rpc_in_replay():
+		return
 	print("[NetworkManager] Received cancellation from ", player_id)
 	_orders_submitted[player_id] = false
 	orders_cancelled.emit(player_id)
@@ -434,6 +702,8 @@ func _peer_id_to_player_id(peer_id: int) -> String:
 
 @rpc("any_peer", "reliable")
 func rpc_step_ready(step_idx: int) -> void:
+	if _ignore_rpc_in_replay():
+		return
 	var mp = get_tree().get_multiplayer()
 	# only the host/server should count these
 	if not mp.is_server():
@@ -450,6 +720,8 @@ func rpc_step_ready(step_idx: int) -> void:
 		rpc_resume_execution(step_idx)
 @rpc("any_peer", "reliable")
 func rpc_resume_execution(step_idx: int) -> void:
+	if _ignore_rpc_in_replay():
+		return
 	print("[NM] rpc_resume_execution received for step %d" % step_idx)
 	turn_mgr.resume_execution()
 

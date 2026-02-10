@@ -53,6 +53,7 @@ var _map_select_id: int = MAP_SELECT_RANDOM_NORMAL
 var _map_select_names: Dictionary = {}
 var _queue_preview_unit_id: int = -1
 var _default_camera_zoom: Vector2 = Vector2.ZERO
+var replay_metric_ids: Array = []
 
 @onready var turn_mgr = get_node(turn_manager_path) as Node
 @onready var unit_mgr = get_node(unit_manager_path) as Node
@@ -106,6 +107,19 @@ var _default_camera_zoom: Vector2 = Vector2.ZERO
 @onready var proc_custom_dragons = $ProcCustomPanel/VBoxContainer/Grid/DragonEdit as LineEdit
 @onready var proc_custom_apply = $ProcCustomPanel/VBoxContainer/Buttons/ApplyButton as Button
 @onready var proc_custom_close = $ProcCustomPanel/VBoxContainer/Buttons/CloseButton as Button
+@onready var replay_panel = $ReplayPanel as Panel
+@onready var replay_turn_label = $ReplayPanel/VBoxContainer/TurnLabel as Label
+@onready var replay_prev_button = $ReplayPanel/VBoxContainer/ControlsRow/PrevButton as Button
+@onready var replay_next_button = $ReplayPanel/VBoxContainer/ControlsRow/NextButton as Button
+@onready var replay_phase_toggle = $ReplayPanel/VBoxContainer/PhaseCheckButton as CheckButton
+@onready var replay_fog_option = $ReplayPanel/VBoxContainer/FogRow/FogOption as OptionButton
+@onready var replay_stats_button = $ReplayPanel/VBoxContainer/StatsButton as Button
+@onready var replay_exit_button = $ReplayPanel/VBoxContainer/ExitButton as Button
+@onready var replay_stats_panel = $ReplayStatsPanel as Window
+@onready var replay_stats_metric = $ReplayStatsPanel/VBoxContainer/ControlsRow/MetricOption as OptionButton
+@onready var replay_stats_player1 = $ReplayStatsPanel/VBoxContainer/ControlsRow/Player1Check as CheckButton
+@onready var replay_stats_player2 = $ReplayStatsPanel/VBoxContainer/ControlsRow/Player2Check as CheckButton
+@onready var replay_stats_graph = $ReplayStatsPanel/VBoxContainer/Graph as Control
 
 const ArrowScene = preload("res://scenes/Arrow.tscn")
 const AttackArrowScene = preload("res://scenes/AttackArrow.tscn")
@@ -132,6 +146,7 @@ const MENU_ID_BUILDING_STATS: int = 11
 const MENU_ID_SPELL_STATS: int = 12
 const MENU_ID_DEV_MODE: int = 13
 const MENU_ID_QUIT: int = 14
+const MENU_ID_CONCEDE: int = 15
 const MENU_ID_TERRAIN_STATS: int = 20
 const MENU_ID_SLOT_BASE: int = 100
 const MAP_SELECT_RANDOM_ANY: int = 1000
@@ -258,6 +273,8 @@ func _ready():
 					Callable(self, "_on_execution_paused"))
 	turn_mgr.connect("execution_complete",
 					Callable(self, "_on_execution_complete"))
+	turn_mgr.connect("replay_state_changed",
+					Callable(self, "_on_replay_state_changed"))
 	next_button.connect("pressed",
 					Callable(self, "_on_next_pressed"))
 	if auto_pass_check != null:
@@ -314,6 +331,40 @@ func _ready():
 					Callable(self, "_on_terrain_stats_close_pressed"))
 	$Panel/FinishMoveButton.connect("pressed",
 					Callable(self, "_on_finish_move_button_pressed"))
+	if replay_prev_button != null:
+		replay_prev_button.connect("pressed",
+					Callable(self, "_on_replay_prev_pressed"))
+	if replay_next_button != null:
+		replay_next_button.connect("pressed",
+					Callable(self, "_on_replay_next_pressed"))
+	if replay_phase_toggle != null:
+		replay_phase_toggle.connect("toggled",
+					Callable(self, "_on_replay_phase_toggled"))
+	if replay_fog_option != null:
+		replay_fog_option.connect("item_selected",
+					Callable(self, "_on_replay_fog_selected"))
+	if replay_stats_button != null:
+		replay_stats_button.connect("pressed",
+					Callable(self, "_on_replay_stats_pressed"))
+	if replay_exit_button != null:
+		replay_exit_button.connect("pressed",
+					Callable(self, "_on_replay_exit_pressed"))
+	if replay_stats_panel != null and replay_stats_panel.has_signal("close_requested"):
+		replay_stats_panel.connect("close_requested",
+					Callable(self, "_on_replay_stats_close_pressed"))
+	if replay_stats_metric != null:
+		replay_stats_metric.connect("item_selected",
+					Callable(self, "_on_replay_metric_changed"))
+	if replay_stats_player1 != null:
+		replay_stats_player1.connect("toggled",
+					Callable(self, "_on_replay_metric_changed"))
+	if replay_stats_player2 != null:
+		replay_stats_player2.connect("toggled",
+					Callable(self, "_on_replay_metric_changed"))
+	if replay_panel != null:
+		replay_panel.visible = false
+	if replay_stats_panel != null:
+		replay_stats_panel.visible = false
 	
 	# setting gold labels and stats for units
 	var base_font: FontFile = load("res://fonts/JetBrainsMono-Medium.ttf")
@@ -507,6 +558,7 @@ func _init_menu() -> void:
 	for i in range(SAVE_SLOT_COUNT_UI):
 		menu_popup.add_radio_check_item("Save Slot %d" % (i + 1), MENU_ID_SLOT_BASE + i)
 	menu_popup.add_separator()
+	menu_popup.add_item("Concede", MENU_ID_CONCEDE)
 	menu_popup.add_item("Quit to Lobby", MENU_ID_QUIT)
 	_sync_menu_checks()
 	menu_popup.connect("id_pressed", Callable(self, "_on_menu_id_pressed"))
@@ -916,6 +968,10 @@ func _on_menu_id_pressed(id: int) -> void:
 			dev_mode_toggle.button_pressed = next
 		_on_dev_mode_toggled(next)
 		_set_menu_checked(MENU_ID_DEV_MODE, next)
+		return
+	if id == MENU_ID_CONCEDE:
+		if turn_mgr != null:
+			NetworkManager.request_concede(turn_mgr.local_player_id)
 		return
 	if id == MENU_ID_QUIT:
 		_on_cancel_game_pressed()
@@ -1755,7 +1811,7 @@ func _refresh_resource_labels() -> void:
 		var ranged_bonus = int(turn_mgr.player_ranged_bonus.get(current_player, 0))
 		dragon_buff_lbl.text = "Dragon Buffs: +%d melee / +%d ranged" % [melee_bonus, ranged_bonus]
 
-func _on_buy_result(player_id: String, unit_type: String, grid_pos: Vector2i, ok: bool, reason: String, cost: int) -> void:
+func _on_buy_result(player_id: String, unit_type: String, grid_pos: Vector2i, ok: bool, reason: String, cost: int, _unit_net_id: int) -> void:
 	if player_id != turn_mgr.local_player_id:
 		return
 	if turn_mgr.is_host():
@@ -3681,36 +3737,114 @@ func _unhandled_input(ev):
 				action_menu.set_position(menu_pos)
 				action_menu.show()
 				return
-		var structure = game_board.get_structure_unit_at(cell)
-		if structure != null and structure.player_id == current_player:
-			_on_unit_selected(structure)
-			last_click_pos = ev.position
-			var menu_pos = ev.position
-			var menu_size = action_menu.size
-			var viewport_size = get_viewport().get_visible_rect().size
-			if menu_pos.y + menu_size.y > viewport_size.y:
-				menu_pos.y = max(0.0, menu_pos.y - menu_size.y)
-			action_menu.set_position(menu_pos)
-			action_menu.show()
-			return
-		var ward_state = turn_mgr.buildable_structures.get(cell, {})
-		if not ward_state.is_empty():
-			if str(ward_state.get("type", "")) == turn_mgr.STRUCT_WARD and str(ward_state.get("owner", "")) == current_player and str(ward_state.get("status", "")) == turn_mgr.STRUCT_STATUS_INTACT:
-				currently_selected_unit = null
-				selected_structure_tile = cell
-				selected_structure_type = "ward"
-				action_menu.clear()
-				action_menu.add_item("Ward Vision", ACTION_WARD_VISION_ID)
-				if bool(ward_state.get("auto_ward", false)):
-					action_menu.add_item("Stop Vision", ACTION_WARD_VISION_STOP_ID)
-				else:
-					action_menu.add_item("Always Vision", ACTION_WARD_VISION_ALWAYS_ID)
-				last_click_pos = ev.position
-				var menu_pos = ev.position
-				var menu_size = action_menu.size
-				var viewport_size = get_viewport().get_visible_rect().size
-				if menu_pos.y + menu_size.y > viewport_size.y:
-					menu_pos.y = max(0.0, menu_pos.y - menu_size.y)
-				action_menu.set_position(menu_pos)
-				action_menu.show()
-				return
+
+func _enter_replay_mode() -> void:
+	allow_clicks = false
+	$Panel.visible = false
+	exec_panel.visible = false
+	resource_panel.visible = false
+	damage_panel.visible = false
+	cancel_done_button.visible = false
+	menu_button.visible = false
+	if replay_panel != null:
+		replay_panel.visible = true
+	if replay_fog_option != null and replay_fog_option.item_count == 0:
+		replay_fog_option.add_item("Player 1", 0)
+		replay_fog_option.add_item("Player 2", 1)
+		replay_fog_option.add_item("No Fog", 2)
+	if replay_fog_option != null:
+		replay_fog_option.select(0)
+	if replay_phase_toggle != null:
+		replay_phase_toggle.button_pressed = false
+
+func _exit_replay_mode() -> void:
+	allow_clicks = true
+	$Panel.visible = false
+	exec_panel.visible = false
+	resource_panel.visible = false
+	damage_panel.visible = false
+	cancel_done_button.visible = false
+	menu_button.visible = true
+	if replay_panel != null:
+		replay_panel.visible = false
+	if replay_stats_panel != null:
+		replay_stats_panel.visible = false
+
+func _on_replay_prev_pressed() -> void:
+	if turn_mgr != null:
+		turn_mgr.replay_step_back()
+
+func _on_replay_next_pressed() -> void:
+	if turn_mgr != null:
+		turn_mgr.replay_step_forward()
+
+func _on_replay_phase_toggled(enabled: bool) -> void:
+	if turn_mgr != null:
+		turn_mgr.set_replay_phase_mode(enabled)
+
+func _on_replay_fog_selected(index: int) -> void:
+	if turn_mgr == null:
+		return
+	match index:
+		0:
+			turn_mgr.set_replay_fog_mode("player1")
+		1:
+			turn_mgr.set_replay_fog_mode("player2")
+		2:
+			turn_mgr.set_replay_fog_mode("none")
+
+func _on_replay_stats_pressed() -> void:
+	_show_replay_stats()
+
+func _show_replay_stats() -> void:
+	if replay_stats_panel == null or turn_mgr == null:
+		return
+	replay_stats_panel.visible = true
+	replay_metric_ids.clear()
+	if replay_stats_metric != null:
+		replay_stats_metric.clear()
+		var metrics = turn_mgr.get_replay_metric_list()
+		for entry in metrics:
+			replay_stats_metric.add_item(str(entry.get("label", "")))
+			replay_metric_ids.append(str(entry.get("id", "")))
+		if replay_stats_metric.item_count > 0:
+			replay_stats_metric.select(0)
+	_update_replay_stats_graph()
+
+func _on_replay_stats_close_pressed() -> void:
+	if replay_stats_panel != null:
+		replay_stats_panel.visible = false
+
+func _on_replay_metric_changed(_value: Variant = null) -> void:
+	_update_replay_stats_graph()
+
+func _update_replay_stats_graph() -> void:
+	if replay_stats_graph == null or turn_mgr == null:
+		return
+	if replay_metric_ids.is_empty():
+		return
+	var idx = 0
+	if replay_stats_metric != null:
+		idx = replay_stats_metric.get_selected_id()
+		if idx < 0:
+			idx = replay_stats_metric.get_selected()
+	var metric_id = replay_metric_ids[min(idx, replay_metric_ids.size() - 1)]
+	var include_p1 = replay_stats_player1 == null or replay_stats_player1.button_pressed
+	var include_p2 = replay_stats_player2 == null or replay_stats_player2.button_pressed
+	var series = turn_mgr.get_replay_series(metric_id, include_p1, include_p2)
+	if replay_stats_graph.has_method("set_series"):
+		replay_stats_graph.set_series(series)
+
+func _on_replay_exit_pressed() -> void:
+	if turn_mgr != null:
+		turn_mgr.exit_replay_to_game_over()
+
+func _on_replay_state_changed(turn: int, phase: int) -> void:
+	if replay_turn_label == null:
+		return
+	var phase_name = "Execution"
+	if phase == 0:
+		phase_name = "Upkeep"
+	elif phase == 1:
+		phase_name = "Orders"
+	replay_turn_label.text = "Turn %d - %s" % [turn, phase_name]

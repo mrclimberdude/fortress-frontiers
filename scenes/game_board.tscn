@@ -1,4 +1,4 @@
-[gd_scene load_steps=43 format=4 uid="uid://dnx0cxl4a46lg"]
+[gd_scene load_steps=44 format=4 uid="uid://dnx0cxl4a46lg"]
 
 [ext_resource type="Script" uid="uid://daaph63aiv3vd" path="res://scripts/TurnManager.gd" id="1_xh13x"]
 [ext_resource type="Texture2D" uid="uid://ciitwnd7hxyra" path="res://assets/spritesheet.png" id="2_17g6i"]
@@ -40,6 +40,7 @@
 [ext_resource type="Resource" uid="uid://e85ygnu5xomy" path="res://maps/map_15.tres" id="22_0eiui"]
 [ext_resource type="Resource" uid="uid://bxs46yodwgbl8" path="res://maps/small_map_1.tres" id="23_5e6fo"]
 [ext_resource type="Resource" uid="uid://n5q02a2ce40l" path="res://maps/procedural.tres" id="24_proc"]
+[ext_resource type="Script" uid="uid://bmtqk7usu0imv" path="res://scripts/ReplayStatsGraph.gd" id="25_replaygraph"]
 
 [sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_17g6i"]
 texture = ExtResource("2_17g6i")
@@ -184,12 +185,68 @@ anchor_top = 0.5
 anchor_right = 0.5
 anchor_bottom = 0.5
 offset_left = -140.0
-offset_top = 210.0
+offset_top = 350.0
 offset_right = 140.0
-offset_bottom = 260.0
+offset_bottom = 400.0
 grow_horizontal = 2
 grow_vertical = 2
 text = "Quit to Lobby"
+
+[node name="ReplayP1Button" type="Button" parent="GameOver"]
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -140.0
+offset_top = 130.0
+offset_right = 140.0
+offset_bottom = 180.0
+grow_horizontal = 2
+grow_vertical = 2
+text = "Replay (P1 Fog)"
+
+[node name="ReplayP2Button" type="Button" parent="GameOver"]
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -140.0
+offset_top = 185.0
+offset_right = 140.0
+offset_bottom = 235.0
+grow_horizontal = 2
+grow_vertical = 2
+text = "Replay (P2 Fog)"
+
+[node name="ReplayNoFogButton" type="Button" parent="GameOver"]
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -140.0
+offset_top = 240.0
+offset_right = 140.0
+offset_bottom = 290.0
+grow_horizontal = 2
+grow_vertical = 2
+text = "Replay (No Fog)"
+
+[node name="ReplayStatsButton" type="Button" parent="GameOver"]
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -140.0
+offset_top = 295.0
+offset_right = 140.0
+offset_bottom = 345.0
+grow_horizontal = 2
+grow_vertical = 2
+text = "View Stats"
 
 [node name="UI" type="CanvasLayer" parent="."]
 script = ExtResource("6_qxawf")
@@ -754,3 +811,92 @@ offset_bottom = -2.0
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
+
+[node name="ReplayPanel" type="Panel" parent="UI"]
+visible = false
+offset_left = 10.0
+offset_top = 40.0
+offset_right = 230.0
+offset_bottom = 280.0
+
+[node name="VBoxContainer" type="VBoxContainer" parent="UI/ReplayPanel"]
+layout_mode = 0
+offset_left = 8.0
+offset_top = 8.0
+offset_right = 210.0
+offset_bottom = 240.0
+
+[node name="TitleLabel" type="Label" parent="UI/ReplayPanel/VBoxContainer"]
+layout_mode = 2
+text = "Replay"
+
+[node name="TurnLabel" type="Label" parent="UI/ReplayPanel/VBoxContainer"]
+layout_mode = 2
+text = "Turn 0 - Upkeep"
+
+[node name="ControlsRow" type="HBoxContainer" parent="UI/ReplayPanel/VBoxContainer"]
+layout_mode = 2
+
+[node name="PrevButton" type="Button" parent="UI/ReplayPanel/VBoxContainer/ControlsRow"]
+layout_mode = 2
+text = "<"
+
+[node name="NextButton" type="Button" parent="UI/ReplayPanel/VBoxContainer/ControlsRow"]
+layout_mode = 2
+text = ">"
+
+[node name="PhaseCheckButton" type="CheckButton" parent="UI/ReplayPanel/VBoxContainer"]
+layout_mode = 2
+text = "Phase Step"
+
+[node name="FogRow" type="HBoxContainer" parent="UI/ReplayPanel/VBoxContainer"]
+layout_mode = 2
+
+[node name="FogLabel" type="Label" parent="UI/ReplayPanel/VBoxContainer/FogRow"]
+layout_mode = 2
+text = "Fog:"
+
+[node name="FogOption" type="OptionButton" parent="UI/ReplayPanel/VBoxContainer/FogRow"]
+layout_mode = 2
+
+[node name="StatsButton" type="Button" parent="UI/ReplayPanel/VBoxContainer"]
+layout_mode = 2
+text = "View Stats"
+
+[node name="ExitButton" type="Button" parent="UI/ReplayPanel/VBoxContainer"]
+layout_mode = 2
+text = "Exit Replay"
+
+[node name="ReplayStatsPanel" type="Window" parent="UI"]
+title = "Replay Stats"
+position = Vector2i(220, 60)
+size = Vector2i(680, 480)
+visible = false
+
+[node name="VBoxContainer" type="VBoxContainer" parent="UI/ReplayStatsPanel"]
+offset_left = 8.0
+offset_top = 8.0
+offset_right = 660.0
+offset_bottom = 452.0
+
+[node name="ControlsRow" type="HBoxContainer" parent="UI/ReplayStatsPanel/VBoxContainer"]
+layout_mode = 2
+
+[node name="MetricOption" type="OptionButton" parent="UI/ReplayStatsPanel/VBoxContainer/ControlsRow"]
+layout_mode = 2
+
+[node name="Player1Check" type="CheckButton" parent="UI/ReplayStatsPanel/VBoxContainer/ControlsRow"]
+layout_mode = 2
+button_pressed = true
+text = "P1"
+
+[node name="Player2Check" type="CheckButton" parent="UI/ReplayStatsPanel/VBoxContainer/ControlsRow"]
+layout_mode = 2
+button_pressed = true
+text = "P2"
+
+[node name="Graph" type="Control" parent="UI/ReplayStatsPanel/VBoxContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+script = ExtResource("25_replaygraph")

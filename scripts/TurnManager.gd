@@ -5,6 +5,7 @@ extends Node
 signal orders_phase_begin(player: String)
 signal orders_phase_end()
 signal state_applied()
+signal replay_state_changed(turn: int, phase: int)
 
 signal execution_paused(phase)   # emitted after each phase
 signal execution_complete()      # emitted at the end
@@ -34,7 +35,21 @@ var rng := RandomNumberGenerator.new()
 var current_map_index: int = -1
 var dev_log_path: String = ""
 var dev_log_file: FileAccess = null
+var host_replay_log_path: String = ""
 var last_snapshot_turn: int = -1
+var game_over: bool = false
+var match_init_logged: bool = false
+var rng_replay: Array = []
+var rng_replay_index: int = 0
+var rng_replay_enabled: bool = false
+var last_state_hash_turn: int = -1
+var last_stats_turn: int = -1
+var replay_mode: bool = false
+var replay_data: Dictionary = {}
+var replay_target_turn: int = 0
+var replay_target_phase: int = 2
+var replay_phase_mode: bool = false
+var replay_fog_mode: String = ""
 const DEV_LOG_VERSION: int = 1
 
 func _map_category_for(md: MapData) -> String:
@@ -94,6 +109,18 @@ func _devlog_player_id() -> String:
 		return "player2"
 	return pid
 
+func get_replay_viewer_id() -> String:
+	if not replay_mode:
+		return local_player_id
+	if replay_fog_mode == "player1":
+		return "player1"
+	if replay_fog_mode == "player2":
+		return "player2"
+	return local_player_id
+
+func is_replay_fog_disabled() -> bool:
+	return replay_mode and replay_fog_mode == "none"
+
 func _ensure_dev_log_open() -> void:
 	if dev_log_file != null:
 		return
@@ -115,6 +142,14 @@ func _close_dev_log() -> void:
 	dev_log_file = null
 	dev_log_path = ""
 
+func set_host_replay_log_path(path: String) -> void:
+	host_replay_log_path = path
+
+func _get_replay_source_path() -> String:
+	if host_replay_log_path != "":
+		return host_replay_log_path
+	return dev_log_path
+
 func _devlog_encode(value):
 	if value is Vector2i:
 		return [value.x, value.y]
@@ -132,6 +167,58 @@ func _devlog_encode(value):
 		return arr
 	return value
 
+func _decode_log_vec2i(value) -> Vector2i:
+	if value is Vector2i:
+		return value
+	if value is Vector2:
+		return Vector2i(int(round(value.x)), int(round(value.y)))
+	if value is Array and value.size() >= 2:
+		return Vector2i(int(value[0]), int(value[1]))
+	return Vector2i(-9999, -9999)
+
+func _decode_log_vec2i_array(values) -> Array:
+	if not (values is Array):
+		return []
+	var decoded: Array = []
+	for entry in values:
+		decoded.append(_decode_log_vec2i(entry))
+	return decoded
+
+func _new_replay_log_container() -> Dictionary:
+	return {
+		"orders": {},
+		"events": {},
+		"rng": [],
+		"stats": {},
+		"map_index": -1,
+		"match_seed": -1,
+		"custom_proc_params": {},
+		"start_turn": 0,
+		"initial_state": {},
+		"max_turn": 0,
+		"unit_types": {}
+	}
+
+func _normalize_replay_order(order: Dictionary) -> Dictionary:
+	var normalized = order.duplicate(true)
+	if normalized.has("path"):
+		normalized["path"] = _decode_log_vec2i_array(normalized.get("path", []))
+	if normalized.has("queue_path"):
+		normalized["queue_path"] = _decode_log_vec2i_array(normalized.get("queue_path", []))
+	if normalized.has("move_queue_path"):
+		normalized["move_queue_path"] = _decode_log_vec2i_array(normalized.get("move_queue_path", []))
+	if normalized.has("target_tile"):
+		normalized["target_tile"] = _decode_log_vec2i(normalized.get("target_tile"))
+	if normalized.has("ward_tile"):
+		normalized["ward_tile"] = _decode_log_vec2i(normalized.get("ward_tile"))
+	if normalized.has("mana_mine"):
+		normalized["mana_mine"] = _decode_log_vec2i(normalized.get("mana_mine"))
+	if normalized.has("pump_mine"):
+		normalized["pump_mine"] = _decode_log_vec2i(normalized.get("pump_mine"))
+	if normalized.has("pump_pool"):
+		normalized["pump_pool"] = _decode_log_vec2i(normalized.get("pump_pool"))
+	return normalized
+
 func _devlog(event: Dictionary) -> void:
 	if dev_log_file == null:
 		return
@@ -143,6 +230,483 @@ func _devlog(event: Dictionary) -> void:
 	dev_log_file.store_line(JSON.stringify(_devlog_encode(payload)))
 	dev_log_file.flush()
 
+func _maybe_log_match_init() -> void:
+	if match_init_logged:
+		return
+	if NetworkManager.selected_map_index < 0 or NetworkManager.match_seed < 0:
+		return
+	_ensure_dev_log_open()
+	_devlog({
+		"type": "match_init",
+		"map_selection_mode": NetworkManager.map_selection_mode,
+		"selected_map_index": NetworkManager.selected_map_index,
+		"match_seed": NetworkManager.match_seed,
+		"custom_proc_params": NetworkManager.custom_proc_params
+	})
+	match_init_logged = true
+
+func _rng_record(payload: Dictionary) -> void:
+	if dev_log_file == null:
+		_ensure_dev_log_open()
+	_devlog(payload)
+
+func _rng_pop() -> Variant:
+	if rng_replay_index >= rng_replay.size():
+		return null
+	var value = rng_replay[rng_replay_index]
+	rng_replay_index += 1
+	return value
+
+func _rng_randf(tag: String) -> float:
+	if rng_replay_enabled:
+		var value = _rng_pop()
+		if value == null:
+			_devlog({"type": "rng_replay_exhausted", "tag": tag})
+			return rng.randf()
+		return float(value)
+	var value = rng.randf()
+	_rng_record({"type": "rng", "tag": tag, "value": value})
+	return value
+
+func _rng_randi_range(min_val: int, max_val: int, tag: String) -> int:
+	if rng_replay_enabled:
+		var value = _rng_pop()
+		if value == null:
+			_devlog({"type": "rng_replay_exhausted", "tag": tag, "min": min_val, "max": max_val})
+			return rng.randi_range(min_val, max_val)
+		return int(value)
+	var value = rng.randi_range(min_val, max_val)
+	_rng_record({"type": "rng", "tag": tag, "min": min_val, "max": max_val, "value": value})
+	return value
+
+func enable_rng_replay(values: Array) -> void:
+	rng_replay = values.duplicate()
+	rng_replay_index = 0
+	rng_replay_enabled = true
+	_devlog({
+		"type": "rng_replay_enabled",
+		"count": rng_replay.size()
+	})
+
+func disable_rng_replay() -> void:
+	rng_replay_enabled = false
+	rng_replay.clear()
+	rng_replay_index = 0
+	_devlog({
+		"type": "rng_replay_disabled"
+	})
+
+func _load_replay_log(path: String) -> Dictionary:
+	var data := _new_replay_log_container()
+	var seen_match_init = false
+	if path == "" or not FileAccess.file_exists(path):
+		return data
+	var file = FileAccess.open(path, FileAccess.READ)
+	if file == null:
+		return data
+	while not file.eof_reached():
+		var line = file.get_line().strip_edges()
+		if line == "":
+			continue
+		var parsed = JSON.parse_string(line)
+		if typeof(parsed) != TYPE_DICTIONARY:
+			continue
+		var entry = parsed as Dictionary
+		var entry_type = str(entry.get("type", ""))
+		var entry_turn = int(entry.get("turn", 0))
+		data["max_turn"] = max(data["max_turn"], entry_turn)
+		match entry_type:
+			"match_init":
+				if seen_match_init:
+					data = _new_replay_log_container()
+				seen_match_init = true
+				if entry.has("selected_map_index"):
+					data["map_index"] = int(entry.get("selected_map_index", -1))
+				if entry.has("match_seed"):
+					data["match_seed"] = int(entry.get("match_seed", -1))
+				if entry.has("custom_proc_params"):
+					data["custom_proc_params"] = entry.get("custom_proc_params", {})
+			"map_load":
+				var loaded_index = int(entry.get("map_index", -1))
+				if loaded_index >= 0:
+					data["map_index"] = loaded_index
+			"state_snapshot":
+				var reason = str(entry.get("reason", ""))
+				if reason == "load":
+					data["initial_state"] = entry.get("state", {})
+					data["start_turn"] = int(data["initial_state"].get("turn_number", entry_turn))
+					data["orders"] = {}
+					data["events"] = {}
+					data["rng"] = []
+					data["stats"] = {}
+					data["max_turn"] = entry_turn
+					data["unit_types"] = {}
+			"order_result":
+				var result = entry.get("result", {})
+				if typeof(result) == TYPE_DICTIONARY and bool(result.get("ok", false)):
+					var player = str(entry.get("player", ""))
+					var order = result.get("order", {})
+					if typeof(order) == TYPE_DICTIONARY:
+						order = _normalize_replay_order(order)
+					if player != "" and typeof(order) == TYPE_DICTIONARY:
+						if not data["orders"].has(entry_turn):
+							data["orders"][entry_turn] = {}
+						if not data["orders"][entry_turn].has(player):
+							data["orders"][entry_turn][player] = {}
+						var unit_id = int(order.get("unit_net_id", -1))
+						if unit_id >= 0:
+							data["orders"][entry_turn][player][unit_id] = order
+			"buy_unit_result":
+				var result = entry.get("result", {})
+				if typeof(result) == TYPE_DICTIONARY and bool(result.get("ok", false)):
+					var player = str(entry.get("player", ""))
+					var unit_type = str(entry.get("unit_type", ""))
+					var grid_pos = _decode_log_vec2i(entry.get("grid_pos", Vector2i(-9999, -9999)))
+					var unit_id = int(result.get("unit_net_id", -1))
+					var cost = int(result.get("cost", 0))
+					if player != "" and unit_type != "" and unit_id >= 0:
+						if not data["events"].has(entry_turn):
+							data["events"][entry_turn] = []
+						data["events"][entry_turn].append({
+							"type": "buy",
+							"player": player,
+							"unit_type": unit_type,
+							"grid_pos": grid_pos,
+							"unit_net_id": unit_id,
+							"cost": cost
+						})
+			"undo_buy_result":
+				var result = entry.get("result", {})
+				if typeof(result) == TYPE_DICTIONARY and bool(result.get("ok", false)):
+					var player = str(entry.get("player", ""))
+					var unit_id = int(entry.get("unit_net_id", -1))
+					var refund = int(result.get("refund", 0))
+					if player != "" and unit_id >= 0:
+						if not data["events"].has(entry_turn):
+							data["events"][entry_turn] = []
+						data["events"][entry_turn].append({
+							"type": "undo_buy",
+							"player": player,
+							"unit_net_id": unit_id,
+							"refund": refund
+						})
+			"rng":
+				data["rng"].append(entry.get("value"))
+			"turn_stats":
+				var stats = entry.get("stats", {})
+				if typeof(stats) == TYPE_DICTIONARY:
+					data["stats"][entry_turn] = stats
+					var players = stats.get("players", {})
+					if typeof(players) == TYPE_DICTIONARY:
+						for pid in players.keys():
+							var pdata = players[pid]
+							if typeof(pdata) == TYPE_DICTIONARY and pdata.has("unit_counts"):
+								for unit_type in pdata["unit_counts"].keys():
+									data["unit_types"][str(unit_type)] = true
+	file.close()
+	return data
+
+func set_replay_fog_mode(mode: String) -> void:
+	replay_fog_mode = mode
+	$GameBoardNode/FogOfWar._update_fog()
+
+func set_replay_phase_mode(enabled: bool) -> void:
+	replay_phase_mode = enabled
+	emit_signal("replay_state_changed", replay_target_turn, replay_target_phase)
+
+func start_replay(path: String, fog_mode: String) -> bool:
+	replay_data = _load_replay_log(path)
+	if replay_data.is_empty() or int(replay_data.get("map_index", -1)) < 0:
+		return false
+	replay_mode = true
+	replay_fog_mode = fog_mode
+	replay_target_phase = 0
+	replay_phase_mode = false
+	var start_turn = int(replay_data.get("start_turn", 0))
+	replay_target_turn = max(1, start_turn)
+	_replay_seek(replay_target_turn, replay_target_phase)
+	set_replay_fog_mode(fog_mode)
+	return true
+
+func stop_replay() -> void:
+	replay_mode = false
+	replay_phase_mode = false
+	replay_data = {}
+	replay_target_turn = 0
+	replay_target_phase = 2
+	replay_fog_mode = ""
+	disable_rng_replay()
+	emit_signal("replay_state_changed", replay_target_turn, replay_target_phase)
+
+func exit_replay_to_game_over() -> void:
+	stop_replay()
+	_set_game_over_controls_visible(true)
+	if $UI != null and $UI.has_method("_exit_replay_mode"):
+		$UI._exit_replay_mode()
+	$UI.visible = false
+	$GameOver.visible = true
+
+func replay_step_forward() -> void:
+	if not replay_mode:
+		return
+	var max_turn = int(replay_data.get("max_turn", replay_target_turn))
+	if replay_phase_mode:
+		if replay_target_phase < 2:
+			replay_target_phase += 1
+		else:
+			if replay_target_turn < max_turn:
+				replay_target_turn += 1
+				replay_target_phase = 0
+	else:
+		if replay_target_turn < max_turn:
+			replay_target_turn += 1
+		replay_target_phase = 2
+	_replay_seek(replay_target_turn, replay_target_phase)
+
+func replay_step_back() -> void:
+	if not replay_mode:
+		return
+	if replay_phase_mode:
+		if replay_target_phase > 0:
+			replay_target_phase -= 1
+		else:
+			if replay_target_turn > 1:
+				replay_target_turn -= 1
+				replay_target_phase = 2
+	else:
+		if replay_target_turn > 1:
+			replay_target_turn -= 1
+		replay_target_phase = 2
+	_replay_seek(replay_target_turn, replay_target_phase)
+
+func _replay_seek(target_turn: int, target_phase: int) -> void:
+	_replay_reset_state()
+	var start_turn = int(replay_data.get("start_turn", 0))
+	var max_turn = int(replay_data.get("max_turn", target_turn))
+	var clamped_turn = clamp(target_turn, max(1, start_turn), max_turn)
+	replay_target_turn = clamped_turn
+	replay_target_phase = target_phase
+	for t in range(max(1, start_turn), clamped_turn + 1):
+		turn_number = t
+		_do_upkeep()
+		if t == clamped_turn and target_phase == 0:
+			_set_replay_phase_state("UPKEEP")
+			return
+		_replay_apply_orders(t)
+		current_phase = Phase.ORDERS
+		if t == clamped_turn and target_phase == 1:
+			_set_replay_phase_state("ORDERS")
+			return
+		_do_execution()
+		_replay_run_execution_to_end()
+		if t == clamped_turn and target_phase == 2:
+			_set_replay_phase_state("EXECUTION")
+			return
+	_set_replay_phase_state("EXECUTION")
+
+func _set_replay_phase_state(label: String) -> void:
+	$GameBoardNode/FogOfWar._update_fog()
+	emit_signal("replay_state_changed", replay_target_turn, replay_target_phase)
+
+func _replay_reset_state() -> void:
+	disable_rng_replay()
+	enable_rng_replay(replay_data.get("rng", []))
+	_reset_map_state()
+	_reset_replay_state_defaults()
+	current_map_index = -1
+	var map_index = int(replay_data.get("map_index", -1))
+	var match_seed = int(replay_data.get("match_seed", -1))
+	var proc_params = replay_data.get("custom_proc_params", {})
+	if map_index >= 0:
+		NetworkManager.selected_map_index = map_index
+	if match_seed > 0:
+		NetworkManager.match_seed = match_seed
+	if proc_params is Dictionary:
+		NetworkManager.custom_proc_params = proc_params
+	var initial_state = replay_data.get("initial_state", {})
+	if initial_state is Dictionary and not initial_state.is_empty():
+		apply_state(initial_state, true)
+	else:
+		if map_index >= 0:
+			_load_map_by_index(map_index)
+			_spawn_neutral_units()
+			$GameBoardNode/FogOfWar._update_fog()
+
+func _reset_replay_state_defaults() -> void:
+	state_seq = 0
+	last_state_seq_applied = -1
+	turn_number = 0
+	current_phase = Phase.UPKEEP
+	current_player = "player1"
+	exec_steps = []
+	step_index = 0
+	neutral_step_index = -1
+	last_snapshot_turn = -1
+	last_state_hash_turn = -1
+	last_stats_turn = -1
+	player_gold = { "player1": 25, "player2": 25 }
+	player_income = { "player1": 0, "player2": 0 }
+	player_mana = { "player1": 0, "player2": 0 }
+	player_mana_income = { "player1": 0, "player2": 0 }
+	player_mana_cap = { "player1": BASE_MANA_CAP, "player2": BASE_MANA_CAP }
+	player_melee_bonus = { "player1": 0, "player2": 0 }
+	player_ranged_bonus = { "player1": 0, "player2": 0 }
+	player_mana_bonus = { "player1": 0, "player2": 0 }
+	player_mana_cap_bonus = { "player1": 0, "player2": 0 }
+	player_global_vision_until = { "player1": 0, "player2": 0 }
+	targeted_vision_active = { "player1": {}, "player2": {} }
+	ward_vision_active = { "player1": {}, "player2": {} }
+	mana_pool_mines = {}
+	damage_log = { "player1": [], "player2": [] }
+	player_orders = { "player1": {}, "player2": {} }
+	committed_orders = { "player1": {}, "player2": {} }
+	if NetworkManager != null:
+		NetworkManager.player_orders = player_orders
+		NetworkManager._orders_submitted = { "player1": false, "player2": false }
+		NetworkManager._step_ready_counts = {}
+
+func _replay_apply_orders(turn: int) -> void:
+	var events_for_turn = replay_data.get("events", {}).get(turn, [])
+	for event in events_for_turn:
+		if typeof(event) != TYPE_DICTIONARY:
+			continue
+		var event_type = str(event.get("type", ""))
+		if event_type == "buy":
+			_replay_apply_buy_event(event)
+		elif event_type == "undo_buy":
+			_replay_apply_undo_buy_event(event)
+	var orders_for_turn = replay_data.get("orders", {}).get(turn, {})
+	for player in ["player1", "player2"]:
+		var orders = player_orders.get(player, {})
+		if orders_for_turn.has(player):
+			for unit_id in orders_for_turn[player].keys():
+				var order_entry = orders_for_turn[player][unit_id]
+				if typeof(order_entry) == TYPE_DICTIONARY:
+					orders[unit_id] = order_entry.duplicate(true)
+				else:
+					orders[unit_id] = order_entry
+		player_orders[player] = orders
+	NetworkManager.player_orders = player_orders
+	committed_orders = player_orders.duplicate(true)
+	for player in ["player1", "player2"]:
+		for unit_id in player_orders.get(player, {}).keys():
+			var unit = unit_manager.get_unit_by_net_id(int(unit_id))
+			var order = player_orders[player][unit_id]
+			if unit == null:
+				_apply_replay_order_side_effects(null, order, player)
+				continue
+			_apply_order_flags(unit, order)
+			_apply_replay_order_side_effects(unit, order, player)
+
+func _apply_replay_order_side_effects(unit, order: Dictionary, player_id: String) -> void:
+	var otype = str(order.get("type", ""))
+	if otype == "ward_vision" and bool(order.get("auto_ward", false)):
+		var ward_tile = order.get("ward_tile", Vector2i(-9999, -9999))
+		if typeof(ward_tile) != TYPE_VECTOR2I:
+			ward_tile = _decode_log_vec2i(ward_tile)
+		var state = buildable_structures.get(ward_tile, {})
+		if not state.is_empty() and str(state.get("type", "")) == STRUCT_WARD and str(state.get("owner", "")) == player_id:
+			state["auto_ward"] = true
+			buildable_structures[ward_tile] = state
+	if unit == null:
+		return
+	if otype == "build" and not order.has("queue_path"):
+		unit.auto_build = true
+		unit.auto_build_type = str(order.get("structure_type", ""))
+	if order.has("queue_path"):
+		var queue_path = order.get("queue_path", [])
+		if queue_path is Array and queue_path.size() > 0:
+			unit.build_queue = queue_path
+			unit.build_queue_type = str(order.get("queue_type", STRUCT_ROAD))
+			_record_build_queue_last_order(unit, order)
+	if order.has("move_queue_path"):
+		var move_path = order.get("move_queue_path", [])
+		if move_path is Array and move_path.size() > 0:
+			unit.move_queue = move_path
+			_record_move_queue_last_order(unit, order)
+
+func _replay_apply_buy_event(event: Dictionary) -> void:
+	var unit_id = int(event.get("unit_net_id", -1))
+	if unit_id < 0:
+		return
+	if unit_manager.get_unit_by_net_id(unit_id) != null:
+		return
+	var player_id = str(event.get("player", ""))
+	var unit_type = str(event.get("unit_type", ""))
+	var cell = event.get("grid_pos", Vector2i(-9999, -9999))
+	var grid_pos = _decode_log_vec2i(cell)
+	var cost = int(event.get("cost", 0))
+	if player_id != "":
+		player_gold[player_id] = int(player_gold.get(player_id, 0)) - cost
+	if unit_type == "" or grid_pos.x <= -9990:
+		return
+	var unit = unit_manager.spawn_unit(unit_type, grid_pos, player_id, false, unit_id)
+	if unit != null:
+		unit.just_purchased = true
+	$GameBoardNode/FogOfWar._update_fog()
+
+func _replay_apply_undo_buy_event(event: Dictionary) -> void:
+	var unit_id = int(event.get("unit_net_id", -1))
+	if unit_id < 0:
+		return
+	var unit = unit_manager.get_unit_by_net_id(unit_id)
+	if unit == null:
+		return
+	var player_id = str(event.get("player", ""))
+	var refund = int(event.get("refund", 0))
+	if player_id != "":
+		player_gold[player_id] = int(player_gold.get(player_id, 0)) + refund
+	player_orders.get(player_id, {}).erase(unit_id)
+	committed_orders.get(player_id, {}).erase(unit_id)
+	NetworkManager.player_orders.get(player_id, {}).erase(unit_id)
+	$GameBoardNode.vacate(unit.grid_pos, unit)
+	_refresh_tile_after_unit_change(unit.grid_pos)
+	unit_manager.unit_by_net_id.erase(unit_id)
+	unit.queue_free()
+
+func _replay_run_execution_to_end() -> void:
+	while step_index < exec_steps.size():
+		resume_execution()
+
+func get_replay_metric_list() -> Array:
+	var metrics := [
+		{"id": "gold_income", "label": "Gold Income"},
+		{"id": "mana_income", "label": "Mana Income"},
+		{"id": "unit_value", "label": "Total Unit Value"},
+		{"id": "gold", "label": "Gold"},
+		{"id": "mana", "label": "Mana"}
+	]
+	var unit_types = replay_data.get("unit_types", {})
+	var keys = unit_types.keys()
+	keys.sort()
+	for unit_type in keys:
+		metrics.append({"id": "unit_count:%s" % unit_type, "label": "Units: %s" % unit_type})
+	return metrics
+
+func get_replay_series(metric_id: String, include_p1: bool, include_p2: bool) -> Dictionary:
+	var series := {}
+	var stats = replay_data.get("stats", {})
+	var turns = stats.keys()
+	turns.sort()
+	for pid in ["player1", "player2"]:
+		if (pid == "player1" and not include_p1) or (pid == "player2" and not include_p2):
+			continue
+		var points: Array = []
+		for t in turns:
+			var entry = stats.get(t, {})
+			var players = entry.get("players", {})
+			var pdata = players.get(pid, {})
+			var value = 0.0
+			if metric_id.begins_with("unit_count:"):
+				var unit_type = metric_id.split(":", false)[1]
+				var counts = pdata.get("unit_counts", {})
+				value = float(counts.get(unit_type, 0))
+			else:
+				value = float(pdata.get(metric_id, 0))
+			points.append(Vector2(float(t), value))
+		series[pid] = points
+	return series
+
 func _log_order_result(player_id: String, order: Dictionary, result: Dictionary) -> Dictionary:
 	_devlog({
 		"type": "order_result",
@@ -151,6 +715,16 @@ func _log_order_result(player_id: String, order: Dictionary, result: Dictionary)
 		"result": result
 	})
 	return result
+
+func log_remote_order_result(player_id: String, unit_net_id: int, order: Dictionary, ok: bool, reason: String) -> void:
+	_ensure_dev_log_open()
+	var result := {
+		"ok": ok,
+		"reason": reason,
+		"order": order,
+		"unit_net_id": unit_net_id
+	}
+	_log_order_result(player_id, order, result)
 
 func _log_buy_result(player_id: String, unit_type: String, grid_pos: Vector2i, result: Dictionary) -> Dictionary:
 	_devlog({
@@ -162,6 +736,16 @@ func _log_buy_result(player_id: String, unit_type: String, grid_pos: Vector2i, r
 	})
 	return result
 
+func log_remote_buy_result(player_id: String, unit_type: String, grid_pos: Vector2i, ok: bool, reason: String, cost: int, unit_net_id: int) -> void:
+	_ensure_dev_log_open()
+	var result := {
+		"ok": ok,
+		"reason": reason,
+		"cost": cost,
+		"unit_net_id": unit_net_id
+	}
+	_log_buy_result(player_id, unit_type, grid_pos, result)
+
 func _log_undo_buy_result(player_id: String, unit_net_id: int, result: Dictionary) -> Dictionary:
 	_devlog({
 		"type": "undo_buy_result",
@@ -171,20 +755,87 @@ func _log_undo_buy_result(player_id: String, unit_net_id: int, result: Dictionar
 	})
 	return result
 
+func log_remote_undo_buy_result(player_id: String, unit_net_id: int, ok: bool, reason: String, refund: int) -> void:
+	_ensure_dev_log_open()
+	var result := {
+		"ok": ok,
+		"reason": reason,
+		"refund": refund
+	}
+	_log_undo_buy_result(player_id, unit_net_id, result)
+
 func _devlog_snapshot(reason: String, extra: Dictionary = {}) -> void:
+	var state = get_state_snapshot(true)
+	var fog = $GameBoardNode.get_node_or_null("FogOfWar")
+	if fog != null and fog.visiblity != null:
+		state["fog_visibility"] = fog.visiblity.duplicate(true)
 	var payload := {
 		"type": "state_snapshot",
 		"reason": reason,
-		"state": get_state_snapshot(true)
+		"state": state
 	}
 	for key in extra.keys():
 		payload[key] = extra[key]
 	last_snapshot_turn = int(turn_number)
 	_devlog(payload)
 
+func _state_hash() -> int:
+	var state = _collect_state()
+	var json = JSON.stringify(_devlog_encode(state))
+	return int(json.hash())
+
+func _collect_turn_stats() -> Dictionary:
+	var unit_values := { "player1": 0, "player2": 0 }
+	var unit_counts := { "player1": {}, "player2": {} }
+	var all_units = $GameBoardNode.get_all_units()
+	for player in ["player1", "player2"]:
+		for unit in all_units.get(player, []):
+			if unit == null or unit.is_base or unit.is_tower:
+				continue
+			var cost = int(unit.cost)
+			unit_values[player] += cost
+			var unit_type = str(unit.unit_type)
+			var counts = unit_counts[player]
+			counts[unit_type] = int(counts.get(unit_type, 0)) + 1
+			unit_counts[player] = counts
+	return {
+		"turn": turn_number,
+		"players": {
+			"player1": {
+				"gold_income": int(player_income.get("player1", 0)),
+				"mana_income": int(player_mana_income.get("player1", 0)),
+				"gold": int(player_gold.get("player1", 0)),
+				"mana": int(player_mana.get("player1", 0)),
+				"unit_value": int(unit_values["player1"]),
+				"unit_counts": unit_counts["player1"]
+			},
+			"player2": {
+				"gold_income": int(player_income.get("player2", 0)),
+				"mana_income": int(player_mana_income.get("player2", 0)),
+				"gold": int(player_gold.get("player2", 0)),
+				"mana": int(player_mana.get("player2", 0)),
+				"unit_value": int(unit_values["player2"]),
+				"unit_counts": unit_counts["player2"]
+			}
+		}
+	}
+
+func _record_turn_stats() -> void:
+	if replay_mode:
+		return
+	if turn_number == last_stats_turn:
+		return
+	var stats = _collect_turn_stats()
+	_devlog({
+		"type": "turn_stats",
+		"stats": stats
+	})
+	last_stats_turn = turn_number
+
 func set_local_player_id(player_id: String) -> void:
 	local_player_id = player_id
 	var desired_suffix = "_%s.jsonl" % _devlog_player_id()
+	var rotated = false
 	if dev_log_file != null and dev_log_path.find(desired_suffix) == -1:
 		_devlog({
 			"type": "log_rotate",
@@ -192,7 +843,11 @@ func set_local_player_id(player_id: String) -> void:
 			"player_id": _devlog_player_id()
 		})
 		_close_dev_log()
+		rotated = true
 	_ensure_dev_log_open()
+	if rotated:
+		match_init_logged = false
+		_maybe_log_match_init()
 	_devlog({
 		"type": "player_id_set",
 		"player_id": _devlog_player_id()
@@ -225,10 +880,10 @@ func _pick_random_map_index(mode: String) -> int:
 			continue
 		candidates.append(i)
 	if candidates.size() == 0:
-		var fallback = rng.randi_range(0, map_data.size() - 1)
+		var fallback = _rng_randi_range(0, map_data.size() - 1, "map_pick_fallback")
 		_devlog({"type": "map_pick", "mode": normalized, "candidates": map_data.size(), "choice": fallback})
 		return fallback
-	var choice = candidates[rng.randi_range(0, candidates.size() - 1)]
+	var choice = candidates[_rng_randi_range(0, candidates.size() - 1, "map_pick_choice")]
 	_devlog({"type": "map_pick", "mode": normalized, "candidates": candidates.size(), "choice": choice})
 	return choice
 
@@ -1251,7 +1906,10 @@ func is_unit_hidden_for_viewer(unit, viewer_id: String) -> bool:
 	return unit.player_id != viewer_id
 
 func is_unit_hidden_to_local(unit) -> bool:
-	return is_unit_hidden_for_viewer(unit, local_player_id)
+	var viewer = local_player_id
+	if replay_mode:
+		viewer = get_replay_viewer_id()
+	return is_unit_hidden_for_viewer(unit, viewer)
 
 func _player_can_see_tile(player_id: String, tile: Vector2i) -> bool:
 	if player_id == "":
@@ -1553,7 +2211,7 @@ func _pick_weighted_index(weights: Array) -> int:
 		total += float(w)
 	if total <= 0.0:
 		return -1
-	var roll = rng.randf() * total
+	var roll = _rng_randf("weighted_pick") * total
 	_devlog({
 		"type": "rng_weighted_pick",
 		"weights": weights,
@@ -1790,7 +2448,7 @@ func _camp_gold_reward(pos: Vector2i) -> int:
 	return min_val + (abs(seed) % steps) * 5
 
 func _roll_camp_respawn() -> int:
-	var roll = rng.randi_range(camp_respawn_min, camp_respawn_max)
+	var roll = _rng_randi_range(camp_respawn_min, camp_respawn_max, "camp_respawn")
 	_devlog({
 		"type": "rng_camp_respawn",
 		"min": camp_respawn_min,
@@ -1800,7 +2458,7 @@ func _roll_camp_respawn() -> int:
 	return roll
 
 func _roll_dragon_respawn() -> int:
-	var roll = rng.randi_range(dragon_respawn_min, dragon_respawn_max)
+	var roll = _rng_randi_range(dragon_respawn_min, dragon_respawn_max, "dragon_respawn")
 	_devlog({
 		"type": "rng_dragon_respawn",
 		"min": dragon_respawn_min,
@@ -1858,6 +2516,18 @@ func _ready():
 	var quit_button = $GameOver.get_node_or_null("QuitToLobbyButton")
 	if quit_button != null:
 		quit_button.connect("pressed", Callable(self, "_on_game_over_quit_pressed"))
+	var replay_p1 = $GameOver.get_node_or_null("ReplayP1Button")
+	if replay_p1 != null:
+		replay_p1.connect("pressed", Callable(self, "_on_replay_p1_pressed"))
+	var replay_p2 = $GameOver.get_node_or_null("ReplayP2Button")
+	if replay_p2 != null:
+		replay_p2.connect("pressed", Callable(self, "_on_replay_p2_pressed"))
+	var replay_no_fog = $GameOver.get_node_or_null("ReplayNoFogButton")
+	if replay_no_fog != null:
+		replay_no_fog.connect("pressed", Callable(self, "_on_replay_no_fog_pressed"))
+	var replay_stats = $GameOver.get_node_or_null("ReplayStatsButton")
+	if replay_stats != null:
+		replay_stats.connect("pressed", Callable(self, "_on_replay_stats_pressed"))
 	
 	rng.randomize()
 	var mp = get_tree().get_multiplayer()
@@ -1868,22 +2538,16 @@ func _ready():
 		if NetworkManager.selected_map_index < 0:
 			NetworkManager.selected_map_index = _pick_random_map_index(NetworkManager.map_selection_mode)
 		if NetworkManager.match_seed < 0:
-			NetworkManager.match_seed = rng.randi_range(1, 2147483646)
+			NetworkManager.match_seed = _rng_randi_range(1, 2147483646, "match_seed_init")
 		map_index = NetworkManager.selected_map_index
-		_ensure_dev_log_open()
-		_devlog({
-			"type": "match_init",
-			"map_selection_mode": NetworkManager.map_selection_mode,
-			"selected_map_index": NetworkManager.selected_map_index,
-			"match_seed": NetworkManager.match_seed,
-			"custom_proc_params": NetworkManager.custom_proc_params
-		})
+		_maybe_log_match_init()
 	else:
 		if NetworkManager.selected_map_index < 0:
 			await NetworkManager.map_index_received
 		if NetworkManager.match_seed < 0:
 			await NetworkManager.match_seed_received
 		map_index = NetworkManager.selected_map_index
+		_maybe_log_match_init()
 	_load_map_by_index(map_index)
 	_spawn_neutral_units()
 	$GameBoardNode/FogOfWar._update_fog()
@@ -1932,7 +2596,7 @@ func _load_map_by_index(map_index: int) -> void:
 		var gen_rng = RandomNumberGenerator.new()
 		var seed_val = NetworkManager.match_seed
 		if seed_val <= 0:
-			seed_val = rng.randi_range(1, 2147483646)
+			seed_val = _rng_randi_range(1, 2147483646, "procedural_seed")
 		gen_rng.seed = seed_val + idx * 7919
 		_devlog({
 			"type": "map_generate",
@@ -2290,6 +2954,8 @@ func _refresh_fog_after_load() -> void:
 func _broadcast_state(force_apply: bool = false) -> void:
 	if not _is_host():
 		return
+	if replay_mode:
+		return
 	_clamp_unit_healths()
 	var state = get_state_snapshot(true)
 	if force_apply:
@@ -2415,15 +3081,21 @@ func _apply_units(units_data: Array) -> void:
 	unit_manager._next_net_id_neutral = max_neutral + 1
 
 func _on_state_snapshot_received(state: Dictionary) -> void:
+	if replay_mode:
+		return
 	apply_state(state)
 
 func _on_execution_paused_received(step_idx: int, neutral_step_idx: int) -> void:
+	if replay_mode:
+		return
 	if _is_host():
 		return
 	neutral_step_index = neutral_step_idx
 	emit_signal("execution_paused", step_idx)
 
 func _on_execution_complete_received() -> void:
+	if replay_mode:
+		return
 	if _is_host():
 		return
 	emit_signal("execution_complete")
@@ -2530,9 +3202,16 @@ func apply_state(state: Dictionary, force_host: bool = false) -> void:
 	refresh_mine_tiles()
 	_render_damage_log_for_local()
 	emit_signal("state_applied")
-	if turn_number % 5 == 0 and last_snapshot_turn != int(turn_number):
+	if not replay_mode and not _is_host() and current_phase == Phase.UPKEEP and turn_number != last_state_hash_turn:
 		_ensure_dev_log_open()
-		_devlog_snapshot("turn_interval", {"interval": 5, "source": "state_apply"})
+		_devlog({
+			"type": "state_hash",
+			"phase_name": "UPKEEP",
+			"value": _state_hash()
+		})
+		last_state_hash_turn = turn_number
+	if not replay_mode and not _is_host() and current_phase == Phase.UPKEEP and turn_number != last_stats_turn:
+		_record_turn_stats()
 
 func _reset_map_state() -> void:
 	if terrain_overlay != null:
@@ -2594,6 +3273,7 @@ func _on_map_index_received(map_index: int) -> void:
 		return
 	if map_index == current_map_index:
 		return
+	_maybe_log_match_init()
 	_reset_map_state()
 	_load_map_by_index(map_index)
 	_spawn_neutral_units()
@@ -2606,6 +3286,7 @@ func _on_match_seed_received(seed_value: int) -> void:
 	if seed_value == NetworkManager.match_seed:
 		return
 	NetworkManager.match_seed = seed_value
+	_maybe_log_match_init()
 
 func _spawn_camp_at(pos: Vector2i) -> Node:
 	var unit = unit_manager.spawn_unit(CAMP_ARCHER_TYPE, pos, NEUTRAL_PLAYER_ID, false)
@@ -2677,6 +3358,8 @@ func _tick_neutral_respawns() -> void:
 	update_neutral_markers()
 
 func start_game() -> void:
+	host_replay_log_path = ""
+	_maybe_log_match_init()
 	call_deferred("_game_loop")
 
 func update_neutral_markers() -> void:
@@ -2709,10 +3392,55 @@ func _add_neutral_marker(root: Node2D, pos: Vector2i, text: String) -> void:
 	root.add_child(label)
 
 func _show_game_over(player_id: String) -> void:
+	game_over = true
 	$GameOver/GameOverLabel.add_theme_font_size_override("font_size", 100)
 	$GameOver/GameOverLabel.text = "%s lost!" % player_id
 	$GameOver.visible = true
 	$UI.visible = false
+
+func _set_game_over_controls_visible(visible: bool) -> void:
+	var nodes = [
+		"GameOverLabel",
+		"QuitToLobbyButton",
+		"ReplayP1Button",
+		"ReplayP2Button",
+		"ReplayNoFogButton",
+		"ReplayStatsButton"
+	]
+	for name in nodes:
+		var node = $GameOver.get_node_or_null(name)
+		if node != null:
+			node.visible = visible
+
+func _start_replay_from_game_over(fog_mode: String) -> void:
+	var replay_path = _get_replay_source_path()
+	if replay_path == "":
+		return
+	if not start_replay(replay_path, fog_mode):
+		return
+	_set_game_over_controls_visible(false)
+	if $UI != null:
+		$UI.visible = true
+		if $UI.has_method("_enter_replay_mode"):
+			$UI._enter_replay_mode()
+
+func _on_replay_p1_pressed() -> void:
+	_start_replay_from_game_over("player1")
+
+func _on_replay_p2_pressed() -> void:
+	_start_replay_from_game_over("player2")
+
+func _on_replay_no_fog_pressed() -> void:
+	_start_replay_from_game_over("none")
+
+func _on_replay_stats_pressed() -> void:
+	var replay_path = _get_replay_source_path()
+	if replay_data.is_empty() and replay_path != "":
+		replay_data = _load_replay_log(replay_path)
+	if $UI != null:
+		$UI.visible = true
+		if $UI.has_method("_show_replay_stats"):
+			$UI._show_replay_stats()
 
 func _on_game_over_quit_pressed() -> void:
 	if has_node("UI") and $UI.has_method("_on_cancel_game_pressed"):
@@ -2725,13 +3453,25 @@ func end_game(player_id: String) -> void:
 	_show_game_over(player_id)
 	if _is_host():
 		NetworkManager.broadcast_game_over(player_id)
+		if dev_log_file != null:
+			dev_log_file.flush()
+		if dev_log_path != "" and NetworkManager.has_method("send_replay_log_to_client"):
+			NetworkManager.send_replay_log_to_client(dev_log_path)
 	print("the game has ended")
+
+func concede(player_id: String) -> void:
+	if not _is_host():
+		return
+	end_game(player_id)
 
 func reset_to_lobby() -> void:
 	_devlog({
 		"type": "match_end"
 	})
 	_close_dev_log()
+	host_replay_log_path = ""
+	game_over = false
+	match_init_logged = false
 	_reset_map_state()
 	current_map_index = -1
 	turn_number = 0
@@ -2741,6 +3481,10 @@ func reset_to_lobby() -> void:
 	step_index = 0
 	neutral_step_index = -1
 	last_snapshot_turn = -1
+	last_state_hash_turn = -1
+	rng_replay_enabled = false
+	rng_replay_index = 0
+	rng_replay.clear()
 	player_gold = { "player1": 25, "player2": 25 }
 	player_income = { "player1": 0, "player2": 0 }
 	player_mana = { "player1": 0, "player2": 0 }
@@ -2756,6 +3500,12 @@ func reset_to_lobby() -> void:
 	player_orders = { "player1": {}, "player2": {} }
 	committed_orders = { "player1": {}, "player2": {} }
 	local_player_id = ""
+	replay_mode = false
+	replay_phase_mode = false
+	replay_data = {}
+	replay_target_turn = 0
+	replay_target_phase = 2
+	replay_fog_mode = ""
 	if NetworkManager != null:
 		NetworkManager.selected_map_index = -1
 		NetworkManager.match_seed = -1
@@ -2770,6 +3520,8 @@ func reset_to_lobby() -> void:
 # Main loop: Upkeep → Orders → Execution → increment → loop
 # --------------------------------------------------------
 func _game_loop() -> void:
+	if replay_mode:
+		return
 	_ensure_map_loaded()
 	turn_number += 1
 	print("\n===== TURN %d =====" % turn_number)
@@ -2778,8 +3530,6 @@ func _game_loop() -> void:
 		"type": "turn_start",
 		"rng_seed": rng.seed
 	})
-	if turn_number % 5 == 0:
-		_devlog_snapshot("turn_interval", {"interval": 5})
 	save_game_slot(-1, true)
 	NetworkManager._orders_submitted = { "player1": false, "player2": false }
 	player_orders = NetworkManager.player_orders
@@ -2798,12 +3548,10 @@ func _ensure_map_loaded() -> void:
 	if map_data.size() == 0:
 		push_error("TurnManager: map_data is empty.")
 		return
-	var map_rng := RandomNumberGenerator.new()
-	map_rng.randomize()
 	if NetworkManager.selected_map_index < 0:
 		NetworkManager.selected_map_index = _pick_random_map_index(NetworkManager.map_selection_mode)
 	if NetworkManager.match_seed < 0:
-		NetworkManager.match_seed = map_rng.randi_range(1, 2147483646)
+		NetworkManager.match_seed = _rng_randi_range(1, 2147483646, "match_seed_fallback")
 	var map_index = NetworkManager.selected_map_index
 	_load_map_by_index(map_index)
 	_spawn_neutral_units()
@@ -2891,6 +3639,14 @@ func _do_upkeep() -> void:
 	$UI/DamagePanel.visible = true
 	$GameBoardNode/OrderReminderMap.highlight_unordered_units(local_player_id)
 	_broadcast_state()
+	if not replay_mode:
+		_devlog({
+			"type": "state_hash",
+			"phase_name": "UPKEEP",
+			"value": _state_hash()
+		})
+		last_state_hash_turn = turn_number
+	_record_turn_stats()
 
 func _apply_auto_heal_orders(all_units: Dictionary) -> void:
 	for player in ["player1", "player2"]:
@@ -3531,6 +4287,9 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 		"order": {},
 		"unit_net_id": -1
 	}
+	if game_over:
+		result["reason"] = "game_over"
+		return _log_order_result(player_id, order, result)
 	if not _is_host():
 		result["reason"] = "not_host"
 		return _log_order_result(player_id, order, result)
@@ -4369,7 +5128,7 @@ func _assign_last_damaged_by(target, dmg_map: Dictionary, target_net_id: int) ->
 		target.last_damaged_by = tied[0]
 		return
 	# TODO: Replace random tie-break with deterministic logic.
-	var idx = rng.randi_range(0, tied.size() - 1)
+	var idx = _rng_randi_range(0, tied.size() - 1, "damage_tie_break")
 	_devlog({
 		"type": "rng_damage_tie_break",
 		"candidates": tied,
@@ -6058,20 +6817,21 @@ func _run_next_step():
 	$GameBoardNode/FogOfWar._update_fog()
 	if step_index >= exec_steps.size():
 		emit_signal("execution_complete")
-		if _is_host():
+		if _is_host() and not replay_mode:
 			_broadcast_state()
 			NetworkManager.broadcast_execution_complete()
-		if get_tree().get_multiplayer().is_server():
+		if get_tree().get_multiplayer().is_server() and not replay_mode:
 			call_deferred("_game_loop")
 		return
 	exec_steps[step_index].call()
-	_broadcast_state()
+	if not replay_mode:
+		_broadcast_state()
 	emit_signal("execution_paused", step_index)
-	if _is_host():
+	if _is_host() and not replay_mode:
 		NetworkManager.broadcast_execution_paused(step_index, neutral_step_index)
 
 func resume_execution():
-	if not _is_host():
+	if not _is_host() and not replay_mode:
 		return
 	step_index += 1
 	_run_next_step()
@@ -6113,6 +6873,9 @@ func buy_unit(player: String, unit_type: String, grid_pos: Vector2i) -> Dictiona
 		"cost": 0,
 		"unit_net_id": -1
 	}
+	if game_over:
+		result["reason"] = "game_over"
+		return _log_buy_result(player, unit_type, grid_pos, result)
 	if not _is_host():
 		result["reason"] = "not_host"
 		return _log_buy_result(player, unit_type, grid_pos, result)
@@ -6175,6 +6938,9 @@ func undo_buy_unit(player_id: String, unit_net_id: int) -> Dictionary:
 		"reason": "",
 		"refund": 0
 	}
+	if game_over:
+		result["reason"] = "game_over"
+		return _log_undo_buy_result(player_id, unit_net_id, result)
 	if not _is_host():
 		result["reason"] = "not_host"
 		return _log_undo_buy_result(player_id, unit_net_id, result)

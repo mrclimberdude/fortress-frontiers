@@ -110,17 +110,38 @@ func _update_fog():
 	var terrain_map = $"../TerrainMap"
 	var hex_map = $"../HexTileMap"
 	var tm_root = $"../.."
+	var viewer_id = tm_root.local_player_id if tm_root != null else ""
+	var no_fog = false
+	if tm_root != null and tm_root.has_method("get_replay_viewer_id"):
+		viewer_id = tm_root.get_replay_viewer_id()
+	if tm_root != null and tm_root.has_method("is_replay_fog_disabled"):
+		no_fog = tm_root.is_replay_fog_disabled()
 	var neutral_root = _get_neutral_memory_root()
 	var spawn_tower_cells := _spawn_tower_cell_map(tm_root)
 	if neutral_root != null:
 		for child in neutral_root.get_children():
 			child.queue_free()
+	if no_fog:
+		clear()
+		if explored != null:
+			explored.clear()
+		for unit in all_units:
+			if unit != null:
+				unit.visible = true
+		for structure in $"..".get_all_structures():
+			if structure != null and is_instance_valid(structure):
+				structure.visible = true
+		if tm_root != null and tm_root.has_method("update_neutral_markers"):
+			tm_root.update_neutral_markers()
+		if tm_root != null and tm_root.has_method("refresh_structure_markers"):
+			tm_root.refresh_structure_markers()
+		return
 	if terrain_map != null and explored != null:
 		if explored.tile_set != terrain_map.tile_set:
 			explored.tile_set = terrain_map.tile_set
 	# make all non-local units invisible (including neutrals)
 	for unit in all_units:
-		if unit.player_id != tm_root.local_player_id:
+		if unit.player_id != viewer_id:
 			unit.visible = false
 	for structure in $"..".get_all_structures():
 		if structure == null or not is_instance_valid(structure):
@@ -160,7 +181,7 @@ func _update_fog():
 			tm_root.update_structure_memory_for(player, visiblity[player])
 		if tm_root != null and tm_root.has_method("update_neutral_tile_memory_for"):
 			tm_root.update_neutral_tile_memory_for(player, visiblity[player])
-		if player == tm_root.local_player_id:
+		if player == viewer_id:
 			var neutral_memory = {}
 			if tm_root != null and tm_root.has_method("_get_neutral_tile_memory"):
 				neutral_memory = tm_root._get_neutral_tile_memory(player)
@@ -183,7 +204,7 @@ func _update_fog():
 							structure.z_index = 99
 					var unit = $"..".get_unit_at(cell)
 					if unit != null:
-						if unit.player_id != $"../..".local_player_id:
+						if unit.player_id != viewer_id:
 							var pid = ""
 							var structure_unit = $"..".get_structure_unit_at(cell)
 							if structure_unit != null:
