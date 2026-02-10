@@ -7,8 +7,15 @@ var received_map_data: Array = []
 var _orders_submitted := { "player1": false, "player2": false }
 var player_orders := {"player1": {}, "player2": {}}  # map player_id → orders list
 
+const MAX_PLAYERS: int = 6
+
 var server_peer_id: int
-var client_peer_id: int
+var client_peer_ids: Array = []
+var local_username: String = ""
+var local_player_id: String = ""
+var lobby_slot_count: int = 2
+var lobby_slots: Array = []
+var peer_id_to_player_id: Dictionary = {}
 var mp
 var selected_map_index: int = -1
 var map_selection_mode: String = "random_normal"
@@ -25,6 +32,7 @@ signal orders_cancelled(player_id: String)
 signal map_index_received(map_index: int)
 signal match_seed_received(match_seed: int)
 signal custom_proc_params_received(params: Dictionary)
+signal map_selection_changed()
 signal state_snapshot_received(state: Dictionary)
 signal execution_paused_received(step_idx: int, neutral_step_idx: int)
 signal execution_complete_received()
@@ -32,6 +40,8 @@ signal game_over_received(player_id: String)
 signal buy_result(player_id: String, unit_type: String, grid_pos: Vector2i, ok: bool, reason: String, cost: int, unit_net_id: int)
 signal undo_result(player_id: String, unit_net_id: int, ok: bool, reason: String, refund: int)
 signal order_result(player_id: String, unit_net_id: int, order: Dictionary, ok: bool, reason: String)
+signal lobby_updated(slots: Array, slot_count: int)
+signal player_id_assigned(player_id: String)
 
 func _ready() -> void:
 	print("NetworkManager _ready() fired")
@@ -44,11 +54,135 @@ func _ready() -> void:
 func _ignore_rpc_in_replay() -> bool:
 	return turn_mgr != null and bool(turn_mgr.get("replay_mode"))
 
+func is_host() -> bool:
+	var mp = get_tree().get_multiplayer()
+	return mp != null and (mp.multiplayer_peer == null or mp.is_server())
+
+func set_local_username(name: String) -> void:
+	local_username = name.strip_edges()
+
+func _reset_lobby_state() -> void:
+	lobby_slots.clear()
+	peer_id_to_player_id.clear()
+	client_peer_ids.clear()
+	lobby_slot_count = 2
+	local_player_id = ""
+
+func _init_lobby_slots() -> void:
+	lobby_slots.clear()
+	peer_id_to_player_id.clear()
+	for i in range(lobby_slot_count):
+		lobby_slots.append({
+			"peer_id": 0,
+			"player_id": "player%d" % (i + 1),
+			"username": ""
+		})
+	_assign_host_slot()
+	_emit_lobby_update()
+
+func _assign_host_slot() -> void:
+	if not is_host():
+		return
+	if lobby_slots.is_empty():
+		return
+	lobby_slots[0]["peer_id"] = server_peer_id
+	lobby_slots[0]["username"] = local_username if local_username != "" else "Host"
+	peer_id_to_player_id[server_peer_id] = lobby_slots[0]["player_id"]
+	local_player_id = lobby_slots[0]["player_id"]
+	if turn_mgr != null and turn_mgr.has_method("set_local_player_id"):
+		turn_mgr.set_local_player_id(local_player_id)
+
+func _emit_lobby_update() -> void:
+	var payload: Array = []
+	for slot in lobby_slots:
+		payload.append({
+			"player_id": slot.get("player_id", ""),
+			"username": slot.get("username", ""),
+			"occupied": int(slot.get("peer_id", 0)) != 0
+		})
+	emit_signal("lobby_updated", payload, lobby_slot_count)
+	_broadcast_lobby_update(payload)
+
+func is_lobby_full() -> bool:
+	if lobby_slots.is_empty():
+		return false
+	for slot in lobby_slots:
+		var occupied = false
+		if slot.has("peer_id"):
+			occupied = int(slot.get("peer_id", 0)) != 0
+		else:
+			occupied = bool(slot.get("occupied", false))
+		if not occupied:
+			return false
+	return true
+
+func _broadcast_lobby_update(payload: Array) -> void:
+	if not is_host():
+		return
+	for peer_id in client_peer_ids:
+		rpc_id(peer_id, "rpc_lobby_update", lobby_slot_count, payload)
+
+func set_lobby_slot_count(count: int) -> void:
+	if not is_host():
+		return
+	var clamped = int(clamp(count, 2, MAX_PLAYERS))
+	if clamped == lobby_slot_count:
+		return
+	if clamped < lobby_slot_count:
+		var mp_local = get_tree().get_multiplayer()
+		for idx in range(lobby_slot_count - 1, clamped - 1, -1):
+			if idx >= 0 and idx < lobby_slots.size():
+				var peer_id = int(lobby_slots[idx].get("peer_id", 0))
+				if peer_id != 0 and mp_local != null and mp_local.multiplayer_peer != null:
+					peer_id_to_player_id.erase(peer_id)
+					if client_peer_ids.has(peer_id):
+						client_peer_ids.erase(peer_id)
+					mp_local.multiplayer_peer.disconnect_peer(peer_id)
+		lobby_slots.resize(clamped)
+	else:
+		for idx in range(lobby_slot_count, clamped):
+			lobby_slots.append({
+				"peer_id": 0,
+				"player_id": "player%d" % (idx + 1),
+				"username": ""
+			})
+	lobby_slot_count = clamped
+	_emit_lobby_update()
+
+func _clear_peer_slot(peer_id: int) -> void:
+	for slot in lobby_slots:
+		if int(slot.get("peer_id", 0)) == peer_id:
+			slot["peer_id"] = 0
+			slot["username"] = ""
+			peer_id_to_player_id.erase(peer_id)
+			_emit_lobby_update()
+			return
+
+func _assign_peer_to_slot(peer_id: int, username: String) -> void:
+	for slot in lobby_slots:
+		if int(slot.get("peer_id", 0)) == peer_id:
+			slot["username"] = username
+			peer_id_to_player_id[peer_id] = slot.get("player_id", "")
+			_emit_lobby_update()
+			return
+	for slot in lobby_slots:
+		if int(slot.get("peer_id", 0)) == 0:
+			slot["peer_id"] = peer_id
+			slot["username"] = username
+			peer_id_to_player_id[peer_id] = slot.get("player_id", "")
+			rpc_id(peer_id, "rpc_set_player_id", peer_id_to_player_id[peer_id])
+			_emit_lobby_update()
+			return
+	var mp_local = get_tree().get_multiplayer()
+	if mp_local != null and mp_local.multiplayer_peer != null:
+		mp_local.multiplayer_peer.disconnect_peer(peer_id)
 func host_game(port: int) -> void:
 	#print("NetworkManager.host_game called with port:", port)
 	var peer = ENetMultiplayerPeer.new()
-	peer.create_server(port, 2)             # Port and max 2 connections (host + one client)
+	peer.create_server(port, MAX_PLAYERS - 1)
 	get_tree().get_multiplayer().multiplayer_peer = peer
+	server_peer_id = get_tree().get_multiplayer().get_unique_id()
+	_init_lobby_slots()
 	print("Hosting game on port %d" % port)
 
 func join_game(ip: String, port: int) -> void:
@@ -60,28 +194,38 @@ func join_game(ip: String, port: int) -> void:
 
 func close_connection():
 	get_tree().get_multiplayer().multiplayer_peer.close()
+	_reset_lobby_state()
 
 func _on_peer_connected(id: int) -> void:
 	mp = get_tree().get_multiplayer()
 	set_gold()
 	if mp.is_server():
 		# Host sees a new client
-		client_peer_id = id
-		print("Client joined as peer %d - starting game!" % id)
+		if not client_peer_ids.has(id):
+			client_peer_ids.append(id)
+		print("Client joined as peer %d" % id)
 		if custom_proc_params.size() > 0:
 			rpc_id(id, "rpc_set_custom_proc_params", custom_proc_params)
+		if map_selection_mode != "":
+			rpc_id(id, "rpc_set_map_selection_mode", map_selection_mode)
 		if selected_map_index >= 0:
 			rpc_id(id, "rpc_set_map_index", selected_map_index)
 		if match_seed >= 0:
 			rpc_id(id, "rpc_set_match_seed", match_seed)
-		turn_mgr.start_game()
 	else:
 		# Client sees the host
 		server_peer_id = id
 		print("Connected to host peer %d" % id)
+		if local_username == "":
+			local_username = "Player"
+		rpc_id(server_peer_id, "rpc_register_username", local_username)
 
 func _on_peer_disconnected(id: int) -> void:
 	print("Peer disconnected with ID %d" % id)
+	if client_peer_ids.has(id):
+		client_peer_ids.erase(id)
+	if is_host():
+		_clear_peer_slot(id)
 
 # RPC to receive the map data on clients
 @rpc("any_peer", "reliable")
@@ -96,8 +240,16 @@ func rpc_set_map_index(map_index: int) -> void:
 		return
 	selected_map_index = map_index
 	emit_signal("map_index_received", map_index)
+	emit_signal("map_selection_changed")
 	if turn_mgr != null and turn_mgr.has_method("_maybe_log_match_init"):
 		turn_mgr._maybe_log_match_init()
+
+@rpc("any_peer", "reliable")
+func rpc_set_map_selection_mode(mode: String) -> void:
+	if _ignore_rpc_in_replay():
+		return
+	map_selection_mode = mode
+	emit_signal("map_selection_changed")
 
 @rpc("any_peer", "reliable")
 func rpc_set_match_seed(seed_value: int) -> void:
@@ -115,11 +267,72 @@ func rpc_set_custom_proc_params(params: Dictionary) -> void:
 	custom_proc_params = params.duplicate(true)
 	emit_signal("custom_proc_params_received", custom_proc_params)
 
+@rpc("any_peer", "reliable")
+func rpc_register_username(username: String) -> void:
+	if _ignore_rpc_in_replay():
+		return
+	var mp_local = get_tree().get_multiplayer()
+	if mp_local == null or not mp_local.is_server():
+		return
+	var sender = multiplayer.get_remote_sender_id()
+	var clean_name = username.strip_edges()
+	if clean_name == "":
+		clean_name = "Player"
+	_assign_peer_to_slot(sender, clean_name)
+
+@rpc("any_peer", "reliable")
+func rpc_set_player_id(player_id: String) -> void:
+	if _ignore_rpc_in_replay():
+		return
+	var mp_local = get_tree().get_multiplayer()
+	if mp_local != null and mp_local.is_server():
+		return
+	local_player_id = player_id
+	if turn_mgr != null and turn_mgr.has_method("set_local_player_id"):
+		turn_mgr.set_local_player_id(player_id)
+	emit_signal("player_id_assigned", player_id)
+
+@rpc("any_peer", "reliable")
+func rpc_lobby_update(slot_count: int, slots_payload: Array) -> void:
+	if _ignore_rpc_in_replay():
+		return
+	var mp_local = get_tree().get_multiplayer()
+	if mp_local != null and mp_local.is_server():
+		return
+	lobby_slot_count = slot_count
+	lobby_slots = []
+	for slot in slots_payload:
+		if slot is Dictionary:
+			lobby_slots.append({
+				"player_id": slot.get("player_id", ""),
+				"username": slot.get("username", ""),
+				"occupied": bool(slot.get("occupied", false))
+			})
+	emit_signal("lobby_updated", lobby_slots, lobby_slot_count)
+
+@rpc("any_peer", "reliable")
+func rpc_start_game() -> void:
+	if _ignore_rpc_in_replay():
+		return
+	var mp_local = get_tree().get_multiplayer()
+	if mp_local != null and mp_local.is_server():
+		return
+	if turn_mgr != null and turn_mgr.has_method("start_game"):
+		turn_mgr.start_game()
+
 func set_custom_proc_params(params: Dictionary) -> void:
 	custom_proc_params = params.duplicate(true)
 	var mp = get_tree().get_multiplayer()
-	if mp != null and mp.is_server() and client_peer_id != 0:
-		rpc_id(client_peer_id, "rpc_set_custom_proc_params", custom_proc_params)
+	if mp != null and mp.is_server():
+		for peer_id in client_peer_ids:
+			rpc_id(peer_id, "rpc_set_custom_proc_params", custom_proc_params)
+
+func broadcast_map_selection() -> void:
+	if not is_host():
+		return
+	for peer_id in client_peer_ids:
+		rpc_id(peer_id, "rpc_set_map_selection_mode", map_selection_mode)
+		rpc_id(peer_id, "rpc_set_map_index", selected_map_index)
 
 @rpc("any_peer", "reliable")
 func rpc_state_snapshot(state: Dictionary) -> void:
@@ -281,14 +494,14 @@ func broadcast_state(state: Dictionary) -> void:
 	if not mp.is_server():
 		return
 	var force_apply = bool(state.get("force_apply", false))
-	if client_peer_id > 0:
-		var viewer = _peer_id_to_player_id(client_peer_id)
+	for peer_id in client_peer_ids:
+		var viewer = _peer_id_to_player_id(peer_id)
 		var snapshot = state
 		if viewer != "" and turn_mgr.has_method("get_state_snapshot_for"):
 			snapshot = turn_mgr.get_state_snapshot_for(viewer)
 			if force_apply:
 				snapshot["force_apply"] = true
-		rpc_id(client_peer_id, "rpc_state_snapshot", snapshot)
+		rpc_id(peer_id, "rpc_state_snapshot", snapshot)
 
 func request_state() -> void:
 	var mp = get_tree().get_multiplayer()
@@ -378,8 +591,24 @@ func broadcast_game_over(player_id: String) -> void:
 		return
 	if not mp.is_server():
 		return
-	if client_peer_id > 0:
-		rpc_id(client_peer_id, "rpc_game_over", player_id)
+	for peer_id in client_peer_ids:
+		rpc_id(peer_id, "rpc_game_over", player_id)
+
+func start_game_for_all() -> void:
+	var mp = get_tree().get_multiplayer()
+	if mp == null or mp.multiplayer_peer == null:
+		return
+	if not mp.is_server():
+		return
+	if not is_lobby_full():
+		return
+	if turn_mgr != null and turn_mgr.has_method("_ensure_map_loaded"):
+		turn_mgr._ensure_map_loaded()
+	broadcast_map_selection()
+	if turn_mgr != null and turn_mgr.has_method("start_game"):
+		turn_mgr.start_game()
+	for peer_id in client_peer_ids:
+		rpc_id(peer_id, "rpc_start_game")
 
 @rpc("any_peer", "reliable")
 func rpc_game_over(player_id: String) -> void:
@@ -398,7 +627,7 @@ func send_replay_log_to_client(path: String) -> void:
 		return
 	if not mp.is_server():
 		return
-	if client_peer_id <= 0:
+	if client_peer_ids.is_empty():
 		return
 	if path == "":
 		return
@@ -410,13 +639,14 @@ func send_replay_log_to_client(path: String) -> void:
 		return
 	var base_name = _replay_filename_from_path(path)
 	var total_chunks = int((compressed.size() + REPLAY_CHUNK_SIZE - 1) / REPLAY_CHUNK_SIZE)
-	rpc_id(client_peer_id, "rpc_replay_log_begin", base_name, total_chunks, raw.size())
-	for idx in range(total_chunks):
-		var start = idx * REPLAY_CHUNK_SIZE
-		var end = min(start + REPLAY_CHUNK_SIZE, compressed.size())
-		var chunk = compressed.slice(start, end)
-		rpc_id(client_peer_id, "rpc_replay_log_chunk", base_name, idx, chunk)
-	rpc_id(client_peer_id, "rpc_replay_log_end", base_name)
+	for peer_id in client_peer_ids:
+		rpc_id(peer_id, "rpc_replay_log_begin", base_name, total_chunks, raw.size())
+		for idx in range(total_chunks):
+			var start = idx * REPLAY_CHUNK_SIZE
+			var end = min(start + REPLAY_CHUNK_SIZE, compressed.size())
+			var chunk = compressed.slice(start, end)
+			rpc_id(peer_id, "rpc_replay_log_chunk", base_name, idx, chunk)
+		rpc_id(peer_id, "rpc_replay_log_end", base_name)
 
 @rpc("any_peer", "reliable")
 func rpc_replay_log_begin(name: String, total_chunks: int, original_size: int) -> void:
@@ -693,12 +923,11 @@ func rpc_orders_cancelled(player_id: String):
 
 # Helper to translate a peer ID into your player‐ID string
 func _peer_id_to_player_id(peer_id: int) -> String:
+	if peer_id_to_player_id.has(peer_id):
+		return str(peer_id_to_player_id[peer_id])
 	if peer_id == server_peer_id:
 		return "player1"
-	elif peer_id == client_peer_id:
-		return "player2"
-	else:
-		return ""
+	return ""
 
 @rpc("any_peer", "reliable")
 func rpc_step_ready(step_idx: int) -> void:

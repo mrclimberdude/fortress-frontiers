@@ -94,6 +94,13 @@ var replay_metric_ids: Array = []
 @onready var finish_move_button = $Panel/FinishMoveButton
 @onready var map_select = $MapSelect as MenuButton
 @onready var map_label = $MapLabel as Label
+@onready var username_label = $UsernameLabel as Label
+@onready var username_edit = $UsernameLineEdit as LineEdit
+@onready var lobby_panel = $LobbyPanel as Panel
+@onready var lobby_players = $LobbyPanel/VBoxContainer/PlayersList as VBoxContainer
+@onready var lobby_add_button = $LobbyPanel/VBoxContainer/SlotsRow/AddSlotButton as Button
+@onready var lobby_remove_button = $LobbyPanel/VBoxContainer/SlotsRow/RemoveSlotButton as Button
+@onready var lobby_start_button = $LobbyPanel/VBoxContainer/StartGameButton as Button
 @onready var proc_custom_panel = $ProcCustomPanel as Panel
 @onready var proc_custom_size = $ProcCustomPanel/VBoxContainer/Grid/SizeOption as OptionButton
 @onready var proc_custom_columns = $ProcCustomPanel/VBoxContainer/Grid/ColumnsEdit as LineEdit
@@ -138,6 +145,9 @@ const GlobalVisionIcon = preload("res://assets/HK-Heightend Sensory Input v2/HSI
 const SAVE_SLOT_COUNT_UI: int = 3
 const ORDER_ICON_Z: int = 12
 const DAMAGE_PANEL_MIN_SIZE: Vector2 = Vector2(220, 120)
+const USERNAME_SAVE_PATH: String = "user://user_settings.cfg"
+
+var lobby_slots_payload: Array = []
 
 const MENU_ID_SAVE: int = 1
 const MENU_ID_LOAD: int = 2
@@ -210,6 +220,8 @@ func _ready():
 	var cam = get_viewport().get_camera_2d()
 	if cam != null:
 		_default_camera_zoom = cam.zoom
+	if username_edit != null:
+		username_edit.text = _load_username()
 	
 	$HostButton.connect("pressed",
 					Callable(self, "_on_host_pressed"))
@@ -217,8 +229,24 @@ func _ready():
 					Callable(self, "_on_join_pressed"))
 	$CancelGameButton.connect("pressed",
 					Callable(self, "_on_cancel_game_pressed"))
+	if lobby_add_button != null:
+		lobby_add_button.connect("pressed",
+					Callable(self, "_on_add_slot_pressed"))
+	if lobby_remove_button != null:
+		lobby_remove_button.connect("pressed",
+					Callable(self, "_on_remove_slot_pressed"))
+	if lobby_start_button != null:
+		lobby_start_button.connect("pressed",
+					Callable(self, "_on_start_game_pressed"))
+	NetworkManager.connect("lobby_updated",
+					Callable(self, "_on_lobby_updated"))
+	NetworkManager.connect("player_id_assigned",
+					Callable(self, "_on_player_id_assigned"))
+	NetworkManager.connect("map_selection_changed",
+					Callable(self, "_on_map_selection_changed"))
 	_init_map_select()
 	_init_proc_custom_panel()
+	_show_main_menu()
 	
 	# dev mode connections
 	dev_mode_toggle.connect("toggled",
@@ -855,6 +883,8 @@ func _set_map_select_label(id: int) -> void:
 func _on_map_select_menu_pressed(id: int) -> void:
 	if id < 0:
 		return
+	if not NetworkManager.is_host():
+		return
 	_set_map_select_label(id)
 	_apply_map_selection(id)
 
@@ -870,32 +900,46 @@ func _apply_map_selection(id: int) -> void:
 	if id == MAP_SELECT_RANDOM_ANY:
 		NetworkManager.selected_map_index = -1
 		NetworkManager.map_selection_mode = "random_any"
+		if NetworkManager.is_host():
+			NetworkManager.broadcast_map_selection()
 		return
 	if id == MAP_SELECT_RANDOM_NORMAL:
 		NetworkManager.selected_map_index = -1
 		NetworkManager.map_selection_mode = "random_normal"
+		if NetworkManager.is_host():
+			NetworkManager.broadcast_map_selection()
 		return
 	if id == MAP_SELECT_RANDOM_THEMED:
 		NetworkManager.selected_map_index = -1
 		NetworkManager.map_selection_mode = "random_themed"
+		if NetworkManager.is_host():
+			NetworkManager.broadcast_map_selection()
 		return
 	if id == MAP_SELECT_RANDOM_SMALL:
 		NetworkManager.selected_map_index = -1
 		NetworkManager.map_selection_mode = "random_small"
+		if NetworkManager.is_host():
+			NetworkManager.broadcast_map_selection()
 		return
 	if id == MAP_SELECT_PROCEDURAL:
 		NetworkManager.selected_map_index = -1
 		NetworkManager.map_selection_mode = "procedural"
+		if NetworkManager.is_host():
+			NetworkManager.broadcast_map_selection()
 		return
 	if id == MAP_SELECT_PROCEDURAL_CUSTOM:
 		NetworkManager.selected_map_index = -1
 		NetworkManager.map_selection_mode = "procedural_custom"
+		if NetworkManager.is_host():
+			NetworkManager.broadcast_map_selection()
 		return
 	if id >= MAP_SELECT_MAP_BASE:
 		var idx = id - MAP_SELECT_MAP_BASE
 		if idx >= 0 and idx < turn_mgr.map_data.size():
 			NetworkManager.selected_map_index = idx
 			NetworkManager.map_selection_mode = "fixed"
+			if NetworkManager.is_host():
+				NetworkManager.broadcast_map_selection()
 
 func _sync_menu_checks() -> void:
 	if menu_popup == null:
@@ -1910,59 +1954,166 @@ func _on_order_result(player_id: String, unit_net_id: int, order: Dictionary, ok
 		_refresh_resource_labels()
 	else:
 		status_lbl.text = _order_error_message(reason)
-	
+
+func _load_username() -> String:
+	var cfg = ConfigFile.new()
+	if cfg.load(USERNAME_SAVE_PATH) == OK:
+		return str(cfg.get_value("user", "name", "")).strip_edges()
+	return ""
+
+func _save_username(name: String) -> void:
+	var cfg = ConfigFile.new()
+	cfg.set_value("user", "name", name.strip_edges())
+	cfg.save(USERNAME_SAVE_PATH)
+
+func _show_main_menu() -> void:
+	if username_label != null:
+		username_label.visible = true
+	if username_edit != null:
+		username_edit.visible = true
+	$HostButton.visible = true
+	$JoinButton.visible = true
+	$IPLineEdit.visible = true
+	$PortLineEdit.visible = true
+	if map_select != null:
+		map_select.visible = false
+	if map_label != null:
+		map_label.visible = false
+	if lobby_panel != null:
+		lobby_panel.visible = false
+	lobby_slots_payload = []
+	if proc_custom_panel != null:
+		proc_custom_panel.visible = false
+	$CancelGameButton.visible = false
+	if lobby_start_button != null:
+		lobby_start_button.disabled = true
+
+func _show_lobby(is_host: bool) -> void:
+	if username_label != null:
+		username_label.visible = false
+	if username_edit != null:
+		username_edit.visible = false
+	$HostButton.visible = false
+	$JoinButton.visible = false
+	$IPLineEdit.visible = false
+	$PortLineEdit.visible = false
+	if map_select != null:
+		map_select.visible = true
+		map_select.disabled = not is_host
+	if map_label != null:
+		map_label.visible = true
+	if lobby_panel != null:
+		lobby_panel.visible = true
+	if proc_custom_panel != null:
+		proc_custom_panel.visible = false
+	$CancelGameButton.visible = true
+	if lobby_add_button != null:
+		lobby_add_button.visible = is_host
+	if lobby_remove_button != null:
+		lobby_remove_button.visible = is_host
+	if lobby_start_button != null:
+		lobby_start_button.visible = is_host
+	_update_lobby_list()
+	_update_start_game_state()
+
+func _on_add_slot_pressed() -> void:
+	NetworkManager.set_lobby_slot_count(NetworkManager.lobby_slot_count + 1)
+
+func _on_remove_slot_pressed() -> void:
+	NetworkManager.set_lobby_slot_count(NetworkManager.lobby_slot_count - 1)
+
+func _on_start_game_pressed() -> void:
+	NetworkManager.start_game_for_all()
+
+func _on_lobby_updated(slots: Array, slot_count: int) -> void:
+	lobby_slots_payload = slots
+	_update_lobby_list()
+	_update_start_game_state()
+
+func _on_player_id_assigned(_player_id: String) -> void:
+	_update_start_game_state()
+
+func _on_map_selection_changed() -> void:
+	if NetworkManager.is_host():
+		return
+	_sync_map_select_from_state()
+
+func _update_lobby_list() -> void:
+	if lobby_players == null:
+		return
+	for child in lobby_players.get_children():
+		child.queue_free()
+	var idx = 1
+	for slot in lobby_slots_payload:
+		var label = Label.new()
+		var name = str(slot.get("username", "")).strip_edges()
+		var occupied = bool(slot.get("occupied", false))
+		if not occupied:
+			name = "Empty"
+		var player_id = str(slot.get("player_id", ""))
+		if player_id == "":
+			player_id = "player%d" % idx
+		label.text = "Slot %d: %s (%s)" % [idx, name, player_id]
+		lobby_players.add_child(label)
+		idx += 1
+
+func _update_start_game_state() -> void:
+	if lobby_start_button == null:
+		return
+	if not NetworkManager.is_host():
+		lobby_start_button.disabled = true
+		return
+	var full = NetworkManager.is_lobby_full()
+	lobby_start_button.disabled = not full
+	if lobby_add_button != null:
+		lobby_add_button.disabled = NetworkManager.lobby_slot_count >= NetworkManager.MAX_PLAYERS
+	if lobby_remove_button != null:
+		lobby_remove_button.disabled = NetworkManager.lobby_slot_count <= 2
+
+func _on_game_started() -> void:
+	if lobby_panel != null:
+		lobby_panel.visible = false
+	if map_select != null:
+		map_select.visible = false
+	if map_label != null:
+		map_label.visible = false
+	if proc_custom_panel != null:
+		proc_custom_panel.visible = false
+	if $CancelGameButton != null:
+		$CancelGameButton.visible = false
 
 func _on_host_pressed():
+	var username = ""
+	if username_edit != null:
+		username = username_edit.text.strip_edges()
+	if username == "":
+		username = "Player"
+	NetworkManager.set_local_username(username)
+	_save_username(username)
 	_apply_map_selection(_map_select_id)
 	if turn_mgr != null and turn_mgr.has_method("_reset_map_state"):
 		turn_mgr.current_map_index = -1
 		turn_mgr._reset_map_state()
 	var port = $"PortLineEdit".text.strip_edges()
 	NetworkManager.host_game(int(port))
-	turn_mgr.set_local_player_id("player1")
-	$HostButton.visible = false
-	$JoinButton.visible = false
-	$IPLineEdit.visible = false
-	$PortLineEdit.visible = false
-	if map_select != null:
-		map_select.visible = false
-	if map_label != null:
-		map_label.visible = false
-	if proc_custom_panel != null:
-		proc_custom_panel.visible = false
-	$CancelGameButton.visible = true
+	_show_lobby(true)
 
 func _on_join_pressed():
 	var ip = $"IPLineEdit".text.strip_edges()
 	var port = $"PortLineEdit".text.strip_edges()
+	var username = ""
+	if username_edit != null:
+		username = username_edit.text.strip_edges()
+	if username == "":
+		username = "Player"
+	NetworkManager.set_local_username(username)
+	_save_username(username)
 	print("[UI] Joining game at %s:%d" % [ip, port])
 	NetworkManager.join_game(ip, int(port))
-	turn_mgr.set_local_player_id("player2")
-	$HostButton.visible = false
-	$JoinButton.visible = false
-	$IPLineEdit.visible = false
-	$PortLineEdit.visible = false
-	if map_select != null:
-		map_select.visible = false
-	if map_label != null:
-		map_label.visible = false
-	if proc_custom_panel != null:
-		proc_custom_panel.visible = false
-	$CancelGameButton.visible = true
+	_show_lobby(false)
 
 func _on_cancel_game_pressed():
-	$HostButton.visible = true
-	$JoinButton.visible = true
-	$IPLineEdit.visible = true
-	$PortLineEdit.visible = true
-	if map_select != null:
-		map_select.visible = true
-	if map_label != null:
-		map_label.visible = true
-	if proc_custom_panel != null:
-		proc_custom_panel.visible = false
-	$CancelGameButton.visible = false
-	$Panel.visible = false
+	_show_main_menu()
 	if resource_panel != null:
 		resource_panel.visible = false
 	cancel_done_button.visible = false

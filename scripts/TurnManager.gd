@@ -3366,6 +3366,8 @@ func _tick_neutral_respawns() -> void:
 func start_game() -> void:
 	host_replay_log_path = ""
 	_maybe_log_match_init()
+	if $UI != null and $UI.has_method("_on_game_started"):
+		$UI._on_game_started()
 	call_deferred("_game_loop")
 
 func update_neutral_markers() -> void:

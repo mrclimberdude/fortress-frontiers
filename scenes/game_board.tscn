@@ -235,6 +235,20 @@ offset_right = 945.0
 offset_bottom = 50.0
 text = "Dev Mode"
 
+[node name="UsernameLabel" type="Label" parent="UI"]
+offset_left = 518.0
+offset_top = 200.0
+offset_right = 690.0
+offset_bottom = 220.0
+text = "Username"
+
+[node name="UsernameLineEdit" type="LineEdit" parent="UI"]
+offset_left = 518.0
+offset_top = 220.0
+offset_right = 725.0
+offset_bottom = 250.0
+placeholder_text = "Enter Username"
+
 [node name="MapLabel" type="Label" parent="UI"]
 offset_left = 518.0
 offset_top = 250.0
@@ -397,6 +411,42 @@ offset_top = 558.0
 offset_right = 702.0
 offset_bottom = 634.0
 text = "Cancel Host/Join"
+
+[node name="LobbyPanel" type="Panel" parent="UI"]
+visible = false
+offset_left = 40.0
+offset_top = 240.0
+offset_right = 360.0
+offset_bottom = 520.0
+
+[node name="VBoxContainer" type="VBoxContainer" parent="UI/LobbyPanel"]
+layout_mode = 0
+offset_left = 8.0
+offset_top = 8.0
+offset_right = 300.0
+offset_bottom = 260.0
+
+[node name="TitleLabel" type="Label" parent="UI/LobbyPanel/VBoxContainer"]
+layout_mode = 2
+text = "Lobby"
+
+[node name="PlayersList" type="VBoxContainer" parent="UI/LobbyPanel/VBoxContainer"]
+layout_mode = 2
+
+[node name="SlotsRow" type="HBoxContainer" parent="UI/LobbyPanel/VBoxContainer"]
+layout_mode = 2
+
+[node name="AddSlotButton" type="Button" parent="UI/LobbyPanel/VBoxContainer/SlotsRow"]
+layout_mode = 2
+text = "+ Slot"
+
+[node name="RemoveSlotButton" type="Button" parent="UI/LobbyPanel/VBoxContainer/SlotsRow"]
+layout_mode = 2
+text = "- Slot"
+
+[node name="StartGameButton" type="Button" parent="UI/LobbyPanel/VBoxContainer"]
+layout_mode = 2
+text = "Start Game"
 
 [node name="Panel" type="Panel" parent="UI"]
 visible = false
