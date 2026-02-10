@@ -403,7 +403,7 @@ func _ready():
 	var unit_scenes = [ScoutScene, MinerScene, CrystalMinerScene, BuilderScene, SoldierScene, ArcherScene, WizardScene, PhalanxScene, CavalryScene]
 	var unit_names = ["Scout", "Miner", "Crystal Miner", "Builder", "Soldier", "Archer", "Wizard", "Phalanx", "Cavalry"]
 	var unit_specials = [
-		"Sight 3; lookout; forest cost 1",
+		"Sight 3; lookout; forest cost 1; +5 melee vs ranged in forest",
 		"Mine bonus +15 on mine",
 		"Mine bonus +10 mana on mine",
 		"Build/repair/sabotage; queue roads/rails",

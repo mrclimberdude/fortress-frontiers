@@ -194,6 +194,7 @@ Damage is symmetric and exponential:
 - Phalanx defending bonus: +20 and negates multi-attack penalty for the phalanx.
 - Adjacent defending phalanx: +2 melee and +2 ranged.
 - Spell buff: +0.1 melee and +0.1 ranged per mana spent for one turn.
+- Scouts on forest tiles: +5 melee strength vs incoming ranged attacks.
 
 ## Spells
 
@@ -230,7 +231,7 @@ Default stats (unless overridden by a unit scene):
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Archer | 100 | 15 | 30 | 2 | 2 | 2 | 10 | Ranged unit. |
 | Soldier | 85 | 28 | 0 | 2 | 0 | 2 | 10 | Melee unit. |
-| Scout | 50 | 4 | 0 | 3 | 0 | 3 | 15 | Lookout; forest move cost 1. |
+| Scout | 50 | 4 | 0 | 3 | 0 | 3 | 15 | Lookout; forest move cost 1; +5 melee vs ranged in forest. |
 | Miner | 75 | 1 | 0 | 2 | 0 | 2 | 15 | +15 gold/turn on controlled mine. |
 | Crystal Miner | 50 | 1 | 0 | 2 | 0 | 2 | 15 | +10 mana/turn on controlled mine. |
 | Builder | 50 | 3 | 0 | 2 | 0 | 2 | 10 | Builds, repairs, sabotages; queues roads/rails. |

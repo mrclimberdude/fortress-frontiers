@@ -5081,6 +5081,10 @@ func calculate_damage(attacker, defender, atk_mode, num_atkrs):
 		defr_str += _terrain_bonus(defender.grid_pos, "ranged_defense_bonus")
 	else:
 		defr_str += _terrain_bonus(defender.grid_pos, "melee_defense_bonus")
+	var defr_str_for_incoming = defr_str
+	if atk_mode == "ranged":
+		if str(defender.unit_type).to_lower() == "scout" and _terrain_type(defender.grid_pos) == "forest":
+			defr_str_for_incoming += 5
 	var atkr_in_dmg
 	if defender.is_ranged and atk_mode == "ranged":
 		var defr_ranged_str = defender.ranged_strength + defr_buff_ranged
@@ -5098,7 +5102,7 @@ func calculate_damage(attacker, defender, atk_mode, num_atkrs):
 		atkr_in_dmg = 30 * (1.041**(defr_ranged_str - attacker.melee_strength * atkr_damaged_penalty))
 	else:
 		atkr_in_dmg = 30 * (1.041**(defr_str - attacker.melee_strength * atkr_damaged_penalty))
-	var defr_in_dmg = 30 * (1.041**(atkr_str - defr_str))
+	var defr_in_dmg = 30 * (1.041**(atkr_str - defr_str_for_incoming))
 	return [atkr_in_dmg, defr_in_dmg]
 
 func _accumulate_damage_by_player(dmg_map: Dictionary, target_net_id: int, player_id: String, amount: float) -> void:
