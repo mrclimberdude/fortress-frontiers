@@ -446,6 +446,18 @@ func exit_replay_to_game_over() -> void:
 	$UI.visible = false
 	$GameOver.visible = true
 
+func exit_replay_to_lobby() -> void:
+	stop_replay()
+	if has_node("GameOver"):
+		$GameOver.visible = false
+	if $UI != null and $UI.has_method("_exit_replay_mode"):
+		$UI._exit_replay_mode()
+	if $UI != null and $UI.has_method("_on_cancel_game_pressed"):
+		$UI.visible = true
+		$UI._on_cancel_game_pressed()
+	else:
+		reset_to_lobby()
+
 func replay_step_forward() -> void:
 	if not replay_mode:
 		return
@@ -2516,15 +2528,9 @@ func _ready():
 	var quit_button = $GameOver.get_node_or_null("QuitToLobbyButton")
 	if quit_button != null:
 		quit_button.connect("pressed", Callable(self, "_on_game_over_quit_pressed"))
-	var replay_p1 = $GameOver.get_node_or_null("ReplayP1Button")
-	if replay_p1 != null:
-		replay_p1.connect("pressed", Callable(self, "_on_replay_p1_pressed"))
-	var replay_p2 = $GameOver.get_node_or_null("ReplayP2Button")
-	if replay_p2 != null:
-		replay_p2.connect("pressed", Callable(self, "_on_replay_p2_pressed"))
-	var replay_no_fog = $GameOver.get_node_or_null("ReplayNoFogButton")
-	if replay_no_fog != null:
-		replay_no_fog.connect("pressed", Callable(self, "_on_replay_no_fog_pressed"))
+	var replay_button = $GameOver.get_node_or_null("ReplayButton")
+	if replay_button != null:
+		replay_button.connect("pressed", Callable(self, "_on_replay_view_pressed"))
 	var replay_stats = $GameOver.get_node_or_null("ReplayStatsButton")
 	if replay_stats != null:
 		replay_stats.connect("pressed", Callable(self, "_on_replay_stats_pressed"))
@@ -3402,9 +3408,7 @@ func _set_game_over_controls_visible(visible: bool) -> void:
 	var nodes = [
 		"GameOverLabel",
 		"QuitToLobbyButton",
-		"ReplayP1Button",
-		"ReplayP2Button",
-		"ReplayNoFogButton",
+		"ReplayButton",
 		"ReplayStatsButton"
 	]
 	for name in nodes:
@@ -3424,14 +3428,9 @@ func _start_replay_from_game_over(fog_mode: String) -> void:
 		if $UI.has_method("_enter_replay_mode"):
 			$UI._enter_replay_mode()
 
-func _on_replay_p1_pressed() -> void:
-	_start_replay_from_game_over("player1")
-
-func _on_replay_p2_pressed() -> void:
-	_start_replay_from_game_over("player2")
-
-func _on_replay_no_fog_pressed() -> void:
-	_start_replay_from_game_over("none")
+func _on_replay_view_pressed() -> void:
+	var default_fog = local_player_id if local_player_id in ["player1", "player2"] else "player1"
+	_start_replay_from_game_over(default_fog)
 
 func _on_replay_stats_pressed() -> void:
 	var replay_path = _get_replay_source_path()

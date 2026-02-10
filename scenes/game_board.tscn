@@ -192,7 +192,7 @@ grow_horizontal = 2
 grow_vertical = 2
 text = "Quit to Lobby"
 
-[node name="ReplayP1Button" type="Button" parent="GameOver"]
+[node name="ReplayButton" type="Button" parent="GameOver"]
 anchors_preset = 8
 anchor_left = 0.5
 anchor_top = 0.5
@@ -204,9 +204,9 @@ offset_right = 140.0
 offset_bottom = 180.0
 grow_horizontal = 2
 grow_vertical = 2
-text = "Replay (P1 Fog)"
+text = "View Replay"
 
-[node name="ReplayP2Button" type="Button" parent="GameOver"]
+[node name="ReplayStatsButton" type="Button" parent="GameOver"]
 anchors_preset = 8
 anchor_left = 0.5
 anchor_top = 0.5
@@ -216,34 +216,6 @@ offset_left = -140.0
 offset_top = 185.0
 offset_right = 140.0
 offset_bottom = 235.0
-grow_horizontal = 2
-grow_vertical = 2
-text = "Replay (P2 Fog)"
-
-[node name="ReplayNoFogButton" type="Button" parent="GameOver"]
-anchors_preset = 8
-anchor_left = 0.5
-anchor_top = 0.5
-anchor_right = 0.5
-anchor_bottom = 0.5
-offset_left = -140.0
-offset_top = 240.0
-offset_right = 140.0
-offset_bottom = 290.0
-grow_horizontal = 2
-grow_vertical = 2
-text = "Replay (No Fog)"
-
-[node name="ReplayStatsButton" type="Button" parent="GameOver"]
-anchors_preset = 8
-anchor_left = 0.5
-anchor_top = 0.5
-anchor_right = 0.5
-anchor_bottom = 0.5
-offset_left = -140.0
-offset_top = 295.0
-offset_right = 140.0
-offset_bottom = 345.0
 grow_horizontal = 2
 grow_vertical = 2
 text = "View Stats"
@@ -817,14 +789,14 @@ visible = false
 offset_left = 10.0
 offset_top = 40.0
 offset_right = 230.0
-offset_bottom = 280.0
+offset_bottom = 310.0
 
 [node name="VBoxContainer" type="VBoxContainer" parent="UI/ReplayPanel"]
 layout_mode = 0
 offset_left = 8.0
 offset_top = 8.0
 offset_right = 210.0
-offset_bottom = 240.0
+offset_bottom = 270.0
 
 [node name="TitleLabel" type="Label" parent="UI/ReplayPanel/VBoxContainer"]
 layout_mode = 2
@@ -866,6 +838,10 @@ text = "View Stats"
 [node name="ExitButton" type="Button" parent="UI/ReplayPanel/VBoxContainer"]
 layout_mode = 2
 text = "Exit Replay"
+
+[node name="QuitToLobbyButton" type="Button" parent="UI/ReplayPanel/VBoxContainer"]
+layout_mode = 2
+text = "Quit to Lobby"
 
 [node name="ReplayStatsPanel" type="Window" parent="UI"]
 title = "Replay Stats"

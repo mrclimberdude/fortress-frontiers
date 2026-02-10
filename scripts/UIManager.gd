@@ -115,6 +115,7 @@ var replay_metric_ids: Array = []
 @onready var replay_fog_option = $ReplayPanel/VBoxContainer/FogRow/FogOption as OptionButton
 @onready var replay_stats_button = $ReplayPanel/VBoxContainer/StatsButton as Button
 @onready var replay_exit_button = $ReplayPanel/VBoxContainer/ExitButton as Button
+@onready var replay_quit_button = $ReplayPanel/VBoxContainer/QuitToLobbyButton as Button
 @onready var replay_stats_panel = $ReplayStatsPanel as Window
 @onready var replay_stats_metric = $ReplayStatsPanel/VBoxContainer/ControlsRow/MetricOption as OptionButton
 @onready var replay_stats_player1 = $ReplayStatsPanel/VBoxContainer/ControlsRow/Player1Check as CheckButton
@@ -349,6 +350,9 @@ func _ready():
 	if replay_exit_button != null:
 		replay_exit_button.connect("pressed",
 					Callable(self, "_on_replay_exit_pressed"))
+	if replay_quit_button != null:
+		replay_quit_button.connect("pressed",
+					Callable(self, "_on_replay_quit_pressed"))
 	if replay_stats_panel != null and replay_stats_panel.has_signal("close_requested"):
 		replay_stats_panel.connect("close_requested",
 					Callable(self, "_on_replay_stats_close_pressed"))
@@ -3838,6 +3842,10 @@ func _update_replay_stats_graph() -> void:
 func _on_replay_exit_pressed() -> void:
 	if turn_mgr != null:
 		turn_mgr.exit_replay_to_game_over()
+
+func _on_replay_quit_pressed() -> void:
+	if turn_mgr != null and turn_mgr.has_method("exit_replay_to_lobby"):
+		turn_mgr.exit_replay_to_lobby()
 
 func _on_replay_state_changed(turn: int, phase: int) -> void:
 	if replay_turn_label == null:
