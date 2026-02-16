@@ -1981,6 +1981,10 @@ func _show_main_menu() -> void:
 	$JoinButton.visible = true
 	$IPLineEdit.visible = true
 	$PortLineEdit.visible = true
+	$Panel.visible = false
+	if resource_panel != null:
+		resource_panel.visible = false
+	exec_panel.visible = false
 	if map_select != null:
 		map_select.visible = false
 	if map_label != null:
@@ -2120,8 +2124,6 @@ func _on_join_pressed():
 
 func _on_cancel_game_pressed():
 	_show_main_menu()
-	if resource_panel != null:
-		resource_panel.visible = false
 	cancel_done_button.visible = false
 	exec_panel.visible = false
 	turn_mgr.reset_to_lobby()

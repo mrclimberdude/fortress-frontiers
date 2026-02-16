@@ -605,6 +605,12 @@ func start_game_for_all() -> void:
 	if turn_mgr != null and turn_mgr.has_method("_ensure_map_loaded"):
 		turn_mgr._ensure_map_loaded()
 	broadcast_map_selection()
+	if match_seed >= 0:
+		for peer_id in client_peer_ids:
+			rpc_id(peer_id, "rpc_set_match_seed", match_seed)
+	if custom_proc_params.size() > 0:
+		for peer_id in client_peer_ids:
+			rpc_id(peer_id, "rpc_set_custom_proc_params", custom_proc_params)
 	if turn_mgr != null and turn_mgr.has_method("start_game"):
 		turn_mgr.start_game()
 	for peer_id in client_peer_ids:

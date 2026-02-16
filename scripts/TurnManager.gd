@@ -3470,6 +3470,7 @@ func reset_to_lobby() -> void:
 		"type": "match_end"
 	})
 	_close_dev_log()
+	rng.randomize()
 	host_replay_log_path = ""
 	game_over = false
 	match_init_logged = false
