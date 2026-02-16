@@ -36,6 +36,7 @@ var current_map_index: int = -1
 var dev_log_path: String = ""
 var dev_log_file: FileAccess = null
 var host_replay_log_path: String = ""
+var keep_dev_logs: bool = false
 var last_snapshot_turn: int = -1
 var game_over: bool = false
 var match_init_logged: bool = false
@@ -142,6 +143,18 @@ func _close_dev_log() -> void:
 	dev_log_file = null
 	dev_log_path = ""
 
+func set_keep_dev_logs(keep: bool) -> void:
+	keep_dev_logs = keep
+
+func _delete_log_file(path: String) -> void:
+	if path == "":
+		return
+	if not FileAccess.file_exists(path):
+		return
+	var dir = DirAccess.open("user://")
+	if dir != null:
+		dir.remove(path.get_file())
+
 func set_host_replay_log_path(path: String) -> void:
 	host_replay_log_path = path
 
@@ -174,6 +187,16 @@ func _decode_log_vec2i(value) -> Vector2i:
 		return Vector2i(int(round(value.x)), int(round(value.y)))
 	if value is Array and value.size() >= 2:
 		return Vector2i(int(value[0]), int(value[1]))
+	if value is String:
+		var cleaned = value.strip_edges()
+		if cleaned.begins_with("(") and cleaned.ends_with(")"):
+			cleaned = cleaned.substr(1, cleaned.length() - 2)
+		var parts = cleaned.split(",")
+		if parts.size() >= 2:
+			var x_text = parts[0].strip_edges()
+			var y_text = parts[1].strip_edges()
+			if x_text.is_valid_int() and y_text.is_valid_int():
+				return Vector2i(int(x_text), int(y_text))
 	return Vector2i(-9999, -9999)
 
 func _decode_log_vec2i_array(values) -> Array:
@@ -184,12 +207,159 @@ func _decode_log_vec2i_array(values) -> Array:
 		decoded.append(_decode_log_vec2i(entry))
 	return decoded
 
+func _decode_log_vec2i_dict(values) -> Dictionary:
+	var decoded := {}
+	if not (values is Dictionary):
+		return decoded
+	for key in values.keys():
+		var cell = _decode_log_vec2i(key)
+		if cell == Vector2i(-9999, -9999):
+			continue
+		decoded[cell] = values[key]
+	return decoded
+
+func _normalize_state_snapshot(state: Dictionary) -> Dictionary:
+	if not (state is Dictionary):
+		return state
+	var normalized = state.duplicate(true)
+	if normalized.has("base_positions") and normalized["base_positions"] is Dictionary:
+		var bases := {}
+		for pid in normalized["base_positions"].keys():
+			bases[pid] = _decode_log_vec2i(normalized["base_positions"][pid])
+		normalized["base_positions"] = bases
+	if normalized.has("tower_positions") and normalized["tower_positions"] is Dictionary:
+		var towers := {}
+		for pid in normalized["tower_positions"].keys():
+			towers[pid] = _decode_log_vec2i_array(normalized["tower_positions"][pid])
+		normalized["tower_positions"] = towers
+	if normalized.has("structure_positions"):
+		normalized["structure_positions"] = _decode_log_vec2i_array(normalized["structure_positions"])
+	if normalized.has("spawn_tower_positions") and normalized["spawn_tower_positions"] is Dictionary:
+		var spawn := {}
+		for pid in normalized["spawn_tower_positions"].keys():
+			spawn[pid] = _decode_log_vec2i_array(normalized["spawn_tower_positions"][pid])
+		normalized["spawn_tower_positions"] = spawn
+	if normalized.has("income_tower_positions") and normalized["income_tower_positions"] is Dictionary:
+		var income := {}
+		for pid in normalized["income_tower_positions"].keys():
+			income[pid] = _decode_log_vec2i_array(normalized["income_tower_positions"][pid])
+		normalized["income_tower_positions"] = income
+	if normalized.has("camps") and normalized["camps"] is Dictionary:
+		var camps_in: Dictionary = normalized["camps"]
+		var camps_out := {
+			"basic": _decode_log_vec2i_array(camps_in.get("basic", [])),
+			"dragon": _decode_log_vec2i_array(camps_in.get("dragon", []))
+		}
+		normalized["camps"] = camps_out
+	if normalized.has("mines") and normalized["mines"] is Dictionary:
+		var mines_in: Dictionary = normalized["mines"]
+		var mines_out := {
+			"unclaimed": _decode_log_vec2i_array(mines_in.get("unclaimed", [])),
+			"player1": _decode_log_vec2i_array(mines_in.get("player1", [])),
+			"player2": _decode_log_vec2i_array(mines_in.get("player2", []))
+		}
+		normalized["mines"] = mines_out
+	if normalized.has("camp_respawns"):
+		normalized["camp_respawns"] = _decode_log_vec2i_dict(normalized["camp_respawns"])
+	if normalized.has("dragon_respawns"):
+		normalized["dragon_respawns"] = _decode_log_vec2i_dict(normalized["dragon_respawns"])
+	if normalized.has("camp_respawn_counts"):
+		normalized["camp_respawn_counts"] = _decode_log_vec2i_dict(normalized["camp_respawn_counts"])
+	if normalized.has("dragon_rewards"):
+		normalized["dragon_rewards"] = _decode_log_vec2i_dict(normalized["dragon_rewards"])
+	if normalized.has("dragon_spawn_counts"):
+		normalized["dragon_spawn_counts"] = _decode_log_vec2i_dict(normalized["dragon_spawn_counts"])
+	if normalized.has("mana_pool_mines") and normalized["mana_pool_mines"] is Dictionary:
+		var pools := {}
+		for key in normalized["mana_pool_mines"].keys():
+			var pool_cell = _decode_log_vec2i(key)
+			if pool_cell == Vector2i(-9999, -9999):
+				continue
+			pools[pool_cell] = _decode_log_vec2i(normalized["mana_pool_mines"][key])
+		normalized["mana_pool_mines"] = pools
+	if normalized.has("buildable_structures") and normalized["buildable_structures"] is Dictionary:
+		var structs := {}
+		for key in normalized["buildable_structures"].keys():
+			var cell = _decode_log_vec2i(key)
+			if cell == Vector2i(-9999, -9999):
+				continue
+			var struct_state = normalized["buildable_structures"][key]
+			if struct_state is Dictionary:
+				var st = struct_state.duplicate(true)
+				if st.has("target_tile"):
+					st["target_tile"] = _decode_log_vec2i(st.get("target_tile"))
+				if st.has("mana_mine"):
+					st["mana_mine"] = _decode_log_vec2i(st.get("mana_mine"))
+				if st.has("pump_mine"):
+					st["pump_mine"] = _decode_log_vec2i(st.get("pump_mine"))
+				if st.has("pump_pool"):
+					st["pump_pool"] = _decode_log_vec2i(st.get("pump_pool"))
+				structs[cell] = st
+			else:
+				structs[cell] = struct_state
+		normalized["buildable_structures"] = structs
+	if normalized.has("ward_vision_active") and normalized["ward_vision_active"] is Dictionary:
+		var ward_out := {}
+		for pid in normalized["ward_vision_active"].keys():
+			ward_out[pid] = _decode_log_vec2i_dict(normalized["ward_vision_active"][pid])
+		normalized["ward_vision_active"] = ward_out
+	if normalized.has("targeted_vision_active") and normalized["targeted_vision_active"] is Dictionary:
+		var target_out := {}
+		for pid in normalized["targeted_vision_active"].keys():
+			target_out[pid] = _decode_log_vec2i_dict(normalized["targeted_vision_active"][pid])
+		normalized["targeted_vision_active"] = target_out
+	if normalized.has("structure_memory") and normalized["structure_memory"] is Dictionary:
+		var struct_mem := {}
+		for pid in normalized["structure_memory"].keys():
+			struct_mem[pid] = _decode_log_vec2i_dict(normalized["structure_memory"][pid])
+		normalized["structure_memory"] = struct_mem
+	if normalized.has("neutral_tile_memory") and normalized["neutral_tile_memory"] is Dictionary:
+		var neutral_mem := {}
+		for pid in normalized["neutral_tile_memory"].keys():
+			neutral_mem[pid] = _decode_log_vec2i_dict(normalized["neutral_tile_memory"][pid])
+		normalized["neutral_tile_memory"] = neutral_mem
+	if normalized.has("fog_visibility") and normalized["fog_visibility"] is Dictionary:
+		var fog_out := {}
+		for pid in normalized["fog_visibility"].keys():
+			fog_out[pid] = _decode_log_vec2i_dict(normalized["fog_visibility"][pid])
+		normalized["fog_visibility"] = fog_out
+	if normalized.has("player_orders") and normalized["player_orders"] is Dictionary:
+		var orders_out := {}
+		for pid in normalized["player_orders"].keys():
+			var orders_in = normalized["player_orders"][pid]
+			var player_dict := {}
+			if orders_in is Dictionary:
+				for unit_key in orders_in.keys():
+					var unit_id = int(unit_key)
+					var order = orders_in[unit_key]
+					if order is Dictionary:
+						order = _normalize_replay_order(order)
+					player_dict[unit_id] = order
+			orders_out[pid] = player_dict
+		normalized["player_orders"] = orders_out
+	if normalized.has("committed_orders") and normalized["committed_orders"] is Dictionary:
+		var committed_out := {}
+		for pid in normalized["committed_orders"].keys():
+			var orders_in = normalized["committed_orders"][pid]
+			var player_dict := {}
+			if orders_in is Dictionary:
+				for unit_key in orders_in.keys():
+					var unit_id = int(unit_key)
+					var order = orders_in[unit_key]
+					if order is Dictionary:
+						order = _normalize_replay_order(order)
+					player_dict[unit_id] = order
+			committed_out[pid] = player_dict
+		normalized["committed_orders"] = committed_out
+	return normalized
+
 func _new_replay_log_container() -> Dictionary:
 	return {
 		"orders": {},
 		"events": {},
 		"rng": [],
 		"stats": {},
+		"snapshots": {},
 		"map_index": -1,
 		"match_seed": -1,
 		"custom_proc_params": {},
@@ -313,6 +483,10 @@ func _load_replay_log(path: String) -> Dictionary:
 			continue
 		var entry = parsed as Dictionary
 		var entry_type = str(entry.get("type", ""))
+		if entry_type == "state_snapshot":
+			var snapshot_state = entry.get("state", {})
+			if typeof(snapshot_state) == TYPE_DICTIONARY:
+				entry["state"] = _normalize_state_snapshot(_decode_value(snapshot_state))
 		var entry_turn = int(entry.get("turn", 0))
 		data["max_turn"] = max(data["max_turn"], entry_turn)
 		match entry_type:
@@ -339,8 +513,13 @@ func _load_replay_log(path: String) -> Dictionary:
 					data["events"] = {}
 					data["rng"] = []
 					data["stats"] = {}
+					data["snapshots"] = {}
 					data["max_turn"] = entry_turn
 					data["unit_types"] = {}
+				else:
+					if not data["snapshots"].has(entry_turn):
+						data["snapshots"][entry_turn] = entry.get("state", {})
+					data["max_turn"] = max(int(data.get("max_turn", 0)), entry_turn)
 			"order_result":
 				var result = entry.get("result", {})
 				if typeof(result) == TYPE_DICTIONARY and bool(result.get("ok", false)):
@@ -498,6 +677,24 @@ func _replay_seek(target_turn: int, target_phase: int) -> void:
 	var clamped_turn = clamp(target_turn, max(1, start_turn), max_turn)
 	replay_target_turn = clamped_turn
 	replay_target_phase = target_phase
+	var snapshots = replay_data.get("snapshots", {})
+	if snapshots is Dictionary and snapshots.has(clamped_turn):
+		var snapshot_state = snapshots.get(clamped_turn, {})
+		if snapshot_state is Dictionary and not snapshot_state.is_empty():
+			apply_state(snapshot_state, true)
+			turn_number = int(snapshot_state.get("turn_number", clamped_turn))
+			if target_phase == 0:
+				_set_replay_phase_state("UPKEEP")
+				return
+			_replay_apply_orders(turn_number)
+			current_phase = Phase.ORDERS
+			if target_phase == 1:
+				_set_replay_phase_state("ORDERS")
+				return
+			_do_execution()
+			_replay_run_execution_to_end()
+			_set_replay_phase_state("EXECUTION")
+			return
 	for t in range(max(1, start_turn), clamped_turn + 1):
 		turn_number = t
 		_do_upkeep()
@@ -778,6 +975,7 @@ func log_remote_undo_buy_result(player_id: String, unit_net_id: int, ok: bool, r
 
 func _devlog_snapshot(reason: String, extra: Dictionary = {}) -> void:
 	var state = get_state_snapshot(true)
+	state["player_orders"] = player_orders
 	var fog = $GameBoardNode.get_node_or_null("FogOfWar")
 	if fog != null and fog.visiblity != null:
 		state["fog_visibility"] = fog.visiblity.duplicate(true)
@@ -3024,9 +3222,12 @@ func _apply_units(units_data: Array) -> void:
 	var max_even = 2
 	var max_neutral = 1000001
 	for data in units_data:
+		var grid_pos = data.get("grid_pos", Vector2i.ZERO)
+		if typeof(grid_pos) != TYPE_VECTOR2I:
+			grid_pos = _decode_log_vec2i(grid_pos)
 		var unit = unit_manager.spawn_unit(
 			data.get("unit_type", ""),
-			data.get("grid_pos", Vector2i.ZERO),
+			grid_pos,
 			data.get("player_id", ""),
 			false,
 			int(data.get("net_id", -1))
@@ -3043,19 +3244,20 @@ func _apply_units(units_data: Array) -> void:
 		unit.auto_build = bool(data.get("auto_build", false))
 		unit.auto_build_type = str(data.get("auto_build_type", ""))
 		var queue_data = data.get("build_queue", [])
-		unit.build_queue = queue_data if queue_data is Array else []
+		unit.build_queue = _decode_log_vec2i_array(queue_data) if queue_data is Array else []
 		unit.build_queue_type = str(data.get("build_queue_type", ""))
 		unit.build_queue_last_type = str(data.get("build_queue_last_type", ""))
 		var last_target = data.get("build_queue_last_target", Vector2i(-9999, -9999))
-		unit.build_queue_last_target = last_target if typeof(last_target) == TYPE_VECTOR2I else Vector2i(-9999, -9999)
+		unit.build_queue_last_target = _decode_log_vec2i(last_target)
 		unit.build_queue_last_build_left = int(data.get("build_queue_last_build_left", -1))
 		var move_queue_data = data.get("move_queue", [])
-		unit.move_queue = move_queue_data if move_queue_data is Array else []
+		unit.move_queue = _decode_log_vec2i_array(move_queue_data) if move_queue_data is Array else []
 		var move_last_target = data.get("move_queue_last_target", Vector2i(-9999, -9999))
-		unit.move_queue_last_target = move_last_target if typeof(move_last_target) == TYPE_VECTOR2I else Vector2i(-9999, -9999)
+		unit.move_queue_last_target = _decode_log_vec2i(move_last_target)
 		unit.is_moving = bool(data.get("is_moving", false))
 		unit.is_looking_out = bool(data.get("is_looking_out", false))
-		unit.moving_to = data.get("moving_to", unit.grid_pos)
+		var moving_to = data.get("moving_to", unit.grid_pos)
+		unit.moving_to = _decode_log_vec2i(moving_to)
 		unit.just_purchased = bool(data.get("just_purchased", false))
 		unit.first_turn_move = bool(data.get("first_turn_move", false))
 		unit.ordered = bool(data.get("ordered", false))
@@ -3089,7 +3291,7 @@ func _apply_units(units_data: Array) -> void:
 func _on_state_snapshot_received(state: Dictionary) -> void:
 	if replay_mode:
 		return
-	apply_state(state)
+	apply_state(_normalize_state_snapshot(state))
 
 func _on_execution_paused_received(step_idx: int, neutral_step_idx: int) -> void:
 	if replay_mode:
@@ -3111,6 +3313,7 @@ func apply_state(state: Dictionary, force_host: bool = false) -> void:
 		return
 	if state.is_empty():
 		return
+	state = _normalize_state_snapshot(state)
 	var incoming_seq = int(state.get("state_seq", -1))
 	var force_apply = bool(state.get("force_apply", false))
 	if incoming_seq >= 0:
@@ -3201,7 +3404,13 @@ func apply_state(state: Dictionary, force_host: bool = false) -> void:
 				fog.reset_fog()
 			for pid in fog_data.keys():
 				if fog_data[pid] is Dictionary:
-					fog.visiblity[pid] = fog_data[pid].duplicate(true)
+					var decoded := {}
+					for cell_key in fog_data[pid].keys():
+						var cell = _decode_log_vec2i(cell_key)
+						if cell == Vector2i(-9999, -9999):
+							continue
+						decoded[cell] = fog_data[pid][cell_key]
+					fog.visiblity[pid] = decoded
 	$GameBoardNode/FogOfWar._update_fog()
 	update_neutral_markers()
 	refresh_structure_markers()
@@ -3216,6 +3425,9 @@ func apply_state(state: Dictionary, force_host: bool = false) -> void:
 			"value": _state_hash()
 		})
 		last_state_hash_turn = turn_number
+	if not replay_mode and not _is_host() and current_phase == Phase.UPKEEP and turn_number != last_snapshot_turn:
+		_ensure_dev_log_open()
+		_devlog_snapshot("upkeep_start_sync")
 	if not replay_mode and not _is_host() and current_phase == Phase.UPKEEP and turn_number != last_stats_turn:
 		_record_turn_stats()
 
@@ -3411,7 +3623,8 @@ func _set_game_over_controls_visible(visible: bool) -> void:
 		"GameOverLabel",
 		"QuitToLobbyButton",
 		"ReplayButton",
-		"ReplayStatsButton"
+		"ReplayStatsButton",
+		"KeepLogsCheckButton"
 	]
 	for name in nodes:
 		var node = $GameOver.get_node_or_null(name)
@@ -3469,7 +3682,14 @@ func reset_to_lobby() -> void:
 	_devlog({
 		"type": "match_end"
 	})
+	var log_path = dev_log_path
+	var replay_path = host_replay_log_path
+	var keep_logs = keep_dev_logs
 	_close_dev_log()
+	if not keep_logs:
+		_delete_log_file(log_path)
+		if replay_path != "" and replay_path != log_path:
+			_delete_log_file(replay_path)
 	rng.randomize()
 	host_replay_log_path = ""
 	game_over = false
@@ -3517,6 +3737,7 @@ func reset_to_lobby() -> void:
 		NetworkManager._step_ready_counts = {}
 	$UI/DamagePanel.visible = false
 	$GameOver.visible = false
+	keep_dev_logs = false
 
 # --------------------------------------------------------
 # Main loop: Upkeep → Orders → Execution → increment → loop
@@ -3637,6 +3858,9 @@ func _do_upkeep() -> void:
 	_apply_build_queue_orders(all_units)
 	_apply_move_queue_orders(all_units)
 	_tick_neutral_respawns()
+	if not replay_mode and turn_number != last_snapshot_turn:
+		_ensure_dev_log_open()
+		_devlog_snapshot("upkeep_start")
 	$GameBoardNode/FogOfWar._update_fog()
 	$UI/DamagePanel.visible = true
 	$GameBoardNode/OrderReminderMap.highlight_unordered_units(local_player_id)

@@ -124,6 +124,8 @@ var replay_metric_ids: Array = []
 @onready var replay_stats_button = $ReplayPanel/VBoxContainer/StatsButton as Button
 @onready var replay_exit_button = $ReplayPanel/VBoxContainer/ExitButton as Button
 @onready var replay_quit_button = $ReplayPanel/VBoxContainer/QuitToLobbyButton as Button
+@onready var keep_logs_game_over_check = $"../GameOver/KeepLogsCheckButton" as CheckButton
+@onready var keep_logs_replay_check = $ReplayPanel/VBoxContainer/KeepLogsCheckButton as CheckButton
 @onready var replay_stats_panel = $ReplayStatsPanel as Window
 @onready var replay_stats_metric = $ReplayStatsPanel/VBoxContainer/ControlsRow/MetricOption as OptionButton
 @onready var replay_stats_player1 = $ReplayStatsPanel/VBoxContainer/ControlsRow/Player1Check as CheckButton
@@ -248,6 +250,10 @@ func _ready():
 	_init_map_select()
 	_init_proc_custom_panel()
 	_show_main_menu()
+	if keep_logs_game_over_check != null and not keep_logs_game_over_check.is_connected("toggled", Callable(self, "_on_keep_logs_toggled")):
+		keep_logs_game_over_check.connect("toggled", Callable(self, "_on_keep_logs_toggled"))
+	if keep_logs_replay_check != null and not keep_logs_replay_check.is_connected("toggled", Callable(self, "_on_keep_logs_toggled")):
+		keep_logs_replay_check.connect("toggled", Callable(self, "_on_keep_logs_toggled"))
 	
 	# dev mode connections
 	dev_mode_toggle.connect("toggled",
@@ -2091,6 +2097,7 @@ func _on_game_started() -> void:
 		proc_custom_panel.visible = false
 	if $CancelGameButton != null:
 		$CancelGameButton.visible = false
+	_set_keep_logs_checked(false)
 
 func _on_host_pressed():
 	var username = ""
@@ -2122,6 +2129,23 @@ func _on_join_pressed():
 	NetworkManager.join_game(ip, int(port))
 	_show_lobby(false)
 
+func _set_keep_logs_checked(value: bool) -> void:
+	if keep_logs_game_over_check != null:
+		if keep_logs_game_over_check.has_method("set_pressed_no_signal"):
+			keep_logs_game_over_check.set_pressed_no_signal(value)
+		else:
+			keep_logs_game_over_check.button_pressed = value
+	if keep_logs_replay_check != null:
+		if keep_logs_replay_check.has_method("set_pressed_no_signal"):
+			keep_logs_replay_check.set_pressed_no_signal(value)
+		else:
+			keep_logs_replay_check.button_pressed = value
+	if turn_mgr != null and turn_mgr.has_method("set_keep_dev_logs"):
+		turn_mgr.set_keep_dev_logs(value)
+
+func _on_keep_logs_toggled(enabled: bool) -> void:
+	_set_keep_logs_checked(enabled)
+
 func _on_cancel_game_pressed():
 	_show_main_menu()
 	cancel_done_button.visible = false
@@ -2134,6 +2158,7 @@ func _on_cancel_game_pressed():
 	_on_terrain_stats_toggled(false)
 	_update_done_button_state()
 	NetworkManager.close_connection()
+	_set_keep_logs_checked(false)
 
 func _on_finish_move_button_pressed():
 	if action_mode == "build_road_to":
