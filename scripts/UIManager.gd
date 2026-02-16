@@ -677,7 +677,7 @@ func _init_proc_custom_panel() -> void:
 	if proc_custom_rows != null:
 		proc_custom_rows.placeholder_text = "0"
 	if proc_custom_forest != null:
-		proc_custom_forest.placeholder_text = "0.18"
+		proc_custom_forest.placeholder_text = "0.14"
 	if proc_custom_mountain != null:
 		proc_custom_mountain.placeholder_text = "0.06"
 	if proc_custom_river != null:
@@ -711,7 +711,7 @@ func _default_proc_custom_params() -> Dictionary:
 			"map_size": "normal",
 			"proc_columns": 0,
 			"proc_rows": 0,
-			"proc_forest_ratio": 0.18,
+			"proc_forest_ratio": 0.14,
 			"proc_mountain_ratio": 0.06,
 			"proc_river_ratio": 0.04,
 			"proc_lake_ratio": 0.03,
@@ -760,7 +760,7 @@ func _populate_proc_custom_fields(params: Dictionary) -> void:
 	if proc_custom_rows != null:
 		proc_custom_rows.text = str(int(params.get("proc_rows", 0)))
 	if proc_custom_forest != null:
-		proc_custom_forest.text = str(float(params.get("proc_forest_ratio", 0.18)))
+		proc_custom_forest.text = str(float(params.get("proc_forest_ratio", 0.14)))
 	if proc_custom_mountain != null:
 		proc_custom_mountain.text = str(float(params.get("proc_mountain_ratio", 0.06)))
 	if proc_custom_river != null:
@@ -805,7 +805,7 @@ func _collect_proc_custom_params() -> Dictionary:
 		size = "small"
 	var columns = _parse_int_edit(proc_custom_columns, int(defaults.get("proc_columns", 0)))
 	var rows = _parse_int_edit(proc_custom_rows, int(defaults.get("proc_rows", 0)))
-	var forest_ratio = clamp(_parse_float_edit(proc_custom_forest, float(defaults.get("proc_forest_ratio", 0.18))), 0.0, 1.0)
+	var forest_ratio = clamp(_parse_float_edit(proc_custom_forest, float(defaults.get("proc_forest_ratio", 0.14))), 0.0, 1.0)
 	var mountain_ratio = clamp(_parse_float_edit(proc_custom_mountain, float(defaults.get("proc_mountain_ratio", 0.06))), 0.0, 1.0)
 	var river_ratio = clamp(_parse_float_edit(proc_custom_river, float(defaults.get("proc_river_ratio", 0.04))), 0.0, 1.0)
 	var lake_ratio = clamp(_parse_float_edit(proc_custom_lake, float(defaults.get("proc_lake_ratio", 0.03))), 0.0, 1.0)

@@ -12,6 +12,10 @@ Victory comes from destroying the enemy base, but the path there can involve eco
 
 Fortress Frontiers is a two-player, host-authoritative, turn-based strategy game on a hex grid. Both players submit orders simultaneously. The host resolves those orders step-by-step and broadcasts authoritative snapshots to clients.
 
+## Procedural Maps
+
+- Camps, dragons, and mines will not spawn within 3 tiles of any base or tower.
+
 ## Core Loop
 
 Each turn has three phases:

@@ -10,6 +10,7 @@ const TERRAIN_FOREST: String = "forest"
 const TERRAIN_MOUNTAIN: String = "mountain"
 const TERRAIN_RIVER: String = "river"
 const TERRAIN_LAKE: String = "lake"
+const MINE_REPULSION_EXPONENT: float = 1.1
 
 static func generate(md: MapData, rng: RandomNumberGenerator) -> Dictionary:
 	var size_tag = str(md.map_size).strip_edges().to_lower()
@@ -84,7 +85,7 @@ static func generate(md: MapData, rng: RandomNumberGenerator) -> Dictionary:
 		dragon_count = max(1, int(area / 320))
 	dragon_count = min(3, dragon_count)
 
-	var structure_buffer = 3
+	var structure_buffer = 4
 	var mine_spread_min_dist = 3
 	var blocked_neutral := {}
 	for pid in bases.keys():
@@ -92,15 +93,19 @@ static func generate(md: MapData, rng: RandomNumberGenerator) -> Dictionary:
 	for pid in towers.keys():
 		for cell in towers[pid]:
 			blocked_neutral[cell] = true
-	var mines_unclaimed := _place_symmetric_tiles(mine_count, bounds, bounds_set, blocked_neutral, rng, min_x, max_x, min_y, max_y, 200, structure_refs, structure_buffer, [], true, false)
+	var mines_unclaimed := _place_symmetric_tiles(mine_count, bounds, bounds_set, blocked_neutral, rng, min_x, max_x, min_y, max_y, 200, structure_refs, structure_buffer, [], true, false, [], 0)
 	var camps_basic := _place_symmetric_tiles(camp_count, bounds, bounds_set, blocked_neutral, rng, min_x, max_x, min_y, max_y, 200, structure_refs, structure_buffer, [], true, false)
 	var tower_cells := []
+	var base_cells := []
+	for pid in bases.keys():
+		base_cells.append(bases[pid])
 	for pid in towers.keys():
 		for cell in towers[pid]:
 			tower_cells.append(cell)
 	var min_dragon_dist = 7
 	var camp_dragon_min_dist = 4
 	var dragon_rules = [
+		{"refs": base_cells, "min_dist": structure_buffer},
 		{"refs": tower_cells, "min_dist": min_dragon_dist},
 		{"refs": camps_basic, "min_dist": camp_dragon_min_dist}
 	]
@@ -111,7 +116,7 @@ static func generate(md: MapData, rng: RandomNumberGenerator) -> Dictionary:
 			{"refs": structure_refs, "min_dist": structure_buffer},
 			{"refs": current_mines, "min_dist": mine_spread_min_dist}
 		]
-	mines_unclaimed = _jitter_positions(mines_unclaimed, bounds, bounds_set, blocked_neutral, rng, neutral_noise, 200, mine_rules_provider, min_x, max_x, min_y, max_y, true)
+	mines_unclaimed = _jitter_positions(mines_unclaimed, bounds, bounds_set, blocked_neutral, rng, neutral_noise, 200, mine_rules_provider, min_x, max_x, min_y, max_y, true, 0)
 	var camp_rules_provider = func(current_camps):
 		return [
 			{"refs": structure_refs, "min_dist": structure_buffer},
@@ -121,6 +126,7 @@ static func generate(md: MapData, rng: RandomNumberGenerator) -> Dictionary:
 	camps_basic = _jitter_positions(camps_basic, bounds, bounds_set, blocked_neutral, rng, neutral_noise, 200, camp_rules_provider, min_x, max_x, min_y, max_y, true)
 	var dragon_rules_provider = func(_positions):
 		return [
+			{"refs": base_cells, "min_dist": structure_buffer},
 			{"refs": tower_cells, "min_dist": min_dragon_dist},
 			{"refs": camps_basic, "min_dist": camp_dragon_min_dist}
 		]
@@ -715,7 +721,7 @@ static func _pick_open_tile_pair(bounds: Array, bounds_set: Dictionary, blocked:
 		return [cell, mirror]
 	return []
 
-static func _jitter_positions(positions: Array, bounds: Array, bounds_set: Dictionary, blocked: Dictionary, rng: RandomNumberGenerator, noise_rate: float, max_tries: int, rules_provider: Callable, min_x: int = 0, max_x: int = 0, min_y: int = 0, max_y: int = 0, enforce_symmetry: bool = false) -> Array:
+static func _jitter_positions(positions: Array, bounds: Array, bounds_set: Dictionary, blocked: Dictionary, rng: RandomNumberGenerator, noise_rate: float, max_tries: int, rules_provider: Callable, min_x: int = 0, max_x: int = 0, min_y: int = 0, max_y: int = 0, enforce_symmetry: bool = false, score_sample: int = 0) -> Array:
 	if positions.is_empty():
 		return positions
 	var count = int(round(positions.size() * noise_rate))
@@ -764,19 +770,28 @@ static func _jitter_positions(positions: Array, bounds: Array, bounds_set: Dicti
 		var rules: Array = []
 		if rules_provider.is_valid():
 			rules = rules_provider.call(positions)
-		var new_primary = _pick_open_cell_with_rules(bounds, bounds_set, blocked, rng, rules, max_tries)
+		var new_primary = Vector2i(-1, -1)
 		var new_mirror = Vector2i(-1, -1)
 		var valid = true
-		if new_primary == Vector2i(-1, -1):
-			valid = false
+		if score_sample > 0:
+			var pair = _pick_open_tile_pair_scored(bounds, bounds_set, blocked, rng, max_tries, min_x, max_x, min_y, max_y, [], 0, rules, positions, score_sample)
+			if pair.is_empty():
+				valid = false
+			else:
+				new_primary = pair[0]
+				new_mirror = pair[1]
 		else:
-			new_mirror = _mirror_cell(new_primary, min_x, max_x, min_y, max_y)
-			if not bounds_set.has(new_mirror):
+			new_primary = _pick_open_cell_with_rules(bounds, bounds_set, blocked, rng, rules, max_tries)
+			if new_primary == Vector2i(-1, -1):
 				valid = false
-			elif blocked.has(new_mirror):
-				valid = false
-			elif not _meets_distance_rules(new_mirror, rules):
-				valid = false
+			else:
+				new_mirror = _mirror_cell(new_primary, min_x, max_x, min_y, max_y)
+				if not bounds_set.has(new_mirror):
+					valid = false
+				elif blocked.has(new_mirror):
+					valid = false
+				elif not _meets_distance_rules(new_mirror, rules):
+					valid = false
 		if valid:
 			positions.append(new_primary)
 			positions_set[new_primary] = true
@@ -792,13 +807,16 @@ static func _jitter_positions(positions: Array, bounds: Array, bounds_set: Dicti
 				blocked[cell] = true
 	return positions
 
-static func _place_symmetric_tiles(count: int, bounds: Array, bounds_set: Dictionary, blocked: Dictionary, rng: RandomNumberGenerator, min_x: int, max_x: int, min_y: int, max_y: int, max_tries: int, refs: Array = [], min_dist: int = 0, rules: Array = [], avoid_self: bool = false, allow_center: bool = true) -> Array:
+static func _place_symmetric_tiles(count: int, bounds: Array, bounds_set: Dictionary, blocked: Dictionary, rng: RandomNumberGenerator, min_x: int, max_x: int, min_y: int, max_y: int, max_tries: int, refs: Array = [], min_dist: int = 0, rules: Array = [], avoid_self: bool = false, allow_center: bool = true, score_refs: Array = [], score_sample: int = 0) -> Array:
 	var placed := []
 	if count <= 0:
 		return placed
 	var remaining = count
 	var center = Vector2i(int((min_x + max_x) / 2), int((min_y + max_y) / 2))
 	var dynamic_refs = refs
+	var scoring_refs: Array = []
+	if score_sample > 0:
+		scoring_refs = score_refs.duplicate()
 	if avoid_self and min_dist > 0:
 		dynamic_refs = refs.duplicate()
 	if remaining % 2 == 1:
@@ -811,7 +829,11 @@ static func _place_symmetric_tiles(count: int, bounds: Array, bounds_set: Dictio
 					dynamic_refs.append(center)
 	var pair_count = int(remaining / 2)
 	for _i in range(pair_count):
-		var pair = _pick_open_tile_pair(bounds, bounds_set, blocked, rng, max_tries, min_x, max_x, min_y, max_y, dynamic_refs, min_dist, rules)
+		var pair: Array
+		if score_sample > 0:
+			pair = _pick_open_tile_pair_scored(bounds, bounds_set, blocked, rng, max_tries, min_x, max_x, min_y, max_y, dynamic_refs, min_dist, rules, scoring_refs, score_sample)
+		else:
+			pair = _pick_open_tile_pair(bounds, bounds_set, blocked, rng, max_tries, min_x, max_x, min_y, max_y, dynamic_refs, min_dist, rules)
 		if pair.is_empty():
 			break
 		for cell in pair:
@@ -819,6 +841,8 @@ static func _place_symmetric_tiles(count: int, bounds: Array, bounds_set: Dictio
 			blocked[cell] = true
 			if avoid_self and min_dist > 0:
 				dynamic_refs.append(cell)
+			if score_sample > 0:
+				scoring_refs.append(cell)
 	return placed
 
 static func _mirror_cell(cell: Vector2i, min_x: int, max_x: int, min_y: int, max_y: int) -> Vector2i:
@@ -854,6 +878,64 @@ static func _meets_min_distance(cell: Vector2i, refs: Array, min_dist: int) -> b
 		if _hex_distance(cell, ref) < min_dist:
 			return false
 	return true
+
+static func _repulsion_score(cell: Vector2i, refs: Array) -> float:
+	var score = 0.0
+	for ref in refs:
+		if typeof(ref) != TYPE_VECTOR2I:
+			continue
+		var dist = _hex_distance(cell, ref)
+		if dist <= 0:
+			continue
+		score += 1.0 / pow(float(dist), MINE_REPULSION_EXPONENT)
+	return score
+
+static func _pair_repulsion_score(cell: Vector2i, mirror: Vector2i, refs: Array) -> float:
+	var score = _repulsion_score(cell, refs)
+	if mirror != cell:
+		score += _repulsion_score(mirror, refs)
+	return score
+
+static func _pick_open_tile_pair_scored(bounds: Array, bounds_set: Dictionary, blocked: Dictionary, rng: RandomNumberGenerator, max_tries: int, min_x: int, max_x: int, min_y: int, max_y: int, refs: Array, min_dist: int, rules: Array, score_refs: Array, score_sample: int) -> Array:
+	if bounds.is_empty():
+		return []
+	var candidates := []
+	for _i in range(max_tries):
+		var idx = rng.randi_range(0, bounds.size() - 1)
+		var cell = bounds[idx]
+		var mirror = _mirror_cell(cell, min_x, max_x, min_y, max_y)
+		if mirror == cell:
+			continue
+		if not bounds_set.has(mirror):
+			continue
+		if blocked.has(cell) or blocked.has(mirror):
+			continue
+		if not _meets_min_distance(cell, refs, min_dist):
+			continue
+		if not _meets_min_distance(mirror, refs, min_dist):
+			continue
+		if not _meets_distance_rules(cell, rules):
+			continue
+		if not _meets_distance_rules(mirror, rules):
+			continue
+		var score = _pair_repulsion_score(cell, mirror, score_refs)
+		candidates.append({"pair": [cell, mirror], "score": score})
+	if candidates.is_empty():
+		return []
+	var total_weight = 0.0
+	for entry in candidates:
+		var score = float(entry["score"])
+		entry["weight"] = 1.0 / max(score, 0.001)
+		total_weight += float(entry["weight"])
+	if total_weight <= 0.0:
+		return candidates[rng.randi_range(0, candidates.size() - 1)]["pair"]
+	var roll = rng.randf_range(0.0, total_weight)
+	var running = 0.0
+	for entry in candidates:
+		running += float(entry["weight"])
+		if roll <= running:
+			return entry["pair"]
+	return candidates[candidates.size() - 1]["pair"]
 
 static func _hex_distance(a: Vector2i, b: Vector2i) -> int:
 	var ac = _offset_to_cube(a)
