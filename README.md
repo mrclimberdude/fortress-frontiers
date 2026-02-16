@@ -27,7 +27,7 @@ Each turn has three phases:
 2) Orders
 - Each unit can receive exactly one order.
 - Orders are hidden from the opponent until execution.
-- Units purchased during Orders are visible and interactable only to the purchasing player until the Spawn step.
+- Units purchased during Orders are visible and interactable only to the purchasing player until the Spawn step, and they begin providing vision at the start of that step.
 
 3) Execution (step-by-step)
 - Spawns (including ward vision)
@@ -77,6 +77,7 @@ Queued and repeating orders:
 - Wards are hidden from enemies except wizards (disabled wards are visible to all).
 - Explored (light) fog shows the last known structure and last known dragon on a tile, but not respawn countdowns.
 - Dragon color reflects its current reward type and is preserved in last-known fog memory.
+- Newly purchased units start contributing vision during the Spawn step of Execution.
 
 ## Resources
 

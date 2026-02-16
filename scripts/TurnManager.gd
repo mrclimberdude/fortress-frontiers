@@ -5448,6 +5448,13 @@ func _process_spawns():
 					continue
 				unit.is_moving = true
 				unit.moving_to = orders_source[player][unit_net_id]["path"][1]
+	var all_units = $GameBoardNode.get_all_units()
+	for player in ["player1", "player2"]:
+		for unit in all_units.get(player, []):
+			if unit == null:
+				continue
+			if unit.just_purchased and not unit.is_base and not unit.is_tower:
+				unit.just_purchased = false
 	$UI._draw_all()
 	$GameBoardNode/FogOfWar._update_fog()
 
