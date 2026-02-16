@@ -751,6 +751,11 @@ ok_button_text = "Submit"
 dialog_text = "You still have units without orders. Submit anyway?"
 cancel_button_text = "Go Back"
 
+[node name="ConfirmConcedeDialog" type="ConfirmationDialog" parent="UI"]
+title = "Concede Game?"
+ok_button_text = "Concede"
+dialog_text = "Are you sure you want to concede?"
+
 [node name="DevPanel" type="Panel" parent="UI"]
 visible = false
 offset_left = 6.0

@@ -81,6 +81,7 @@ var replay_metric_ids: Array = []
 @onready var next_unordered_button = $Panel/VBoxContainer/NextUnorderedButton as Button
 @onready var cancel_done_button = $CancelDoneButton as Button
 @onready var confirm_done_dialog = $ConfirmDoneDialog as ConfirmationDialog
+@onready var confirm_concede_dialog = $ConfirmConcedeDialog as ConfirmationDialog
 @onready var dev_mode_toggle = get_node(dev_mode_toggle_path) as CheckButton
 @onready var dev_panel = $DevPanel
 @onready var respawn_timers_toggle = $DevPanel/VBoxContainer/RespawnTimersCheckButton as CheckButton
@@ -281,6 +282,9 @@ func _ready():
 	if confirm_done_dialog != null:
 		confirm_done_dialog.connect("confirmed",
 					Callable(self, "_on_done_confirmed"))
+	if confirm_concede_dialog != null:
+		confirm_concede_dialog.connect("confirmed",
+					Callable(self, "_on_concede_confirmed"))
 	if damage_resize_handle != null:
 		damage_resize_handle.connect("gui_input",
 					Callable(self, "_on_damage_resize_input"))
@@ -1018,7 +1022,9 @@ func _on_menu_id_pressed(id: int) -> void:
 		_set_menu_checked(MENU_ID_DEV_MODE, next)
 		return
 	if id == MENU_ID_CONCEDE:
-		if turn_mgr != null:
+		if confirm_concede_dialog != null:
+			confirm_concede_dialog.popup_centered()
+		elif turn_mgr != null:
 			NetworkManager.request_concede(turn_mgr.local_player_id)
 		return
 	if id == MENU_ID_QUIT:
@@ -2630,9 +2636,13 @@ func _on_done_pressed():
 func _on_done_confirmed() -> void:
 	_submit_orders()
 
+func _on_concede_confirmed() -> void:
+	if turn_mgr != null:
+		NetworkManager.request_concede(turn_mgr.local_player_id)
+
 func _on_cancel_pressed():
 	NetworkManager.cancel_orders(current_player)
-	status_lbl.text = "Orders unsubmitted - edit and resubmit"
+	status_lbl.text = "Orders unsubmitted"
 	_draw_all()
 	currently_selected_unit = null
 	action_mode = ""
@@ -3892,6 +3902,18 @@ func _unhandled_input(ev):
 				action_menu.set_position(menu_pos)
 				action_menu.show()
 				return
+		var struct = game_board.get_structure_unit_at(cell)
+		if struct != null and struct.player_id == current_player and (struct.is_base or struct.is_tower):
+			_on_unit_selected(struct)
+			last_click_pos = ev.position
+			var struct_menu_pos = ev.position
+			var struct_menu_size = action_menu.size
+			var struct_viewport_size = get_viewport().get_visible_rect().size
+			if struct_menu_pos.y + struct_menu_size.y > struct_viewport_size.y:
+				struct_menu_pos.y = max(0.0, struct_menu_pos.y - struct_menu_size.y)
+			action_menu.set_position(struct_menu_pos)
+			action_menu.show()
+			return
 
 func _enter_replay_mode() -> void:
 	allow_clicks = false

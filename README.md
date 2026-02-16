@@ -1,5 +1,13 @@
 # Fortress Frontiers Rulebook
 
+## Introduction
+
+Fortress Frontiers is a competitive, turn-based strategy game where each player expands from a base and towers, secures mines for income, and fights for map control. You issue orders in secret, then watch the host resolve them step-by-step so positioning, timing, and risk management matter as much as raw strength.
+
+The map mixes open ground, forests, rivers, lakes, and mountains. Terrain changes movement costs and combat outcomes, while fog of war means information is partial and last-known. Neutral camps and dragons add pressure and rewards, and players can build roads, railroads, fortifications, traps, spawn towers, and magical infrastructure to shape the battlefield.
+
+Victory comes from destroying the enemy base, but the path there can involve economic play (mines, roads/rails), tactical fights (ranged vs melee, towers, buffs), and spell-driven swings. The rules below cover the core systems and their interactions in detail.
+
 ## Overview
 
 Fortress Frontiers is a two-player, host-authoritative, turn-based strategy game on a hex grid. Both players submit orders simultaneously. The host resolves those orders step-by-step and broadcasts authoritative snapshots to clients.
