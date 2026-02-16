@@ -54,6 +54,8 @@ var _map_select_names: Dictionary = {}
 var _queue_preview_unit_id: int = -1
 var _default_camera_zoom: Vector2 = Vector2.ZERO
 var replay_metric_ids: Array = []
+var replay_browser_entries: Array = []
+var _replay_name_syncing: bool = false
 
 @onready var turn_mgr = get_node(turn_manager_path) as Node
 @onready var unit_mgr = get_node(unit_manager_path) as Node
@@ -97,6 +99,7 @@ var replay_metric_ids: Array = []
 @onready var map_label = $MapLabel as Label
 @onready var username_label = $UsernameLabel as Label
 @onready var username_edit = $UsernameLineEdit as LineEdit
+@onready var replays_button = $ReplaysButton as Button
 @onready var lobby_panel = $LobbyPanel as Panel
 @onready var lobby_players = $LobbyPanel/VBoxContainer/PlayersList as VBoxContainer
 @onready var lobby_add_button = $LobbyPanel/VBoxContainer/SlotsRow/AddSlotButton as Button
@@ -115,6 +118,14 @@ var replay_metric_ids: Array = []
 @onready var proc_custom_dragons = $ProcCustomPanel/VBoxContainer/Grid/DragonEdit as LineEdit
 @onready var proc_custom_apply = $ProcCustomPanel/VBoxContainer/Buttons/ApplyButton as Button
 @onready var proc_custom_close = $ProcCustomPanel/VBoxContainer/Buttons/CloseButton as Button
+@onready var replay_browser_panel = $ReplayBrowserPanel as Panel
+@onready var replay_browser_list = $ReplayBrowserPanel/VBoxContainer/ReplayList as ItemList
+@onready var replay_browser_search = $ReplayBrowserPanel/VBoxContainer/SearchRow/SearchEdit as LineEdit
+@onready var replay_browser_status = $ReplayBrowserPanel/VBoxContainer/StatusLabel as Label
+@onready var replay_browser_view = $ReplayBrowserPanel/VBoxContainer/ButtonsRow/ViewReplayButton as Button
+@onready var replay_browser_stats = $ReplayBrowserPanel/VBoxContainer/ButtonsRow/ViewStatsButton as Button
+@onready var replay_browser_delete = $ReplayBrowserPanel/VBoxContainer/ButtonsRow/DeleteButton as Button
+@onready var replay_browser_close = $ReplayBrowserPanel/VBoxContainer/ButtonsRow/CloseButton as Button
 @onready var replay_panel = $ReplayPanel as Panel
 @onready var replay_turn_label = $ReplayPanel/VBoxContainer/TurnLabel as Label
 @onready var replay_prev_button = $ReplayPanel/VBoxContainer/ControlsRow/PrevButton as Button
@@ -126,6 +137,8 @@ var replay_metric_ids: Array = []
 @onready var replay_quit_button = $ReplayPanel/VBoxContainer/QuitToLobbyButton as Button
 @onready var keep_logs_game_over_check = $"../GameOver/KeepLogsCheckButton" as CheckButton
 @onready var keep_logs_replay_check = $ReplayPanel/VBoxContainer/KeepLogsCheckButton as CheckButton
+@onready var keep_logs_game_over_name = $"../GameOver/ReplayNameLineEdit" as LineEdit
+@onready var keep_logs_replay_name = $ReplayPanel/VBoxContainer/ReplayNameLineEdit as LineEdit
 @onready var replay_stats_panel = $ReplayStatsPanel as Window
 @onready var replay_stats_metric = $ReplayStatsPanel/VBoxContainer/ControlsRow/MetricOption as OptionButton
 @onready var replay_stats_player1 = $ReplayStatsPanel/VBoxContainer/ControlsRow/Player1Check as CheckButton
@@ -145,6 +158,7 @@ const FireballIcon = preload("res://assets/HK-Heightend Sensory Input v2/HSI - I
 const BuffIcon = preload("res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Objects/HSI_icon_139.png")
 const LightningIcon = preload("res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Objects/HSI_icon_174.png")
 const GlobalVisionIcon = preload("res://assets/HK-Heightend Sensory Input v2/HSI - Icons/HSI - Icon Objects/HSI_icon_177.png")
+const REPLAY_MANIFEST_PATH: String = "user://replay_index.json"
 const SAVE_SLOT_COUNT_UI: int = 3
 const ORDER_ICON_Z: int = 12
 const DAMAGE_PANEL_MIN_SIZE: Vector2 = Vector2(220, 120)
@@ -225,11 +239,15 @@ func _ready():
 		_default_camera_zoom = cam.zoom
 	if username_edit != null:
 		username_edit.text = _load_username()
+	if replay_browser_panel != null:
+		replay_browser_panel.visible = false
 	
 	$HostButton.connect("pressed",
 					Callable(self, "_on_host_pressed"))
 	$JoinButton.connect("pressed",
 					Callable(self, "_on_join_pressed"))
+	if replays_button != null:
+		replays_button.connect("pressed", Callable(self, "_on_replays_button_pressed"))
 	$CancelGameButton.connect("pressed",
 					Callable(self, "_on_cancel_game_pressed"))
 	if lobby_add_button != null:
@@ -254,6 +272,25 @@ func _ready():
 		keep_logs_game_over_check.connect("toggled", Callable(self, "_on_keep_logs_toggled"))
 	if keep_logs_replay_check != null and not keep_logs_replay_check.is_connected("toggled", Callable(self, "_on_keep_logs_toggled")):
 		keep_logs_replay_check.connect("toggled", Callable(self, "_on_keep_logs_toggled"))
+	if keep_logs_game_over_name != null and not keep_logs_game_over_name.is_connected("text_changed", Callable(self, "_on_replay_name_changed")):
+		keep_logs_game_over_name.connect("text_changed", Callable(self, "_on_replay_name_changed"))
+	if keep_logs_replay_name != null and not keep_logs_replay_name.is_connected("text_changed", Callable(self, "_on_replay_name_changed")):
+		keep_logs_replay_name.connect("text_changed", Callable(self, "_on_replay_name_changed"))
+	if replay_browser_list != null and not replay_browser_list.is_connected("item_selected", Callable(self, "_on_replay_browser_item_selected")):
+		replay_browser_list.connect("item_selected", Callable(self, "_on_replay_browser_item_selected"))
+	if replay_browser_search != null and not replay_browser_search.is_connected("text_changed", Callable(self, "_on_replay_browser_search_changed")):
+		replay_browser_search.connect("text_changed", Callable(self, "_on_replay_browser_search_changed"))
+	if replay_browser_view != null:
+		replay_browser_view.connect("pressed", Callable(self, "_on_replay_browser_view_pressed"))
+	if replay_browser_stats != null:
+		replay_browser_stats.connect("pressed", Callable(self, "_on_replay_browser_stats_pressed"))
+	if replay_browser_delete != null:
+		replay_browser_delete.connect("pressed", Callable(self, "_on_replay_browser_delete_pressed"))
+	if replay_browser_close != null:
+		replay_browser_close.connect("pressed", Callable(self, "_on_replay_browser_close_pressed"))
+	if turn_mgr != null and turn_mgr.has_signal("host_replay_ready_changed"):
+		turn_mgr.connect("host_replay_ready_changed", Callable(self, "_on_host_replay_ready_changed"))
+	_refresh_keep_logs_controls()
 	
 	# dev mode connections
 	dev_mode_toggle.connect("toggled",
@@ -1987,6 +2024,8 @@ func _show_main_menu() -> void:
 	$JoinButton.visible = true
 	$IPLineEdit.visible = true
 	$PortLineEdit.visible = true
+	if replays_button != null:
+		replays_button.visible = true
 	$Panel.visible = false
 	if resource_panel != null:
 		resource_panel.visible = false
@@ -2000,9 +2039,12 @@ func _show_main_menu() -> void:
 	lobby_slots_payload = []
 	if proc_custom_panel != null:
 		proc_custom_panel.visible = false
+	if replay_browser_panel != null:
+		replay_browser_panel.visible = false
 	$CancelGameButton.visible = false
 	if lobby_start_button != null:
 		lobby_start_button.disabled = true
+	_set_main_menu_interactive(true)
 
 func _show_lobby(is_host: bool) -> void:
 	if username_label != null:
@@ -2013,6 +2055,8 @@ func _show_lobby(is_host: bool) -> void:
 	$JoinButton.visible = false
 	$IPLineEdit.visible = false
 	$PortLineEdit.visible = false
+	if replays_button != null:
+		replays_button.visible = false
 	if map_select != null:
 		map_select.visible = true
 		map_select.disabled = not is_host
@@ -2022,6 +2066,8 @@ func _show_lobby(is_host: bool) -> void:
 		lobby_panel.visible = true
 	if proc_custom_panel != null:
 		proc_custom_panel.visible = false
+	if replay_browser_panel != null:
+		replay_browser_panel.visible = false
 	$CancelGameButton.visible = true
 	if lobby_add_button != null:
 		lobby_add_button.visible = is_host
@@ -2095,9 +2141,12 @@ func _on_game_started() -> void:
 		map_label.visible = false
 	if proc_custom_panel != null:
 		proc_custom_panel.visible = false
+	if replay_browser_panel != null:
+		replay_browser_panel.visible = false
 	if $CancelGameButton != null:
 		$CancelGameButton.visible = false
 	_set_keep_logs_checked(false)
+	_reset_replay_name_inputs()
 
 func _on_host_pressed():
 	var username = ""
@@ -2142,9 +2191,77 @@ func _set_keep_logs_checked(value: bool) -> void:
 			keep_logs_replay_check.button_pressed = value
 	if turn_mgr != null and turn_mgr.has_method("set_keep_dev_logs"):
 		turn_mgr.set_keep_dev_logs(value)
+	_update_replay_name_visibility()
 
 func _on_keep_logs_toggled(enabled: bool) -> void:
+	if enabled and not _can_enable_keep_logs():
+		_set_keep_logs_checked(false)
+		return
 	_set_keep_logs_checked(enabled)
+
+func _can_enable_keep_logs() -> bool:
+	if turn_mgr != null and turn_mgr.has_method("is_host_replay_ready"):
+		return bool(turn_mgr.is_host_replay_ready())
+	return true
+
+func _is_keep_logs_checked() -> bool:
+	if keep_logs_game_over_check != null and keep_logs_game_over_check.button_pressed:
+		return true
+	if keep_logs_replay_check != null and keep_logs_replay_check.button_pressed:
+		return true
+	return false
+
+func _update_replay_name_visibility() -> void:
+	var ready = _can_enable_keep_logs()
+	var show_name = ready and _is_keep_logs_checked()
+	if keep_logs_game_over_name != null:
+		keep_logs_game_over_name.visible = show_name
+	if keep_logs_replay_name != null:
+		keep_logs_replay_name.visible = show_name
+
+func _set_replay_name_text(value: String) -> void:
+	if _replay_name_syncing:
+		return
+	_replay_name_syncing = true
+	if keep_logs_game_over_name != null:
+		keep_logs_game_over_name.text = value
+	if keep_logs_replay_name != null:
+		keep_logs_replay_name.text = value
+	_replay_name_syncing = false
+
+func _reset_replay_name_inputs() -> void:
+	_set_replay_name_text("")
+	if turn_mgr != null and turn_mgr.has_method("set_replay_name_override"):
+		turn_mgr.set_replay_name_override("")
+	_update_replay_name_visibility()
+
+func _on_replay_name_changed(value: String) -> void:
+	if _replay_name_syncing:
+		return
+	if turn_mgr != null and turn_mgr.has_method("set_replay_name_override"):
+		turn_mgr.set_replay_name_override(value)
+	var focus = get_viewport().gui_get_focus_owner()
+	_replay_name_syncing = true
+	if keep_logs_game_over_name != null and keep_logs_game_over_name != focus:
+		if keep_logs_game_over_name.text != value:
+			keep_logs_game_over_name.text = value
+	if keep_logs_replay_name != null and keep_logs_replay_name != focus:
+		if keep_logs_replay_name.text != value:
+			keep_logs_replay_name.text = value
+	_replay_name_syncing = false
+
+func _refresh_keep_logs_controls() -> void:
+	var ready = _can_enable_keep_logs()
+	if keep_logs_game_over_check != null:
+		keep_logs_game_over_check.disabled = not ready
+	if keep_logs_replay_check != null:
+		keep_logs_replay_check.disabled = not ready
+	if not ready and _is_keep_logs_checked():
+		_set_keep_logs_checked(false)
+	_update_replay_name_visibility()
+
+func _on_host_replay_ready_changed(_ready: bool) -> void:
+	_refresh_keep_logs_controls()
 
 func _on_cancel_game_pressed():
 	_show_main_menu()
@@ -2159,6 +2276,231 @@ func _on_cancel_game_pressed():
 	_update_done_button_state()
 	NetworkManager.close_connection()
 	_set_keep_logs_checked(false)
+	_reset_replay_name_inputs()
+
+func _set_main_menu_interactive(enabled: bool) -> void:
+	if $HostButton != null:
+		$HostButton.disabled = not enabled
+	if $JoinButton != null:
+		$JoinButton.disabled = not enabled
+	if $IPLineEdit != null:
+		$IPLineEdit.editable = enabled
+	if $PortLineEdit != null:
+		$PortLineEdit.editable = enabled
+	if username_edit != null:
+		username_edit.editable = enabled
+	if replays_button != null:
+		replays_button.disabled = not enabled
+
+func _hide_main_menu_controls() -> void:
+	if username_label != null:
+		username_label.visible = false
+	if username_edit != null:
+		username_edit.visible = false
+	if $HostButton != null:
+		$HostButton.visible = false
+	if $JoinButton != null:
+		$JoinButton.visible = false
+	if $IPLineEdit != null:
+		$IPLineEdit.visible = false
+	if $PortLineEdit != null:
+		$PortLineEdit.visible = false
+	if map_select != null:
+		map_select.visible = false
+	if map_label != null:
+		map_label.visible = false
+	if replays_button != null:
+		replays_button.visible = false
+	if replay_browser_panel != null:
+		replay_browser_panel.visible = false
+
+func _on_replays_button_pressed() -> void:
+	_show_replay_browser()
+
+func _show_replay_browser() -> void:
+	if replay_browser_panel == null:
+		return
+	replay_browser_panel.visible = true
+	_set_main_menu_interactive(false)
+	_refresh_replay_browser_list()
+
+func _on_replay_browser_close_pressed() -> void:
+	if replay_browser_panel != null:
+		replay_browser_panel.visible = false
+	_set_main_menu_interactive(true)
+
+func _on_replay_browser_search_changed(_value: String) -> void:
+	_refresh_replay_browser_list()
+
+func _on_replay_browser_item_selected(_index: int) -> void:
+	_update_replay_browser_buttons()
+
+func _update_replay_browser_buttons() -> void:
+	var has_selection = false
+	if replay_browser_list != null:
+		has_selection = replay_browser_list.get_selected_items().size() > 0
+	if replay_browser_view != null:
+		replay_browser_view.disabled = not has_selection
+	if replay_browser_stats != null:
+		replay_browser_stats.disabled = not has_selection
+	if replay_browser_delete != null:
+		replay_browser_delete.disabled = not has_selection
+
+func _get_selected_replay_entry() -> Dictionary:
+	if replay_browser_list == null:
+		return {}
+	var selected = replay_browser_list.get_selected_items()
+	if selected.is_empty():
+		return {}
+	var idx = int(selected[0])
+	if idx < 0 or idx >= replay_browser_entries.size():
+		return {}
+	var entry = replay_browser_entries[idx]
+	if entry is Dictionary:
+		return entry
+	return {}
+
+func _replay_entry_path(entry: Dictionary) -> String:
+	var path = str(entry.get("path", "")).strip_edges()
+	if path == "" and entry.has("file"):
+		path = "user://%s" % str(entry.get("file", "")).strip_edges()
+	return path
+
+func _format_replay_entry(entry: Dictionary) -> String:
+	var name = str(entry.get("name", "")).strip_edges()
+	if name == "":
+		name = str(entry.get("timestamp", "")).strip_edges()
+	if name == "":
+		name = str(entry.get("file", "Replay"))
+	var players = entry.get("players", [])
+	var players_text = ""
+	if players is Array and players.size() > 0:
+		players_text = ", ".join(players)
+	var map_name = str(entry.get("map_name", "")).strip_edges()
+	var date_text = str(entry.get("timestamp", "")).strip_edges()
+	var parts: Array = [name]
+	if players_text != "":
+		parts.append(players_text)
+	if map_name != "":
+		parts.append(map_name)
+	if date_text != "":
+		parts.append(date_text)
+	return " | ".join(parts)
+
+func _refresh_replay_browser_list() -> void:
+	if replay_browser_list == null:
+		return
+	replay_browser_list.clear()
+	replay_browser_entries.clear()
+	var raw_entries = _load_replay_manifest_entries()
+	var entries: Array = []
+	for entry in raw_entries:
+		if entry is Dictionary:
+			entries.append(entry)
+	entries.sort_custom(func(a, b): return int(a.get("timestamp_unix", 0)) > int(b.get("timestamp_unix", 0)))
+	var search = ""
+	if replay_browser_search != null:
+		search = replay_browser_search.text.strip_edges().to_lower()
+	for entry in entries:
+		var path = _replay_entry_path(entry)
+		if path == "" or not FileAccess.file_exists(path):
+			continue
+		var label = _format_replay_entry(entry)
+		if search != "" and label.to_lower().find(search) == -1:
+			continue
+		replay_browser_entries.append(entry)
+		replay_browser_list.add_item(label)
+	_update_replay_browser_buttons()
+	if replay_browser_status != null:
+		replay_browser_status.text = "No saved replays." if replay_browser_entries.is_empty() else ""
+
+func _load_replay_manifest_entries() -> Array:
+	var path = REPLAY_MANIFEST_PATH
+	if turn_mgr != null and turn_mgr.has_method("get_replay_manifest_path"):
+		path = str(turn_mgr.get_replay_manifest_path())
+	if not FileAccess.file_exists(path):
+		return []
+	var file = FileAccess.open(path, FileAccess.READ)
+	if file == null:
+		return []
+	var parsed = JSON.parse_string(file.get_as_text())
+	if typeof(parsed) != TYPE_DICTIONARY:
+		return []
+	var entries = parsed.get("entries", [])
+	if entries is Array:
+		return entries
+	return []
+
+func _save_replay_manifest_entries(entries: Array) -> void:
+	var path = REPLAY_MANIFEST_PATH
+	if turn_mgr != null and turn_mgr.has_method("get_replay_manifest_path"):
+		path = str(turn_mgr.get_replay_manifest_path())
+	var manifest = {
+		"version": 1,
+		"entries": entries
+	}
+	var file = FileAccess.open(path, FileAccess.WRITE)
+	if file == null:
+		return
+	file.store_string(JSON.stringify(manifest))
+	file.close()
+
+func _delete_replay_file(path: String) -> void:
+	if path == "":
+		return
+	if not FileAccess.file_exists(path):
+		return
+	var dir = DirAccess.open("user://")
+	if dir != null:
+		dir.remove(path.get_file())
+
+func _on_replay_browser_view_pressed() -> void:
+	var entry = _get_selected_replay_entry()
+	if entry.is_empty():
+		return
+	var path = _replay_entry_path(entry)
+	if path == "":
+		return
+	if turn_mgr != null and turn_mgr.start_replay(path, "none"):
+		_hide_main_menu_controls()
+		if replay_browser_panel != null:
+			replay_browser_panel.visible = false
+		if has_method("_enter_replay_mode"):
+			_enter_replay_mode()
+
+func _on_replay_browser_stats_pressed() -> void:
+	var entry = _get_selected_replay_entry()
+	if entry.is_empty() or turn_mgr == null:
+		return
+	var path = _replay_entry_path(entry)
+	if path == "":
+		return
+	if not turn_mgr.has_method("_load_replay_log"):
+		return
+	var data = turn_mgr._load_replay_log(path)
+	if data.is_empty():
+		return
+	turn_mgr.replay_data = data
+	if replay_browser_panel != null:
+		replay_browser_panel.visible = false
+	_set_main_menu_interactive(true)
+	_show_replay_stats()
+
+func _on_replay_browser_delete_pressed() -> void:
+	var entry = _get_selected_replay_entry()
+	if entry.is_empty():
+		return
+	var path = _replay_entry_path(entry)
+	var entries = _load_replay_manifest_entries()
+	var file_name = path.get_file()
+	for idx in range(entries.size() - 1, -1, -1):
+		var existing = entries[idx]
+		if existing is Dictionary:
+			if str(existing.get("path", "")) == path or str(existing.get("file", "")) == file_name:
+				entries.remove_at(idx)
+	_save_replay_manifest_entries(entries)
+	_delete_replay_file(path)
+	_refresh_replay_browser_list()
 
 func _on_finish_move_button_pressed():
 	if action_mode == "build_road_to":
@@ -3957,7 +4299,15 @@ func _enter_replay_mode() -> void:
 		replay_fog_option.add_item("Player 2", 1)
 		replay_fog_option.add_item("No Fog", 2)
 	if replay_fog_option != null:
-		replay_fog_option.select(0)
+		var mode = ""
+		if turn_mgr != null:
+			mode = str(turn_mgr.get("replay_fog_mode"))
+		var selected = 0
+		if mode == "player2":
+			selected = 1
+		elif mode == "none":
+			selected = 2
+		replay_fog_option.select(selected)
 	if replay_phase_toggle != null:
 		replay_phase_toggle.button_pressed = false
 

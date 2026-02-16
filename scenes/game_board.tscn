@@ -234,6 +234,21 @@ grow_horizontal = 2
 grow_vertical = 2
 text = "Keep Dev Logs"
 
+[node name="ReplayNameLineEdit" type="LineEdit" parent="GameOver"]
+visible = false
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -220.0
+offset_top = 295.0
+offset_right = 220.0
+offset_bottom = 325.0
+grow_horizontal = 2
+grow_vertical = 2
+placeholder_text = "Replay name (optional)"
+
 [node name="UI" type="CanvasLayer" parent="."]
 script = ExtResource("6_qxawf")
 turn_manager_path = NodePath("..")
@@ -385,10 +400,10 @@ anchor_left = 0.227
 anchor_top = 0.544
 anchor_right = 0.84
 anchor_bottom = 0.659
-offset_left = 166.496
-offset_top = 66.488
-offset_right = -397.68
-offset_bottom = 52.968
+offset_left = 212.496
+offset_top = 119.488
+offset_right = -342.68
+offset_bottom = 103.968
 text = "Host Game
 "
 
@@ -398,11 +413,18 @@ anchor_left = 0.242
 anchor_top = 0.782
 anchor_right = 0.824
 anchor_bottom = 0.907
-offset_left = 345.216
-offset_top = -89.736
-offset_right = -184.248
-offset_bottom = -111.736
+offset_left = 379.216
+offset_top = -34.736
+offset_right = -150.248
+offset_bottom = -56.736
 text = "Join Game"
+
+[node name="ReplaysButton" type="Button" parent="UI"]
+offset_left = 518.0
+offset_top = 410.0
+offset_right = 725.0
+offset_bottom = 448.0
+text = "Replays"
 
 [node name="IPLineEdit" type="LineEdit" parent="UI"]
 offset_left = 518.0
@@ -461,6 +483,64 @@ text = "- Slot"
 [node name="StartGameButton" type="Button" parent="UI/LobbyPanel/VBoxContainer"]
 layout_mode = 2
 text = "Start Game"
+
+[node name="ReplayBrowserPanel" type="Panel" parent="UI"]
+visible = false
+offset_left = 180.0
+offset_top = 120.0
+offset_right = 900.0
+offset_bottom = 620.0
+mouse_filter = 2
+
+[node name="VBoxContainer" type="VBoxContainer" parent="UI/ReplayBrowserPanel"]
+layout_mode = 0
+offset_left = 10.0
+offset_top = 10.0
+offset_right = 710.0
+offset_bottom = 490.0
+
+[node name="TitleLabel" type="Label" parent="UI/ReplayBrowserPanel/VBoxContainer"]
+layout_mode = 2
+text = "Replays"
+
+[node name="SearchRow" type="HBoxContainer" parent="UI/ReplayBrowserPanel/VBoxContainer"]
+layout_mode = 2
+
+[node name="SearchLabel" type="Label" parent="UI/ReplayBrowserPanel/VBoxContainer/SearchRow"]
+layout_mode = 2
+text = "Search"
+
+[node name="SearchEdit" type="LineEdit" parent="UI/ReplayBrowserPanel/VBoxContainer/SearchRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="StatusLabel" type="Label" parent="UI/ReplayBrowserPanel/VBoxContainer"]
+layout_mode = 2
+
+[node name="ReplayList" type="ItemList" parent="UI/ReplayBrowserPanel/VBoxContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+allow_reselect = true
+
+[node name="ButtonsRow" type="HBoxContainer" parent="UI/ReplayBrowserPanel/VBoxContainer"]
+layout_mode = 2
+
+[node name="ViewReplayButton" type="Button" parent="UI/ReplayBrowserPanel/VBoxContainer/ButtonsRow"]
+layout_mode = 2
+text = "View Replay"
+
+[node name="ViewStatsButton" type="Button" parent="UI/ReplayBrowserPanel/VBoxContainer/ButtonsRow"]
+layout_mode = 2
+text = "View Stats"
+
+[node name="DeleteButton" type="Button" parent="UI/ReplayBrowserPanel/VBoxContainer/ButtonsRow"]
+layout_mode = 2
+text = "Delete"
+
+[node name="CloseButton" type="Button" parent="UI/ReplayBrowserPanel/VBoxContainer/ButtonsRow"]
+layout_mode = 2
+text = "Close"
 
 [node name="Panel" type="Panel" parent="UI"]
 visible = false
@@ -911,6 +991,11 @@ text = "Exit Replay"
 [node name="KeepLogsCheckButton" type="CheckButton" parent="UI/ReplayPanel/VBoxContainer"]
 layout_mode = 2
 text = "Keep Dev Logs"
+
+[node name="ReplayNameLineEdit" type="LineEdit" parent="UI/ReplayPanel/VBoxContainer"]
+visible = false
+layout_mode = 2
+placeholder_text = "Replay name (optional)"
 
 [node name="QuitToLobbyButton" type="Button" parent="UI/ReplayPanel/VBoxContainer"]
 layout_mode = 2

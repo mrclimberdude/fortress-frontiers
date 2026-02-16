@@ -6,6 +6,7 @@ signal orders_phase_begin(player: String)
 signal orders_phase_end()
 signal state_applied()
 signal replay_state_changed(turn: int, phase: int)
+signal host_replay_ready_changed(ready: bool)
 
 signal execution_paused(phase)   # emitted after each phase
 signal execution_complete()      # emitted at the end
@@ -37,6 +38,10 @@ var dev_log_path: String = ""
 var dev_log_file: FileAccess = null
 var host_replay_log_path: String = ""
 var keep_dev_logs: bool = false
+var host_replay_ready: bool = false
+var replay_name_override: String = ""
+var pending_replay_meta: Dictionary = {}
+var pending_replay_delete: bool = false
 var last_snapshot_turn: int = -1
 var game_over: bool = false
 var match_init_logged: bool = false
@@ -52,6 +57,8 @@ var replay_target_phase: int = 2
 var replay_phase_mode: bool = false
 var replay_fog_mode: String = ""
 const DEV_LOG_VERSION: int = 1
+const REPLAY_MANIFEST_PATH: String = "user://replay_index.json"
+const REPLAY_MANIFEST_VERSION: int = 1
 
 func _map_category_for(md: MapData) -> String:
 	if md == null:
@@ -130,6 +137,8 @@ func _ensure_dev_log_open() -> void:
 	if dev_log_file == null:
 		push_error("Dev log: failed to open %s" % dev_log_path)
 		return
+	if _is_host():
+		_set_host_replay_ready(true)
 	_devlog({
 		"type": "log_start",
 		"version": DEV_LOG_VERSION,
@@ -146,6 +155,21 @@ func _close_dev_log() -> void:
 func set_keep_dev_logs(keep: bool) -> void:
 	keep_dev_logs = keep
 
+func set_replay_name_override(name: String) -> void:
+	replay_name_override = name.strip_edges()
+
+func is_host_replay_ready() -> bool:
+	return host_replay_ready
+
+func get_replay_manifest_path() -> String:
+	return REPLAY_MANIFEST_PATH
+
+func _set_host_replay_ready(ready: bool) -> void:
+	if host_replay_ready == ready:
+		return
+	host_replay_ready = ready
+	emit_signal("host_replay_ready_changed", host_replay_ready)
+
 func _delete_log_file(path: String) -> void:
 	if path == "":
 		return
@@ -157,6 +181,12 @@ func _delete_log_file(path: String) -> void:
 
 func set_host_replay_log_path(path: String) -> void:
 	host_replay_log_path = path
+	_set_host_replay_ready(path != "")
+	if pending_replay_delete and not keep_dev_logs and host_replay_log_path != "":
+		_delete_log_file(host_replay_log_path)
+		host_replay_log_path = ""
+		_set_host_replay_ready(false)
+		pending_replay_delete = false
 
 func _get_replay_source_path() -> String:
 	if host_replay_log_path != "":
@@ -179,6 +209,141 @@ func _devlog_encode(value):
 			arr.append(_devlog_encode(v))
 		return arr
 	return value
+
+func _format_datetime_label(dt: Dictionary) -> String:
+	return "%04d-%02d-%02d %02d:%02d:%02d" % [
+		int(dt.get("year", 0)),
+		int(dt.get("month", 0)),
+		int(dt.get("day", 0)),
+		int(dt.get("hour", 0)),
+		int(dt.get("minute", 0)),
+		int(dt.get("second", 0))
+	]
+
+func _collect_replay_usernames() -> Array:
+	var names: Array = []
+	if NetworkManager != null and NetworkManager.lobby_slots.size() > 0:
+		for slot in NetworkManager.lobby_slots:
+			var occupied = true
+			if slot.has("occupied"):
+				occupied = bool(slot.get("occupied", true))
+			elif slot.has("peer_id"):
+				occupied = int(slot.get("peer_id", 0)) != 0
+			if not occupied:
+				continue
+			var name = str(slot.get("username", "")).strip_edges()
+			if name == "":
+				name = str(slot.get("player_id", "")).strip_edges()
+			if name != "":
+				names.append(name)
+	if names.is_empty():
+		names = ["Player 1", "Player 2"]
+	return names
+
+func _collect_replay_player_ids() -> Array:
+	var ids: Array = []
+	if NetworkManager != null and NetworkManager.lobby_slots.size() > 0:
+		for slot in NetworkManager.lobby_slots:
+			var occupied = true
+			if slot.has("occupied"):
+				occupied = bool(slot.get("occupied", true))
+			elif slot.has("peer_id"):
+				occupied = int(slot.get("peer_id", 0)) != 0
+			if not occupied:
+				continue
+			var pid = str(slot.get("player_id", "")).strip_edges()
+			if pid != "":
+				ids.append(pid)
+	if ids.is_empty():
+		ids = ["player1", "player2"]
+	return ids
+
+func _prepare_replay_metadata(loser_id: String) -> void:
+	var md: MapData = null
+	if current_map_index >= 0 and current_map_index < map_data.size():
+		md = map_data[current_map_index]
+	var dt = Time.get_datetime_dict_from_system()
+	var timestamp_label = _format_datetime_label(dt)
+	var replay_names = _collect_replay_usernames()
+	var replay_ids = _collect_replay_player_ids()
+	var map_name = ""
+	if md != null:
+		map_name = str(md.map_name).strip_edges()
+	if map_name == "" and current_map_index >= 0:
+		map_name = "Map %d" % current_map_index
+	var winner_id = ""
+	if loser_id == "player1":
+		winner_id = "player2"
+	elif loser_id == "player2":
+		winner_id = "player1"
+	pending_replay_meta = {
+		"loser_id": loser_id,
+		"winner_id": winner_id,
+		"end_turn": int(turn_number),
+		"timestamp": timestamp_label,
+		"timestamp_unix": int(Time.get_unix_time_from_system()),
+		"map_index": int(current_map_index),
+		"map_name": map_name,
+		"map_category": _map_category_for(md),
+		"map_size": _map_size_for(md),
+		"players": replay_names,
+		"player_ids": replay_ids,
+		"player_count": int(replay_ids.size()),
+		"map_selection_mode": NetworkManager.map_selection_mode if NetworkManager != null else ""
+	}
+
+func _load_replay_manifest() -> Dictionary:
+	var manifest := {
+		"version": REPLAY_MANIFEST_VERSION,
+		"entries": []
+	}
+	if not FileAccess.file_exists(REPLAY_MANIFEST_PATH):
+		return manifest
+	var file = FileAccess.open(REPLAY_MANIFEST_PATH, FileAccess.READ)
+	if file == null:
+		return manifest
+	var text = file.get_as_text()
+	var parsed = JSON.parse_string(text)
+	if typeof(parsed) != TYPE_DICTIONARY:
+		return manifest
+	manifest = parsed
+	if not manifest.has("entries") or not (manifest["entries"] is Array):
+		manifest["entries"] = []
+	manifest["version"] = int(manifest.get("version", REPLAY_MANIFEST_VERSION))
+	return manifest
+
+func _write_replay_manifest_entry(replay_path: String) -> void:
+	if replay_path == "":
+		return
+	if pending_replay_meta.is_empty():
+		return
+	var entry = pending_replay_meta.duplicate(true)
+	entry["path"] = replay_path
+	entry["file"] = replay_path.get_file()
+	var custom_name = replay_name_override.strip_edges()
+	entry["custom_name"] = custom_name
+	if custom_name != "":
+		entry["name"] = custom_name
+	else:
+		var fallback = str(entry.get("timestamp", "")).strip_edges()
+		if fallback == "":
+			fallback = entry["file"]
+		entry["name"] = fallback
+	var manifest = _load_replay_manifest()
+	var entries: Array = manifest.get("entries", [])
+	for idx in range(entries.size() - 1, -1, -1):
+		var existing = entries[idx]
+		if existing is Dictionary:
+			if str(existing.get("file", "")) == entry["file"] or str(existing.get("path", "")) == entry["path"]:
+				entries.remove_at(idx)
+	entries.append(entry)
+	manifest["entries"] = entries
+	manifest["version"] = REPLAY_MANIFEST_VERSION
+	var out_file = FileAccess.open(REPLAY_MANIFEST_PATH, FileAccess.WRITE)
+	if out_file == null:
+		return
+	out_file.store_string(JSON.stringify(manifest))
+	out_file.close()
 
 func _decode_log_vec2i(value) -> Vector2i:
 	if value is Vector2i:
@@ -3613,6 +3778,7 @@ func _add_neutral_marker(root: Node2D, pos: Vector2i, text: String) -> void:
 
 func _show_game_over(player_id: String) -> void:
 	game_over = true
+	_prepare_replay_metadata(player_id)
 	$GameOver/GameOverLabel.add_theme_font_size_override("font_size", 100)
 	$GameOver/GameOverLabel.text = "%s lost!" % player_id
 	$GameOver.visible = true
@@ -3624,7 +3790,8 @@ func _set_game_over_controls_visible(visible: bool) -> void:
 		"QuitToLobbyButton",
 		"ReplayButton",
 		"ReplayStatsButton",
-		"KeepLogsCheckButton"
+		"KeepLogsCheckButton",
+		"ReplayNameLineEdit"
 	]
 	for name in nodes:
 		var node = $GameOver.get_node_or_null(name)
@@ -3685,6 +3852,17 @@ func reset_to_lobby() -> void:
 	var log_path = dev_log_path
 	var replay_path = host_replay_log_path
 	var keep_logs = keep_dev_logs
+	var manifest_replay_path = ""
+	if _is_host():
+		manifest_replay_path = log_path if log_path != "" else replay_path
+	else:
+		manifest_replay_path = replay_path
+	var can_keep = keep_logs and manifest_replay_path != "" and (_is_host() or host_replay_ready)
+	if can_keep:
+		_write_replay_manifest_entry(manifest_replay_path)
+	else:
+		keep_logs = false
+	pending_replay_delete = not keep_logs
 	_close_dev_log()
 	if not keep_logs:
 		_delete_log_file(log_path)
@@ -3692,6 +3870,7 @@ func reset_to_lobby() -> void:
 			_delete_log_file(replay_path)
 	rng.randomize()
 	host_replay_log_path = ""
+	_set_host_replay_ready(false)
 	game_over = false
 	match_init_logged = false
 	_reset_map_state()
@@ -3738,6 +3917,8 @@ func reset_to_lobby() -> void:
 	$UI/DamagePanel.visible = false
 	$GameOver.visible = false
 	keep_dev_logs = false
+	pending_replay_meta = {}
+	replay_name_override = ""
 
 # --------------------------------------------------------
 # Main loop: Upkeep → Orders → Execution → increment → loop
