@@ -98,6 +98,7 @@ var _replay_name_syncing: bool = false
 @onready var menu_button = $MenuButton as MenuButton
 @onready var damage_panel = $DamagePanel as Panel
 @onready var damage_scroll = $DamagePanel/ScrollContainer as ScrollContainer
+@onready var damage_report_list = $DamagePanel/ScrollContainer/VBoxContainer as VBoxContainer
 @onready var damage_toggle_button = $DamagePanel/ToggleDamageButton as Button
 @onready var damage_resize_handle = $DamagePanel/ResizeHandle as Control
 @onready var finish_move_button = $Panel/FinishMoveButton
@@ -1949,6 +1950,7 @@ func _update_damage_panel() -> void:
 		damage_panel.custom_minimum_size = Vector2(damage_panel_full_size.x, header_height)
 		_apply_damage_panel_size(Vector2(damage_panel_full_size.x, header_height))
 		damage_toggle_button.text = "+"
+		_clear_damage_report_hover()
 	else:
 		damage_scroll.visible = true
 		damage_panel.custom_minimum_size = Vector2.ZERO
@@ -2002,6 +2004,62 @@ func _update_auto_pass_for_damage() -> void:
 			else:
 				auto_pass_check.button_pressed = false
 	last_damage_log_count = current
+
+func _damage_entry_tiles(entry: Dictionary) -> Array:
+	var tiles: Array = []
+	if entry.has("tiles") and entry["tiles"] is Array:
+		for tile in entry["tiles"]:
+			if typeof(tile) == TYPE_VECTOR2I and not tiles.has(tile):
+				tiles.append(tile)
+	for key in ["attacker_tile", "defender_tile", "target_tile", "tile"]:
+		if entry.has(key):
+			var tile = entry.get(key)
+			if typeof(tile) == TYPE_VECTOR2I and tile != Vector2i(-9999, -9999) and not tiles.has(tile):
+				tiles.append(tile)
+	return tiles
+
+func _clear_damage_report_hover() -> void:
+	if game_board != null and game_board.has_method("clear_damage_hover_highlights"):
+		game_board.clear_damage_hover_highlights()
+
+func _on_damage_report_entry_hovered(entry: Dictionary) -> void:
+	if game_board == null or not game_board.has_method("show_damage_hover_highlights"):
+		return
+	var tiles = _damage_entry_tiles(entry)
+	if tiles.is_empty():
+		game_board.clear_damage_hover_highlights()
+		return
+	game_board.show_damage_hover_highlights(tiles)
+
+func _on_damage_report_entry_unhovered() -> void:
+	_clear_damage_report_hover()
+
+func render_damage_report() -> void:
+	if damage_report_list == null or turn_mgr == null:
+		return
+	for child in damage_report_list.get_children():
+		child.queue_free()
+	_clear_damage_report_hover()
+	var local_id = turn_mgr.local_player_id
+	if local_id == "":
+		return
+	var entries = turn_mgr.damage_log_entries.get(local_id, [])
+	if not (entries is Array):
+		return
+	for entry in entries:
+		if not (entry is Dictionary):
+			continue
+		var text = str(entry.get("text", ""))
+		if text == "":
+			continue
+		var report_label = Label.new()
+		report_label.text = text
+		report_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		report_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		report_label.mouse_filter = Control.MOUSE_FILTER_PASS
+		report_label.connect("mouse_entered", Callable(self, "_on_damage_report_entry_hovered").bind(entry))
+		report_label.connect("mouse_exited", Callable(self, "_on_damage_report_entry_unhovered"))
+		damage_report_list.add_child(report_label)
 
 func _has_unordered_units(player_id: String) -> bool:
 	if player_id == "":
@@ -3259,6 +3317,7 @@ func _reset_ui_for_snapshot() -> void:
 	_clear_all_drawings()
 	_hide_build_hover()
 	_hide_queue_hover()
+	_clear_damage_report_hover()
 
 func _submit_orders() -> void:
 	game_board.clear_highlights()
@@ -4326,6 +4385,7 @@ func _on_state_applied() -> void:
 		$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
 		_update_done_button_state()
 	_draw_all()
+	render_damage_report()
 	_update_auto_pass_for_damage()
 
 func _update_turn_label() -> void:

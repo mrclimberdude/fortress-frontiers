@@ -9,6 +9,7 @@ var terrain_overlay: TileMapLayer = null
 var occupied_tiles: Dictionary = {}
 var structure_tiles: Dictionary = {}
 var structure_units: Dictionary = {}
+var damage_hover_highlight_map: TileMapLayer = null
 
 func _ready() -> void:
 	pass
@@ -464,3 +465,36 @@ func show_highlights(tiles: Array) -> void:
 	clear_highlights()
 	for tile in tiles:
 		$HighlightMap.set_cell(tile, highlight_tile_id, Vector2i(0,0))
+
+func _get_damage_hover_highlight_map() -> TileMapLayer:
+	if damage_hover_highlight_map != null and is_instance_valid(damage_hover_highlight_map):
+		return damage_hover_highlight_map
+	damage_hover_highlight_map = get_node_or_null("DamageHoverHighlightMap")
+	if damage_hover_highlight_map != null and is_instance_valid(damage_hover_highlight_map):
+		return damage_hover_highlight_map
+	var highlight_map = get_node_or_null("HighlightMap")
+	if highlight_map == null:
+		return null
+	var hover_map = TileMapLayer.new()
+	hover_map.name = "DamageHoverHighlightMap"
+	hover_map.tile_set = highlight_map.tile_set
+	hover_map.top_level = true
+	hover_map.z_index = 102
+	hover_map.self_modulate = Color(1.0, 0.72, 0.32, 0.7)
+	add_child(hover_map)
+	damage_hover_highlight_map = hover_map
+	return damage_hover_highlight_map
+
+func clear_damage_hover_highlights() -> void:
+	var hover_map = _get_damage_hover_highlight_map()
+	if hover_map != null:
+		hover_map.clear()
+
+func show_damage_hover_highlights(tiles: Array) -> void:
+	var hover_map = _get_damage_hover_highlight_map()
+	if hover_map == null:
+		return
+	hover_map.clear()
+	for tile in tiles:
+		if typeof(tile) == TYPE_VECTOR2I:
+			hover_map.set_cell(tile, highlight_tile_id, Vector2i(0, 0))

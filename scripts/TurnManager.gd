@@ -517,6 +517,24 @@ func _normalize_state_snapshot(state: Dictionary) -> Dictionary:
 					player_dict[unit_id] = order
 			committed_out[pid] = player_dict
 		normalized["committed_orders"] = committed_out
+	if normalized.has("damage_log_entries") and normalized["damage_log_entries"] is Dictionary:
+		var entries_out := {}
+		for pid in normalized["damage_log_entries"].keys():
+			var arr: Array = []
+			var raw_entries = normalized["damage_log_entries"][pid]
+			if raw_entries is Array:
+				for raw_entry in raw_entries:
+					if not (raw_entry is Dictionary):
+						continue
+					var entry = raw_entry.duplicate(true)
+					if entry.has("tiles") and entry["tiles"] is Array:
+						entry["tiles"] = _decode_log_vec2i_array(entry["tiles"])
+					for tile_key in ["attacker_tile", "defender_tile", "target_tile", "tile"]:
+						if entry.has(tile_key):
+							entry[tile_key] = _decode_log_vec2i(entry.get(tile_key))
+					arr.append(entry)
+			entries_out[pid] = arr
+		normalized["damage_log_entries"] = entries_out
 	return normalized
 
 func _new_replay_log_container() -> Dictionary:
@@ -933,6 +951,7 @@ func _reset_replay_state_defaults() -> void:
 	ward_vision_active = { "player1": {}, "player2": {} }
 	mana_pool_mines = {}
 	damage_log = { "player1": [], "player2": [] }
+	damage_log_entries = { "player1": [], "player2": [] }
 	player_orders = { "player1": {}, "player2": {} }
 	committed_orders = { "player1": {}, "player2": {} }
 	if NetworkManager != null:
@@ -1461,6 +1480,7 @@ var player_ranged_bonus := { "player1": 0, "player2": 0 }
 var player_mana_bonus := { "player1": 0, "player2": 0 }
 var player_mana_cap_bonus := { "player1": 0, "player2": 0 }
 var damage_log := { "player1": [], "player2": [] }
+var damage_log_entries := { "player1": [], "player2": [] }
 
 var buildable_structures := {}
 var mana_pool_mines := {}
@@ -3191,7 +3211,8 @@ func _collect_state() -> Dictionary:
 		"neutral_step_index": neutral_step_index,
 		"committed_orders": committed_orders,
 		"units": units,
-		"damage_log": damage_log
+		"damage_log": damage_log,
+		"damage_log_entries": damage_log_entries
 	}
 
 func get_state_snapshot(bump_seq: bool = false) -> Dictionary:
@@ -3219,6 +3240,8 @@ func _collect_state_for(viewer_id: String) -> Dictionary:
 	var fog = $GameBoardNode.get_node_or_null("FogOfWar")
 	if fog != null and fog.visiblity.has(viewer_id):
 		state["fog_visibility"] = { viewer_id: fog.visiblity[viewer_id].duplicate(true) }
+	state["damage_log"] = { viewer_id: damage_log.get(viewer_id, []).duplicate(true) }
+	state["damage_log_entries"] = { viewer_id: damage_log_entries.get(viewer_id, []).duplicate(true) }
 	return state
 
 func _collect_procedural_map_state() -> Dictionary:
@@ -3633,7 +3656,8 @@ func apply_state(state: Dictionary, force_host: bool = false) -> void:
 	camp_respawn_counts = state.get("camp_respawn_counts", camp_respawn_counts)
 	dragon_rewards = state.get("dragon_rewards", dragon_rewards)
 	dragon_spawn_counts = state.get("dragon_spawn_counts", dragon_spawn_counts)
-	damage_log = state.get("damage_log", damage_log)
+	damage_log = state.get("damage_log", { "player1": [], "player2": [] })
+	damage_log_entries = state.get("damage_log_entries", { "player1": [], "player2": [] })
 	neutral_step_index = int(state.get("neutral_step_index", neutral_step_index))
 	_apply_units(state.get("units", []))
 	player_orders = { "player1": {}, "player2": {} }
@@ -3983,6 +4007,7 @@ func reset_to_lobby() -> void:
 	player_global_vision_until = { "player1": 0, "player2": 0 }
 	targeted_vision_active = { "player1": {}, "player2": {} }
 	damage_log = { "player1": [], "player2": [] }
+	damage_log_entries = { "player1": [], "player2": [] }
 	player_orders = { "player1": {}, "player2": {} }
 	committed_orders = { "player1": {}, "player2": {} }
 	local_player_id = ""
@@ -5997,19 +6022,11 @@ func _prune_dead_units_after_apply() -> void:
 
 func dealt_dmg_report(atkr, defr, atkr_in_dmg, defr_in_dmg, retaliate, atk_mode):
 	_append_damage_log(atkr, defr, atkr_in_dmg, defr_in_dmg, retaliate, atk_mode)
-	var lines = _damage_lines_for_viewer(local_player_id, atkr, defr, atkr_in_dmg, defr_in_dmg, retaliate, atk_mode)
-	for line in lines:
-		var report_label = Label.new()
-		report_label.text = line
-		dmg_report.add_child(report_label)
+	_render_damage_log_for_local()
 
 func died_dmg_report(unit):
 	_append_death_log(unit)
-	var lines = _death_lines_for_viewer(local_player_id, unit)
-	for line in lines:
-		var report_label = Label.new()
-		report_label.text = line
-		dmg_report.add_child(report_label)
+	_render_damage_log_for_local()
 
 func _damage_lines_for_viewer(viewer_id: String, atkr, defr, atkr_in_dmg, defr_in_dmg, retaliate, atk_mode) -> Array:
 	if viewer_id == "":
@@ -6027,6 +6044,75 @@ func _damage_lines_for_viewer(viewer_id: String, atkr, defr, atkr_in_dmg, defr_i
 			lines.append("Enemy %s #%d retaliated and dealt %d damage" % [defr.unit_type, defr.net_id, atkr_in_dmg])
 	return lines
 
+func _damage_entry_for_line(text: String, kind: String, attacker_tile, defender_tile, target_tile, attacker_unit_id: int = -1, defender_unit_id: int = -1, atk_mode: String = "") -> Dictionary:
+	var tiles: Array = []
+	for tile in [attacker_tile, defender_tile, target_tile]:
+		if typeof(tile) == TYPE_VECTOR2I and not tiles.has(tile):
+			tiles.append(tile)
+	return {
+		"text": text,
+		"kind": kind,
+		"tiles": tiles,
+		"attacker_tile": attacker_tile if typeof(attacker_tile) == TYPE_VECTOR2I else Vector2i(-9999, -9999),
+		"defender_tile": defender_tile if typeof(defender_tile) == TYPE_VECTOR2I else Vector2i(-9999, -9999),
+		"target_tile": target_tile if typeof(target_tile) == TYPE_VECTOR2I else Vector2i(-9999, -9999),
+		"attacker_unit_net_id": attacker_unit_id,
+		"defender_unit_net_id": defender_unit_id,
+		"atk_mode": atk_mode
+	}
+
+func _damage_entries_for_viewer(viewer_id: String, atkr, defr, atkr_in_dmg, defr_in_dmg, retaliate, atk_mode) -> Array:
+	if viewer_id == "":
+		return []
+	if atkr.player_id != viewer_id and defr.player_id != viewer_id:
+		return []
+	var entries: Array = []
+	if defr.player_id == viewer_id:
+		entries.append(_damage_entry_for_line(
+			"Your %s #%d took %d %s damage from %s #%d" % [defr.unit_type, defr.net_id, defr_in_dmg, atk_mode, atkr.unit_type, atkr.net_id],
+			"damage",
+			atkr.grid_pos,
+			defr.grid_pos,
+			defr.grid_pos,
+			atkr.net_id,
+			defr.net_id,
+			atk_mode
+		))
+		if retaliate:
+			entries.append(_damage_entry_for_line(
+				"Your %s #%d retaliated and dealt %d damage" % [defr.unit_type, defr.net_id, atkr_in_dmg],
+				"retaliation",
+				defr.grid_pos,
+				atkr.grid_pos,
+				atkr.grid_pos,
+				defr.net_id,
+				atkr.net_id,
+				atk_mode
+			))
+	else:
+		entries.append(_damage_entry_for_line(
+			"Your %s #%d dealt %d %s damage to %s #%d" % [atkr.unit_type, atkr.net_id, defr_in_dmg, atk_mode, defr.unit_type, defr.net_id],
+			"damage",
+			atkr.grid_pos,
+			defr.grid_pos,
+			defr.grid_pos,
+			atkr.net_id,
+			defr.net_id,
+			atk_mode
+		))
+		if retaliate:
+			entries.append(_damage_entry_for_line(
+				"Enemy %s #%d retaliated and dealt %d damage" % [defr.unit_type, defr.net_id, atkr_in_dmg],
+				"retaliation",
+				defr.grid_pos,
+				atkr.grid_pos,
+				atkr.grid_pos,
+				defr.net_id,
+				atkr.net_id,
+				atk_mode
+			))
+	return entries
+
 func _death_lines_for_viewer(viewer_id: String, unit) -> Array:
 	if viewer_id == "":
 		return []
@@ -6036,19 +6122,43 @@ func _death_lines_for_viewer(viewer_id: String, unit) -> Array:
 		return ["Your %s #%d died at %s" % [unit.unit_type, unit.net_id, unit.grid_pos]]
 	return ["Enemy %s #%d died at %s" % [unit.unit_type, unit.net_id, unit.grid_pos]]
 
+func _death_entries_for_viewer(viewer_id: String, unit) -> Array:
+	if viewer_id == "":
+		return []
+	if unit.player_id != viewer_id and unit.last_damaged_by != viewer_id:
+		return []
+	var text = ""
+	if unit.player_id == viewer_id:
+		text = "Your %s #%d died at %s" % [unit.unit_type, unit.net_id, unit.grid_pos]
+	else:
+		text = "Enemy %s #%d died at %s" % [unit.unit_type, unit.net_id, unit.grid_pos]
+	return [{
+		"text": text,
+		"kind": "death",
+		"tiles": [unit.grid_pos],
+		"tile": unit.grid_pos,
+		"unit_net_id": int(unit.net_id)
+	}]
+
 func _append_damage_log(atkr, defr, atkr_in_dmg, defr_in_dmg, retaliate, atk_mode) -> void:
 	for viewer_id in ["player1", "player2"]:
-		var lines = _damage_lines_for_viewer(viewer_id, atkr, defr, atkr_in_dmg, defr_in_dmg, retaliate, atk_mode)
-		for line in lines:
-			damage_log[viewer_id].append(line)
+		var entries = _damage_entries_for_viewer(viewer_id, atkr, defr, atkr_in_dmg, defr_in_dmg, retaliate, atk_mode)
+		for entry in entries:
+			damage_log[viewer_id].append(str(entry.get("text", "")))
+			damage_log_entries[viewer_id].append(entry)
 
 func _append_death_log(unit) -> void:
 	for viewer_id in ["player1", "player2"]:
-		var lines = _death_lines_for_viewer(viewer_id, unit)
-		for line in lines:
-			damage_log[viewer_id].append(line)
+		var entries = _death_entries_for_viewer(viewer_id, unit)
+		for entry in entries:
+			damage_log[viewer_id].append(str(entry.get("text", "")))
+			damage_log_entries[viewer_id].append(entry)
 
 func _render_damage_log_for_local() -> void:
+	var ui = get_node_or_null("UI")
+	if ui != null and ui.has_method("render_damage_report"):
+		ui.render_damage_report()
+		return
 	for child in dmg_report.get_children():
 		child.queue_free()
 	var lines = damage_log.get(local_player_id, [])
@@ -7563,6 +7673,7 @@ func _do_execution() -> void:
 	for child in dmg_report.get_children():
 		child.queue_free()
 	damage_log = { "player1": [], "player2": [] }
+	damage_log_entries = { "player1": [], "player2": [] }
 	neutral_step_index = -1
 	exec_steps = [
 		func(): _process_spawns(),
