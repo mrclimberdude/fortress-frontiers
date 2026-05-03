@@ -4578,6 +4578,31 @@ func _move_queue_next_order(unit, player_id: String) -> Dictionary:
 		"priority": 0
 	}
 
+func get_move_queue_turn_endpoints(unit, path: Array, player_id: String) -> Array:
+	var endpoints: Array = []
+	if unit == null:
+		return endpoints
+	if not (path is Array) or path.size() < 2:
+		return endpoints
+	if path[0] != unit.grid_pos:
+		return endpoints
+	var idx = 0
+	var turn_num = 1
+	while idx < path.size() - 1:
+		var end_idx = _move_queue_segment_end_index(path, idx, unit, player_id)
+		if end_idx <= idx or end_idx >= path.size():
+			return []
+		var end_tile = path[end_idx]
+		if typeof(end_tile) != TYPE_VECTOR2I:
+			return []
+		endpoints.append({
+			"turn": turn_num,
+			"tile": end_tile
+		})
+		idx = end_idx
+		turn_num += 1
+	return endpoints
+
 func _record_move_queue_last_order(unit, order: Dictionary) -> void:
 	if unit == null:
 		return

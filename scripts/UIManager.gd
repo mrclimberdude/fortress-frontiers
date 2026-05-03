@@ -39,6 +39,7 @@ var _build_hover_label: Label = null
 var _build_hover_cell: Vector2i = Vector2i(-99999, -99999)
 var _queue_hover_root: Node2D = null
 var _queue_hover_label: Label = null
+var _preview_marker_root: Control = null
 var _queue_hover_cell: Vector2i = Vector2i(-99999, -99999)
 var _queue_hover_path: Array = []
 var _queue_hover_eta: int = -1
@@ -623,6 +624,7 @@ func _ready():
 		spell_menu.add_item(entry["label"], entry["id"])
 	_init_build_hover()
 	_init_queue_hover()
+	_init_preview_markers()
 	_init_menu()
 
 func _init_menu() -> void:
@@ -1236,6 +1238,17 @@ func _init_queue_hover() -> void:
 	_queue_hover_label.z_index = 12
 	_queue_hover_root.add_child(_queue_hover_label)
 
+func _init_preview_markers() -> void:
+	_preview_marker_root = Control.new()
+	_preview_marker_root.name = "PreviewTurnMarkers"
+	_preview_marker_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_preview_marker_root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_preview_marker_root.offset_left = 0
+	_preview_marker_root.offset_top = 0
+	_preview_marker_root.offset_right = 0
+	_preview_marker_root.offset_bottom = 0
+	add_child(_preview_marker_root)
+
 func _process(_delta: float) -> void:
 	_update_build_hover()
 	_update_queue_hover()
@@ -1311,6 +1324,11 @@ func _set_queue_finish_button_position() -> void:
 	if parent != null and parent is Control:
 		screen_pos -= (parent as Control).global_position
 	finish_move_button.set_position(screen_pos)
+
+func _is_mouse_over_finish_move_button(screen_pos: Vector2) -> bool:
+	if finish_move_button == null or not finish_move_button.visible:
+		return false
+	return finish_move_button.get_global_rect().has_point(screen_pos)
 
 func _reconstruct_queue_segment(start: Vector2i, target: Vector2i, prev: Dictionary) -> Array:
 	if start == target:
@@ -1393,9 +1411,14 @@ func _update_queue_hover() -> void:
 		_draw_preview_path(current_path)
 		_hide_queue_hover()
 		return
+	var mouse_pos = get_viewport().get_mouse_position()
+	if _is_mouse_over_finish_move_button(mouse_pos):
+		_draw_preview_path(current_path)
+		_hide_queue_hover()
+		return
 	var world_pos = cam.get_global_mouse_position()
 	var cell = hex.world_to_map(world_pos)
-	_update_queue_path_preview_for_cell(cell, get_viewport().get_mouse_position())
+	_update_queue_path_preview_for_cell(cell, mouse_pos)
 
 func _refresh_queue_reachable() -> void:
 	if currently_selected_unit == null or not _is_long_queue_mode():
@@ -1433,19 +1456,72 @@ func _queue_path_index(path: Array, tile: Vector2i) -> int:
 
 func _clear_queue_preview() -> void:
 	if _queue_preview_unit_id == -1:
+		if _preview_marker_root != null:
+			for child in _preview_marker_root.get_children():
+				child.queue_free()
 		return
 	var preview_node = hex.get_node_or_null("PreviewPathArrows")
 	if preview_node != null:
 		for child in preview_node.get_children():
 			child.queue_free()
+	if _preview_marker_root != null:
+		for child in _preview_marker_root.get_children():
+			child.queue_free()
 	_queue_preview_unit_id = -1
 
-func _draw_preview_path(path: Array) -> void:
+func _draw_move_queue_turn_markers(path: Array, preview_unit, preview_player: String) -> void:
+	if _preview_marker_root == null or turn_mgr == null or preview_unit == null:
+		return
+	if not turn_mgr.has_method("get_move_queue_turn_endpoints"):
+		return
+	var endpoints = turn_mgr.get_move_queue_turn_endpoints(preview_unit, path, preview_player)
+	if not (endpoints is Array) or endpoints.is_empty():
+		return
+	for child in _preview_marker_root.get_children():
+		child.queue_free()
+	var badge_size = Vector2(28, 28)
+	for entry in endpoints:
+		if not (entry is Dictionary):
+			continue
+		var tile = entry.get("tile", null)
+		if typeof(tile) != TYPE_VECTOR2I:
+			continue
+		var turn_num = int(entry.get("turn", 0))
+		if turn_num <= 0:
+			continue
+		var world_pos = hex.map_to_world(tile) + hex.tile_size * 0.5 + Vector2(0, -hex.tile_size.y * 0.12)
+		var badge = Panel.new()
+		badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		badge.position = _world_to_screen(world_pos) - badge_size * 0.5
+		badge.size = badge_size
+		badge.self_modulate = Color(0.05, 0.08, 0.12, 0.82)
+		var bg = ColorRect.new()
+		bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		bg.color = Color(0.05, 0.08, 0.12, 0.82)
+		bg.position = Vector2.ZERO
+		bg.size = badge_size
+		badge.add_child(bg)
+		var label = Label.new()
+		label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		label.position = Vector2.ZERO
+		label.size = badge_size
+		label.text = str(turn_num)
+		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		label.add_theme_font_size_override("font_size", 18)
+		label.add_theme_color_override("font_color", Color(0.92, 0.98, 1.0))
+		badge.add_child(label)
+		_preview_marker_root.add_child(badge)
+
+func _draw_preview_path(path: Array, preview_unit = null, preview_player: String = "", show_turn_markers: bool = false) -> void:
 	var preview_node = hex.get_node_or_null("PreviewPathArrows")
 	if preview_node == null:
 		return
 	for child in preview_node.get_children():
 		child.queue_free()
+	if _preview_marker_root != null:
+		for child in _preview_marker_root.get_children():
+			child.queue_free()
 	if path.size() < 2:
 		return
 	var root = Node2D.new()
@@ -1470,8 +1546,21 @@ func _draw_preview_path(path: Array) -> void:
 		arrow.rotation = (p2 - p1).angle()
 		arrow.z_index = 101
 		root.add_child(arrow)
+	var marker_unit = preview_unit
+	var marker_player = preview_player
+	var should_show_turn_markers = show_turn_markers
+	if not should_show_turn_markers and action_mode == "move_to":
+		should_show_turn_markers = true
+		if marker_unit == null:
+			marker_unit = currently_selected_unit
+		if marker_player == "":
+			marker_player = current_player
+	if should_show_turn_markers:
+		_draw_move_queue_turn_markers(path, marker_unit, marker_player)
 
 func _update_queue_preview() -> void:
+	if _is_long_queue_mode():
+		return
 	if action_mode != "" or placing_unit != "" or current_path.size() > 1:
 		_clear_queue_preview()
 		return
@@ -1488,10 +1577,12 @@ func _update_queue_preview() -> void:
 		_clear_queue_preview()
 		return
 	var path: Array = []
+	var show_turn_markers := false
 	if unit.build_queue.size() >= 2:
 		path = unit.build_queue.duplicate()
 	elif unit.move_queue.size() >= 2:
 		path = unit.move_queue.duplicate()
+		show_turn_markers = true
 	else:
 		var order := {}
 		if turn_mgr.current_phase == turn_mgr.Phase.EXECUTION:
@@ -1516,7 +1607,7 @@ func _update_queue_preview() -> void:
 	if idx > 0:
 		path = path.slice(idx)
 	_queue_preview_unit_id = unit.net_id
-	_draw_preview_path(path)
+	_draw_preview_path(path, unit, turn_mgr.local_player_id, show_turn_markers)
 
 func _refresh_build_menu_labels() -> void:
 	for entry in BUILD_OPTIONS:
@@ -4249,6 +4340,8 @@ func _unhandled_input(ev):
 			_on_next_pressed()
 			return
 	if not (ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT):
+		return
+	if _is_mouse_over_finish_move_button(ev.position):
 		return
 	if not allow_clicks:
 		return
