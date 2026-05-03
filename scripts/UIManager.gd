@@ -37,6 +37,11 @@ var selected_structure_type: String = ""
 var _build_hover_root: Node2D = null
 var _build_hover_label: Label = null
 var _build_hover_cell: Vector2i = Vector2i(-99999, -99999)
+var _queue_hover_root: Node2D = null
+var _queue_hover_label: Label = null
+var _queue_hover_cell: Vector2i = Vector2i(-99999, -99999)
+var _queue_hover_path: Array = []
+var _queue_hover_eta: int = -1
 
 var _current_exec_step_idx: int = 0
 var menu_popup: PopupMenu = null
@@ -617,6 +622,7 @@ func _ready():
 	for entry in SPELL_OPTIONS:
 		spell_menu.add_item(entry["label"], entry["id"])
 	_init_build_hover()
+	_init_queue_hover()
 	_init_menu()
 
 func _init_menu() -> void:
@@ -1216,12 +1222,30 @@ func _init_build_hover() -> void:
 	_build_hover_label.z_index = 12
 	_build_hover_root.add_child(_build_hover_label)
 
+func _init_queue_hover() -> void:
+	_queue_hover_root = Node2D.new()
+	_queue_hover_root.name = "QueueHover"
+	_queue_hover_root.z_index = 12
+	hex.add_child(_queue_hover_root)
+	_queue_hover_label = Label.new()
+	_queue_hover_label.visible = false
+	_queue_hover_label.add_theme_color_override("font_color", Color(0.82, 0.97, 1.0))
+	_queue_hover_label.add_theme_font_size_override("font_size", 18)
+	_queue_hover_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_queue_hover_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_queue_hover_label.z_index = 12
+	_queue_hover_root.add_child(_queue_hover_label)
+
 func _process(_delta: float) -> void:
 	_update_build_hover()
+	_update_queue_hover()
 	_update_queue_preview()
 
 func _update_build_hover() -> void:
 	if _build_hover_label == null:
+		return
+	if _is_long_queue_mode():
+		_hide_build_hover()
 		return
 	var cam = get_viewport().get_camera_2d()
 	if cam == null:
@@ -1244,6 +1268,162 @@ func _hide_build_hover() -> void:
 	_build_hover_cell = Vector2i(-99999, -99999)
 	if _build_hover_label != null:
 		_build_hover_label.visible = false
+
+func _is_long_queue_mode() -> bool:
+	return action_mode in ["move_to", "build_road_to", "build_rail_to"]
+
+func _current_queue_endpoint() -> Vector2i:
+	if current_path.size() > 0:
+		var tail = current_path[current_path.size() - 1]
+		if typeof(tail) == TYPE_VECTOR2I:
+			return tail
+	if currently_selected_unit != null:
+		return currently_selected_unit.grid_pos
+	return Vector2i(-99999, -99999)
+
+func _hide_queue_hover() -> void:
+	_queue_hover_cell = Vector2i(-99999, -99999)
+	_queue_hover_path = []
+	_queue_hover_eta = -1
+	if _queue_hover_label != null:
+		_queue_hover_label.visible = false
+
+func _show_queue_hover(cell: Vector2i, eta: int) -> void:
+	if _queue_hover_label == null:
+		return
+	_queue_hover_eta = eta
+	var tile_size = hex.tile_size
+	_queue_hover_label.text = "ETA: %d turns" % eta
+	_queue_hover_label.size = Vector2(tile_size.x, tile_size.y * 0.25)
+	_queue_hover_label.position = hex.map_to_world(cell) + Vector2(0, tile_size.y * 0.05)
+	_queue_hover_label.visible = true
+
+func _set_queue_finish_button_position() -> void:
+	if finish_move_button == null:
+		return
+	var endpoint = _current_queue_endpoint()
+	if typeof(endpoint) != TYPE_VECTOR2I:
+		return
+	var tile_size = hex.tile_size
+	var world_pos = hex.map_to_world(endpoint) + Vector2(tile_size.x * 0.55, tile_size.y * 0.2)
+	var screen_pos = _world_to_screen(world_pos)
+	var parent = finish_move_button.get_parent()
+	if parent != null and parent is Control:
+		screen_pos -= (parent as Control).global_position
+	finish_move_button.set_position(screen_pos)
+
+func _reconstruct_queue_segment(start: Vector2i, target: Vector2i, prev: Dictionary) -> Array:
+	if start == target:
+		return [start]
+	if not prev.has(target):
+		return []
+	var path := [target]
+	var cur = target
+	var guard = 0
+	while cur != start and guard < 10000:
+		guard += 1
+		if not prev.has(cur):
+			return []
+		cur = prev[cur]
+		path.insert(0, cur)
+	if path.is_empty() or path[0] != start:
+		return []
+	return path
+
+func _update_queue_path_preview_for_cell(cell: Vector2i, mouse_pos: Vector2, force: bool = false) -> void:
+	if not _is_long_queue_mode() or currently_selected_unit == null:
+		_draw_preview_path(current_path)
+		_hide_queue_hover()
+		return
+	if not force and cell == _queue_hover_cell:
+		if finish_move_button != null:
+			if finish_move_button.visible:
+				_set_queue_finish_button_position()
+		return
+	_queue_hover_cell = cell
+	_queue_hover_path = []
+	_queue_hover_eta = -1
+	var endpoint = _current_queue_endpoint()
+	var valid_tiles = current_reachable.get("tiles", [])
+	if cell == endpoint or not valid_tiles.has(cell):
+		_draw_preview_path(current_path)
+		_hide_queue_hover()
+		if finish_move_button != null:
+			finish_move_button.visible = current_path.size() > 1
+			if finish_move_button.visible:
+				_set_queue_finish_button_position()
+		return
+	var segment = _reconstruct_queue_segment(endpoint, cell, current_reachable.get("prev", {}))
+	if segment.size() < 2:
+		_draw_preview_path(current_path)
+		_hide_queue_hover()
+		if finish_move_button != null:
+			finish_move_button.visible = current_path.size() > 1
+			if finish_move_button.visible:
+				_set_queue_finish_button_position()
+		return
+	var preview_path = current_path.duplicate()
+	for i in range(1, segment.size()):
+		preview_path.append(segment[i])
+	var eta = -1
+	if turn_mgr != null and turn_mgr.has_method("estimate_queue_turns"):
+		eta = int(turn_mgr.estimate_queue_turns(currently_selected_unit, preview_path, action_mode, current_player))
+	if eta < 0:
+		_draw_preview_path(current_path)
+		_hide_queue_hover()
+		if finish_move_button != null:
+			finish_move_button.visible = current_path.size() > 1
+			if finish_move_button.visible:
+				_set_queue_finish_button_position()
+		return
+	_queue_hover_path = preview_path
+	_draw_preview_path(preview_path)
+	_show_queue_hover(cell, eta)
+	if finish_move_button != null:
+		finish_move_button.visible = current_path.size() > 1
+		if finish_move_button.visible:
+			_set_queue_finish_button_position()
+
+func _update_queue_hover() -> void:
+	if not _is_long_queue_mode():
+		_hide_queue_hover()
+		return
+	var cam = get_viewport().get_camera_2d()
+	if cam == null:
+		_draw_preview_path(current_path)
+		_hide_queue_hover()
+		return
+	var world_pos = cam.get_global_mouse_position()
+	var cell = hex.world_to_map(world_pos)
+	_update_queue_path_preview_for_cell(cell, get_viewport().get_mouse_position())
+
+func _refresh_queue_reachable() -> void:
+	if currently_selected_unit == null or not _is_long_queue_mode():
+		current_reachable = {}
+		_hide_queue_hover()
+		return
+	var endpoint = _current_queue_endpoint()
+	var result = game_board.get_queue_reachable(endpoint, action_mode, currently_selected_unit, current_player)
+	current_reachable = result
+	var tiles = result.get("tiles", []).duplicate()
+	if tiles.has(endpoint):
+		tiles.erase(endpoint)
+	var visible_tiles: Array = []
+	for tile in tiles:
+		if typeof(tile) == TYPE_VECTOR2I and game_board.get_visibility_state_for_player(tile, current_player) > 0:
+			visible_tiles.append(tile)
+	game_board.show_highlights(visible_tiles)
+	_hide_queue_hover()
+	_draw_preview_path(current_path)
+	if finish_move_button != null:
+		finish_move_button.visible = current_path.size() > 1
+		if finish_move_button.visible:
+			_set_queue_finish_button_position()
+
+func _get_finalize_queue_path() -> Array:
+	if _is_long_queue_mode() and _queue_hover_path.size() >= 2 and _queue_hover_eta >= 0:
+		return _queue_hover_path.duplicate()
+	return current_path.duplicate()
 
 func _queue_path_index(path: Array, tile: Vector2i) -> int:
 	for i in range(path.size()):
@@ -1269,6 +1449,8 @@ func _draw_preview_path(path: Array) -> void:
 	if path.size() < 2:
 		return
 	var root = Node2D.new()
+	root.top_level = true
+	root.z_index = 101
 	preview_node.add_child(root)
 	for i in range(path.size() - 1):
 		var a = path[i]
@@ -1286,7 +1468,7 @@ func _draw_preview_path(path: Array) -> void:
 		var half_length = tex_size.x * scale_x * 0.5
 		arrow.position = p1 + dir * half_length
 		arrow.rotation = (p2 - p1).angle()
-		arrow.z_index = 10
+		arrow.z_index = 101
 		root.add_child(arrow)
 
 func _update_queue_preview() -> void:
@@ -2985,6 +3167,7 @@ func _reset_ui_for_snapshot() -> void:
 	game_board.clear_highlights()
 	_clear_all_drawings()
 	_hide_build_hover()
+	_hide_queue_hover()
 
 func _submit_orders() -> void:
 	game_board.clear_highlights()
@@ -3023,6 +3206,7 @@ func _on_cancel_pressed():
 	_reset_cavalry_bonus_state()
 	finish_move_button.visible = false
 	game_board.clear_highlights()
+	_hide_queue_hover()
 	allow_clicks = true
 	$Panel.visible = true
 	cancel_done_button.visible = false
@@ -3835,9 +4019,9 @@ func _append_cavalry_bonus_highlights(start: Vector2i, reachable: Dictionary, ti
 			var step = neighbors[dir_idx]
 			if not hex.is_cell_valid(step):
 				break
-			if game_board._terrain_is_impassable(step):
+			if not game_board.is_move_tile_passable_for_orders(step, current_player):
 				break
-			var step_cost = float(game_board.get_move_cost(step, currently_selected_unit))
+			var step_cost = float(game_board.get_order_move_cost(step, currently_selected_unit, current_player))
 			var new_cost = cost + step_cost
 			if new_cost > max_budget + 1.0 + 0.001:
 				break
@@ -3871,9 +4055,9 @@ func _append_cavalry_bonus_step(cell: Vector2i, remaining: float, reachable: Dic
 	var bonus = neighbors[dir_idx]
 	if not hex.is_cell_valid(bonus):
 		return
-	if game_board._terrain_is_impassable(bonus):
+	if not game_board.is_move_tile_passable_for_orders(bonus, current_player):
 		return
-	var bonus_cost = float(game_board.get_move_cost(bonus, currently_selected_unit))
+	var bonus_cost = float(game_board.get_order_move_cost(bonus, currently_selected_unit, current_player))
 	if bonus_cost <= remaining + 0.001:
 		return
 	if bonus_cost > remaining + 1.0 + 0.001:
@@ -3919,9 +4103,9 @@ func _set_cavalry_bonus_reachable(button_pos: Vector2) -> bool:
 	var bonus_tile: Vector2i = neighbors[dir_idx]
 	if not hex.is_cell_valid(bonus_tile):
 		return false
-	if game_board._terrain_is_impassable(bonus_tile):
+	if not game_board.is_move_tile_passable_for_orders(bonus_tile, current_player):
 		return false
-	var bonus_cost = float(game_board.get_move_cost(bonus_tile, currently_selected_unit))
+	var bonus_cost = float(game_board.get_order_move_cost(bonus_tile, currently_selected_unit, current_player))
 	if bonus_cost > 1.0 + 0.001:
 		return false
 	cavalry_bonus_available = true
@@ -3935,44 +4119,30 @@ func _set_cavalry_bonus_reachable(button_pos: Vector2) -> bool:
 func _start_move_to() -> void:
 	action_mode = "move_to"
 	current_path = [currently_selected_unit.grid_pos]
-	var result = _get_build_road_reachable(currently_selected_unit.grid_pos)
-	var tiles = result["tiles"]
-	if tiles.has(currently_selected_unit.grid_pos):
-		tiles.erase(currently_selected_unit.grid_pos)
-	game_board.show_highlights(tiles)
-	current_reachable = result
+	_refresh_queue_reachable()
 	finish_move_button.visible = false
 
 func _start_build_road_to() -> void:
 	action_mode = "build_road_to"
 	current_path = [currently_selected_unit.grid_pos]
-	var result = _get_build_road_reachable(currently_selected_unit.grid_pos)
-	var tiles = result["tiles"]
-	if tiles.has(currently_selected_unit.grid_pos):
-		tiles.erase(currently_selected_unit.grid_pos)
-	game_board.show_highlights(tiles)
-	current_reachable = result
+	_refresh_queue_reachable()
 	finish_move_button.visible = false
 
 func _start_build_rail_to() -> void:
 	action_mode = "build_rail_to"
 	current_path = [currently_selected_unit.grid_pos]
-	var result = _get_build_road_reachable(currently_selected_unit.grid_pos)
-	var tiles = result["tiles"]
-	if tiles.has(currently_selected_unit.grid_pos):
-		tiles.erase(currently_selected_unit.grid_pos)
-	game_board.show_highlights(tiles)
-	current_reachable = result
+	_refresh_queue_reachable()
 	finish_move_button.visible = false
 
 func finish_build_road_path():
-	if current_path.size() == 1:
+	var path_to_submit = _get_finalize_queue_path()
+	if path_to_submit.size() < 2:
 		action_mode = ""
 		return
 	NetworkManager.request_order(current_player, {
 		"unit_net_id": currently_selected_unit.net_id,
 		"type": "build_road_to",
-		"path": current_path
+		"path": path_to_submit
 	})
 	var preview_node = hex.get_node("PreviewPathArrows")
 	for child in preview_node.get_children():
@@ -3983,17 +4153,19 @@ func finish_build_road_path():
 	current_path = []
 	remaining_moves = 0
 	game_board.clear_highlights()
+	_hide_queue_hover()
 	$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
 	_update_done_button_state()
 
 func finish_build_rail_path():
-	if current_path.size() == 1:
+	var path_to_submit = _get_finalize_queue_path()
+	if path_to_submit.size() < 2:
 		action_mode = ""
 		return
 	NetworkManager.request_order(current_player, {
 		"unit_net_id": currently_selected_unit.net_id,
 		"type": "build_rail_to",
-		"path": current_path
+		"path": path_to_submit
 	})
 	var preview_node = hex.get_node("PreviewPathArrows")
 	for child in preview_node.get_children():
@@ -4003,17 +4175,19 @@ func finish_build_rail_path():
 	current_path = []
 	remaining_moves = 0
 	game_board.clear_highlights()
+	_hide_queue_hover()
 	$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
 	_update_done_button_state()
 
 func finish_move_to_path():
-	if current_path.size() == 1:
+	var path_to_submit = _get_finalize_queue_path()
+	if path_to_submit.size() < 2:
 		action_mode = ""
 		return
 	NetworkManager.request_order(current_player, {
 		"unit_net_id": currently_selected_unit.net_id,
 		"type": "move_to",
-		"path": current_path
+		"path": path_to_submit
 	})
 	var preview_node = hex.get_node("PreviewPathArrows")
 	for child in preview_node.get_children():
@@ -4023,6 +4197,7 @@ func finish_move_to_path():
 	current_path = []
 	remaining_moves = 0
 	game_board.clear_highlights()
+	_hide_queue_hover()
 	$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
 	_update_done_button_state()
 
@@ -4105,7 +4280,9 @@ func _unhandled_input(ev):
 		return
 	
 	if (action_mode == "build_road_to" or action_mode == "build_rail_to" or action_mode == "move_to") and currently_selected_unit:
-		if cell not in current_reachable["tiles"]:
+		_update_queue_path_preview_for_cell(cell, ev.position, true)
+		var queue_tiles = current_reachable.get("tiles", [])
+		if cell not in queue_tiles:
 			if action_mode == "build_road_to":
 				finish_build_road_path()
 			elif action_mode == "build_rail_to":
@@ -4113,32 +4290,32 @@ func _unhandled_input(ev):
 			else:
 				finish_move_to_path()
 			return
-		var path = []
-		var prev = current_reachable["prev"]
-		var cur = cell
-		while cur in prev:
-			path.insert(0, cur)
-			cur = prev[cur]
-		if path.is_empty():
-			var tiles = current_reachable.get("tiles", []).duplicate()
-			if tiles.has(currently_selected_unit.grid_pos):
-				tiles.erase(currently_selected_unit.grid_pos)
-			game_board.show_highlights(tiles)
-			finish_move_button.visible = false
+		if _queue_hover_path.size() < 2 or _queue_hover_cell != cell:
+			var endpoint = _current_queue_endpoint()
+			var segment = _reconstruct_queue_segment(endpoint, cell, current_reachable.get("prev", {}))
+			if segment.size() < 2:
+				finish_move_button.visible = current_path.size() > 1
+				return
+			var preview_path = current_path.duplicate()
+			for i in range(1, segment.size()):
+				preview_path.append(segment[i])
+			var eta = -1
+			if turn_mgr != null and turn_mgr.has_method("estimate_queue_turns"):
+				eta = int(turn_mgr.estimate_queue_turns(currently_selected_unit, preview_path, action_mode, current_player))
+			if eta < 0:
+				finish_move_button.visible = current_path.size() > 1
+				return
+			_queue_hover_cell = cell
+			_queue_hover_path = preview_path
+			_queue_hover_eta = eta
+		if _queue_hover_path.size() < 2:
+			finish_move_button.visible = current_path.size() > 1
 			return
-		current_path += path
-		_draw_partial_path()
-		var result = _get_build_road_reachable(cell)
-		var tiles = result["tiles"]
-		if tiles.has(cell):
-			tiles.erase(cell)
-		if tiles.size() == 0:
-			finish_build_road_path()
-			return
-		game_board.show_highlights(tiles)
-		current_reachable = result
-		finish_move_button.set_position(ev.position)
-		finish_move_button.visible = true
+		current_path = _queue_hover_path.duplicate()
+		_refresh_queue_reachable()
+		finish_move_button.visible = current_path.size() > 1
+		if finish_move_button.visible:
+			_set_queue_finish_button_position()
 		return
 
 	# Order phase: if waiting for destination (move mode)

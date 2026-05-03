@@ -56,6 +56,7 @@ var replay_target_turn: int = 0
 var replay_target_phase: int = 2
 var replay_phase_mode: bool = false
 var replay_fog_mode: String = ""
+var pending_broadcast_map_state: Dictionary = {}
 const DEV_LOG_VERSION: int = 1
 const REPLAY_MANIFEST_PATH: String = "user://replay_index.json"
 const REPLAY_MANIFEST_VERSION: int = 1
@@ -3220,6 +3221,71 @@ func _collect_state_for(viewer_id: String) -> Dictionary:
 		state["fog_visibility"] = { viewer_id: fog.visiblity[viewer_id].duplicate(true) }
 	return state
 
+func _collect_procedural_map_state() -> Dictionary:
+	if current_map_index < 0 or current_map_index >= map_data.size():
+		return {}
+	var md = map_data[current_map_index] as MapData
+	if md == null or not md.procedural:
+		return {}
+	var map_state := {}
+	var hex = $GameBoardNode/HexTileMap
+	if hex != null:
+		map_state["bounds"] = hex.get_used_cells()
+	if terrain_overlay != null:
+		var terrain := {
+			"forest": [],
+			"mountain": [],
+			"river": [],
+			"lake": []
+		}
+		var forest_src = 1
+		var mountain_src = 2
+		var river_src = 3
+		var lake_src = 4
+		for cell in terrain_overlay.get_used_cells():
+			var src_id = terrain_overlay.get_cell_source_id(cell)
+			match src_id:
+				forest_src:
+					terrain["forest"].append(cell)
+				mountain_src:
+					terrain["mountain"].append(cell)
+				river_src:
+					terrain["river"].append(cell)
+				lake_src:
+					terrain["lake"].append(cell)
+		map_state["terrain"] = terrain
+	return map_state
+
+func _apply_procedural_map_state(map_state: Dictionary, reset_fog: bool = false) -> void:
+	if map_state.is_empty():
+		return
+	var hex = $GameBoardNode/HexTileMap
+	if hex != null and map_state.has("bounds"):
+		var bounds = map_state["bounds"]
+		if bounds is Array and hex.has_method("apply_bounds"):
+			hex.apply_bounds(bounds)
+			if reset_fog:
+				var fog = $GameBoardNode.get_node_or_null("FogOfWar")
+				if fog != null and fog.has_method("reset_fog"):
+					fog.reset_fog()
+	if terrain_overlay != null and map_state.has("terrain"):
+		var terrain = map_state["terrain"]
+		if terrain is Dictionary:
+			terrain_overlay.clear()
+			var forest_src = 1
+			var mountain_src = 2
+			var river_src = 3
+			var lake_src = 4
+			for cell in terrain.get("forest", []):
+				terrain_overlay.set_cell(cell, forest_src, Vector2i(0, 0))
+			for cell in terrain.get("mountain", []):
+				terrain_overlay.set_cell(cell, mountain_src, Vector2i(0, 0))
+			for cell in terrain.get("river", []):
+				terrain_overlay.set_cell(cell, river_src, Vector2i(0, 0))
+			for cell in terrain.get("lake", []):
+				terrain_overlay.set_cell(cell, lake_src, Vector2i(0, 0))
+			terrain_overlay.update_internals()
+
 func get_state_snapshot_for(viewer_id: String, bump_seq: bool = false) -> Dictionary:
 	if bump_seq:
 		state_seq += 1
@@ -3240,6 +3306,9 @@ func save_game(path: String = SAVE_DEFAULT_PATH, allow_non_orders: bool = false)
 		push_error("Save failed: only supported during the orders phase.")
 		return false
 	var state = _collect_state()
+	var map_state = _collect_procedural_map_state()
+	if not map_state.is_empty():
+		state["procedural_map"] = map_state
 	var fog = $GameBoardNode.get_node_or_null("FogOfWar")
 	if fog != null:
 		state["fog_visibility"] = fog.visiblity.duplicate(true)
@@ -3285,6 +3354,9 @@ func load_game(path: String = SAVE_DEFAULT_PATH) -> bool:
 		push_error("Load failed: missing state data.")
 		return false
 	state["force_apply"] = true
+	var map_state = {}
+	if state.has("procedural_map") and state["procedural_map"] is Dictionary:
+		map_state = state["procedural_map"]
 	var phase = int(state.get("current_phase", int(Phase.ORDERS)))
 	if phase != int(Phase.ORDERS):
 		push_error("Load failed: only orders-phase saves are supported.")
@@ -3297,6 +3369,9 @@ func load_game(path: String = SAVE_DEFAULT_PATH) -> bool:
 	_ensure_dev_log_open()
 	_reset_map_state()
 	_load_map_by_index(map_index)
+	var should_reset_fog = map_state.is_empty() or not state.has("fog_visibility")
+	if not map_state.is_empty():
+		_apply_procedural_map_state(map_state, should_reset_fog)
 	apply_state(state, true)
 	_rebuild_orders_after_load()
 	_devlog({
@@ -3308,6 +3383,7 @@ func load_game(path: String = SAVE_DEFAULT_PATH) -> bool:
 	call_deferred("_refresh_fog_after_load")
 	NetworkManager._orders_submitted = { "player1": false, "player2": false }
 	NetworkManager._step_ready_counts = {}
+	pending_broadcast_map_state = map_state
 	_broadcast_state(true)
 	call_deferred("_broadcast_state", true)
 	return true
@@ -3327,6 +3403,9 @@ func _broadcast_state(force_apply: bool = false) -> void:
 		return
 	_clamp_unit_healths()
 	var state = get_state_snapshot(true)
+	if not pending_broadcast_map_state.is_empty():
+		state["procedural_map"] = pending_broadcast_map_state
+		pending_broadcast_map_state = {}
 	if force_apply:
 		state["force_apply"] = true
 	NetworkManager.broadcast_state(state)
@@ -3493,6 +3572,12 @@ func apply_state(state: Dictionary, force_host: bool = false) -> void:
 	if map_index != current_map_index:
 		_reset_map_state()
 		_load_map_by_index(map_index)
+	var map_state = {}
+	if state.has("procedural_map") and state["procedural_map"] is Dictionary:
+		map_state = state["procedural_map"]
+	if not map_state.is_empty():
+		var should_reset_fog = not state.has("fog_visibility")
+		_apply_procedural_map_state(map_state, should_reset_fog)
 	if state.has("base_positions"):
 		base_positions = state["base_positions"]
 	if state.has("tower_positions"):
@@ -3919,6 +4004,7 @@ func reset_to_lobby() -> void:
 	keep_dev_logs = false
 	pending_replay_meta = {}
 	replay_name_override = ""
+	pending_broadcast_map_state = {}
 
 # --------------------------------------------------------
 # Main loop: Upkeep → Orders → Execution → increment → loop
@@ -4309,11 +4395,62 @@ func _rail_queue_tile_status(tile: Vector2i, player_id: String, allow_start: boo
 func is_road_queue_tile_valid(tile: Vector2i, player_id: String, allow_start: bool = false) -> bool:
 	return _road_queue_tile_status(tile, player_id, allow_start) != "invalid"
 
+func is_rail_queue_tile_valid(tile: Vector2i, player_id: String, allow_start: bool = false) -> bool:
+	return _rail_queue_tile_status(tile, player_id, allow_start) != "invalid"
+
 func _queue_path_index(path: Array, tile: Vector2i) -> int:
 	for i in range(path.size()):
 		if path[i] == tile:
 			return i
 	return -1
+
+func _move_queue_segment_end_index(path: Array, idx: int, unit, player_id: String) -> int:
+	if unit == null:
+		return -1
+	if not (path is Array) or path.size() < 2:
+		return -1
+	if idx < 0 or idx >= path.size() - 1:
+		return -1
+	var budget = float(unit.move_range)
+	var prev = path[idx]
+	var dir_idx = -1
+	var straight = true
+	var bonus_used = false
+	var end_idx = idx
+	var planning_mode = current_phase == Phase.ORDERS
+	for i in range(idx + 1, path.size()):
+		var step = path[i]
+		if typeof(step) != TYPE_VECTOR2I:
+			return -1
+		var step_dir = _step_dir_index(prev, step)
+		if step_dir == -1:
+			return -1
+		if dir_idx == -1:
+			dir_idx = step_dir
+		elif step_dir != dir_idx:
+			straight = false
+		if planning_mode:
+			if not $GameBoardNode.is_move_tile_passable_for_orders(step, player_id):
+				return -1
+		elif $GameBoardNode._terrain_is_impassable(step):
+			return -1
+		if $GameBoardNode.is_enemy_structure_tile(step, player_id) and i != path.size() - 1:
+			return -1
+		var cost = float($GameBoardNode.get_order_move_cost(step, unit, player_id)) if planning_mode else float($GameBoardNode.get_move_cost(step, unit))
+		if cost > budget + 0.001:
+			var can_bonus = _is_cavalry_unit(unit) and straight and not bonus_used and cost <= budget + 1.0 + 0.001
+			if not can_bonus:
+				break
+			end_idx = i
+			bonus_used = true
+			prev = step
+			break
+		budget -= cost
+		end_idx = i
+		prev = step
+		if $GameBoardNode.is_enemy_structure_tile(step, player_id):
+			break
+	return end_idx
 
 func _build_queue_last_step_ok(unit, player_id: String) -> bool:
 	var last_type = str(unit.build_queue_last_type)
@@ -4426,42 +4563,12 @@ func _move_queue_next_order(unit, player_id: String) -> Dictionary:
 		return {}
 	if idx >= path.size() - 1:
 		return {}
-	var budget = float(unit.move_range)
 	var segment: Array = [unit.grid_pos]
-	var prev = unit.grid_pos
-	var dir_idx = -1
-	var straight = true
-	var bonus_used = false
-	for i in range(idx + 1, path.size()):
-		var step = path[i]
-		if typeof(step) != TYPE_VECTOR2I:
-			return {}
-		var step_dir = _step_dir_index(prev, step)
-		if step_dir == -1:
-			return {}
-		if dir_idx == -1:
-			dir_idx = step_dir
-		elif step_dir != dir_idx:
-			straight = false
-		if $GameBoardNode._terrain_is_impassable(step):
-			return {}
-		if $GameBoardNode.is_enemy_structure_tile(step, player_id) and i != path.size() - 1:
-			return {}
-		var cost = float($GameBoardNode.get_move_cost(step, unit))
-		if cost > budget + 0.001:
-			var can_bonus = _is_cavalry_unit(unit) and straight and not bonus_used and cost <= budget + 1.0 + 0.001
-			if not can_bonus:
-				break
-			segment.append(step)
-			bonus_used = true
-			prev = step
-			break
-		else:
-			budget -= cost
-			segment.append(step)
-			prev = step
-			if $GameBoardNode.is_enemy_structure_tile(step, player_id):
-				break
+	var end_idx = _move_queue_segment_end_index(path, idx, unit, player_id)
+	if end_idx < 0:
+		return {}
+	for i in range(idx + 1, end_idx + 1):
+		segment.append(path[i])
 	if segment.size() < 2:
 		return {}
 	return {
@@ -4536,6 +4643,218 @@ func get_queue_front_order(unit, player_id: String) -> Dictionary:
 	if order.is_empty() or order.has("_queue_fail"):
 		return {}
 	return order
+
+func _queue_estimate_state(status: String, stype: String, owner: String, build_left: int, turn_cost: int) -> Dictionary:
+	return {
+		"status": status,
+		"type": stype,
+		"owner": owner,
+		"build_left": build_left,
+		"turn_cost": turn_cost
+	}
+
+func _queue_estimate_state_for(tile: Vector2i, local_states: Dictionary) -> Dictionary:
+	if local_states.has(tile):
+		var cached = local_states[tile]
+		return cached.duplicate(true) if cached is Dictionary else {}
+	var state = _structure_state(tile)
+	if state.is_empty():
+		return {}
+	return {
+		"status": str(state.get("status", "")),
+		"type": str(state.get("type", "")),
+		"owner": str(state.get("owner", "")),
+		"build_left": int(state.get("build_left", 0)),
+		"turn_cost": int(state.get("turn_cost", 0))
+	}
+
+func _road_queue_tile_status_estimate(tile: Vector2i, player_id: String, local_states: Dictionary, allow_start: bool = false) -> String:
+	if not $GameBoardNode/HexTileMap.is_cell_valid(tile):
+		return "invalid"
+	if $GameBoardNode._terrain_is_impassable(tile):
+		return "invalid"
+	var terrain = _terrain_type(tile)
+	if terrain in ["mountain", "lake"]:
+		return "invalid"
+	if tile in camps.get("basic", []) or tile in camps.get("dragon", []):
+		return "skip" if allow_start else "invalid"
+	if tile in structure_positions:
+		if tile == base_positions.get(player_id, Vector2i(-9999, -9999)) or tile in tower_positions.get(player_id, []):
+			return "skip"
+		return "skip" if allow_start else "invalid"
+	var state = _queue_estimate_state_for(tile, local_states)
+	if not state.is_empty():
+		var stype = str(state.get("type", ""))
+		var status = str(state.get("status", ""))
+		var owner = str(state.get("owner", ""))
+		if status == STRUCT_STATUS_DISABLED:
+			return "skip" if allow_start else "invalid"
+		if stype == STRUCT_ROAD:
+			if status == STRUCT_STATUS_BUILDING:
+				return "build" if owner == player_id else ("skip" if allow_start else "invalid")
+			if status == STRUCT_STATUS_INTACT:
+				return "skip"
+		if stype == STRUCT_RAIL:
+			if status in [STRUCT_STATUS_BUILDING, STRUCT_STATUS_INTACT]:
+				return "skip"
+		return "skip" if allow_start else "invalid"
+	return "build"
+
+func _rail_queue_tile_status_estimate(tile: Vector2i, player_id: String, local_states: Dictionary, allow_start: bool = false) -> String:
+	if not $GameBoardNode/HexTileMap.is_cell_valid(tile):
+		return "invalid"
+	if $GameBoardNode._terrain_is_impassable(tile):
+		return "invalid"
+	var terrain = _terrain_type(tile)
+	if terrain in ["mountain", "lake"]:
+		return "invalid"
+	if tile in camps.get("basic", []) or tile in camps.get("dragon", []):
+		return "invalid"
+	if tile in structure_positions:
+		if tile == base_positions.get(player_id, Vector2i(-9999, -9999)) or tile in tower_positions.get(player_id, []):
+			return "skip"
+		return "invalid"
+	var state = _queue_estimate_state_for(tile, local_states)
+	if state.is_empty():
+		return "invalid"
+	var stype = str(state.get("type", ""))
+	var status = str(state.get("status", ""))
+	var owner = str(state.get("owner", ""))
+	if status == STRUCT_STATUS_DISABLED:
+		return "invalid"
+	if stype == STRUCT_ROAD:
+		if status == STRUCT_STATUS_INTACT and owner == player_id:
+			return "build"
+		return "invalid"
+	if stype == STRUCT_RAIL:
+		if owner != player_id:
+			return "invalid"
+		if status == STRUCT_STATUS_BUILDING:
+			return "build"
+		if status == STRUCT_STATUS_INTACT:
+			return "skip"
+	return "invalid"
+
+func _ensure_queue_build_state(tile: Vector2i, player_id: String, struct_type: String, local_states: Dictionary) -> Dictionary:
+	var state = _queue_estimate_state_for(tile, local_states)
+	var turn_cost = _structure_turn_cost(struct_type)
+	if struct_type == STRUCT_ROAD:
+		if state.is_empty():
+			state = _queue_estimate_state(STRUCT_STATUS_BUILDING, STRUCT_ROAD, player_id, _structure_build_turns(STRUCT_ROAD, tile), turn_cost)
+		elif str(state.get("type", "")) == STRUCT_ROAD and str(state.get("status", "")) == STRUCT_STATUS_BUILDING:
+			if int(state.get("turn_cost", 0)) <= 0:
+				state["turn_cost"] = turn_cost
+			if int(state.get("build_left", 0)) <= 0:
+				state["build_left"] = _structure_build_turns(STRUCT_ROAD, tile)
+	elif struct_type == STRUCT_RAIL:
+		if state.is_empty():
+			return {}
+		var stype = str(state.get("type", ""))
+		var status = str(state.get("status", ""))
+		var owner = str(state.get("owner", ""))
+		if stype == STRUCT_ROAD and status == STRUCT_STATUS_INTACT and owner == player_id:
+			state = _queue_estimate_state(STRUCT_STATUS_BUILDING, STRUCT_RAIL, player_id, _structure_build_turns(STRUCT_RAIL, tile), turn_cost)
+		elif stype == STRUCT_RAIL and status == STRUCT_STATUS_BUILDING and owner == player_id:
+			if int(state.get("turn_cost", 0)) <= 0:
+				state["turn_cost"] = turn_cost
+			if int(state.get("build_left", 0)) <= 0:
+				state["build_left"] = _structure_build_turns(STRUCT_RAIL, tile)
+		else:
+			return {}
+	local_states[tile] = state.duplicate(true)
+	return local_states[tile]
+
+func _estimate_move_queue_turns(unit, path: Array, player_id: String) -> int:
+	if unit == null:
+		return -1
+	if not (path is Array) or path.size() < 2:
+		return -1
+	if path[0] != unit.grid_pos:
+		return -1
+	var idx = 0
+	var turns = 0
+	while idx < path.size() - 1:
+		var end_idx = _move_queue_segment_end_index(path, idx, unit, player_id)
+		if end_idx <= idx:
+			return -1
+		idx = end_idx
+		turns += 1
+	return turns
+
+func _estimate_build_queue_turns(unit, path: Array, player_id: String, struct_type: String) -> int:
+	if unit == null or not unit.is_builder:
+		return -1
+	if not (path is Array) or path.size() < 2:
+		return -1
+	if path[0] != unit.grid_pos:
+		return -1
+	var idx = 0
+	var pos: Vector2i = unit.grid_pos
+	var turns = 0
+	var gold = int(player_gold.get(player_id, 0))
+	var income = int(player_income.get(player_id, 0))
+	var local_states := {}
+	var use_rail = struct_type == STRUCT_RAIL
+	var guard = 0
+	while guard < 10000:
+		guard += 1
+		var status = _road_queue_tile_status_estimate(pos, player_id, local_states, idx == 0)
+		if use_rail:
+			status = _rail_queue_tile_status_estimate(pos, player_id, local_states, idx == 0)
+		if status == "invalid":
+			return -1
+		if status == "build":
+			var state = _ensure_queue_build_state(pos, player_id, struct_type, local_states)
+			if state.is_empty():
+				return -1
+			var turn_cost = int(state.get("turn_cost", _structure_turn_cost(struct_type)))
+			if turn_cost > 0 and gold < turn_cost:
+				return -1
+			gold -= turn_cost
+			var remaining = int(state.get("build_left", 0)) - 1
+			turns += 1
+			if remaining <= 0:
+				local_states[pos] = _queue_estimate_state(STRUCT_STATUS_INTACT, struct_type, player_id, 0, turn_cost)
+			else:
+				state["build_left"] = remaining
+				state["status"] = STRUCT_STATUS_BUILDING
+				state["type"] = struct_type
+				state["owner"] = player_id
+				local_states[pos] = state
+		else:
+			if idx >= path.size() - 1:
+				return turns
+			var next_tile = path[idx + 1]
+			if typeof(next_tile) != TYPE_VECTOR2I:
+				return -1
+			if not next_tile in $GameBoardNode.get_offset_neighbors(pos):
+				return -1
+			if $GameBoardNode._terrain_is_impassable(next_tile):
+				return -1
+			if $GameBoardNode.is_enemy_structure_tile(next_tile, player_id):
+				return -1
+			pos = next_tile
+			idx += 1
+			turns += 1
+		if idx >= path.size() - 1:
+			var end_status = _road_queue_tile_status_estimate(pos, player_id, local_states, false)
+			if use_rail:
+				end_status = _rail_queue_tile_status_estimate(pos, player_id, local_states, false)
+			if end_status == "skip":
+				return turns
+		gold += income
+	return -1
+
+func estimate_queue_turns(unit, path: Array, mode: String, player_id: String) -> int:
+	var queue_mode = str(mode).to_lower()
+	match queue_mode:
+		"move_to":
+			return _estimate_move_queue_turns(unit, path, player_id)
+		"build_road_to":
+			return _estimate_build_queue_turns(unit, path, player_id, STRUCT_ROAD)
+		"build_rail_to":
+			return _estimate_build_queue_turns(unit, path, player_id, STRUCT_RAIL)
+	return -1
 
 func _apply_build_queue_orders(all_units: Dictionary) -> void:
 	for player in ["player1", "player2"]:
@@ -4834,14 +5153,14 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 					dir_idx = step_dir
 				elif step_dir != dir_idx:
 					straight = false
-				if $GameBoardNode._terrain_is_impassable(step):
+				if not $GameBoardNode.is_move_tile_passable_for_orders(step, player_id):
 					result["reason"] = "invalid_path"
 					return _log_order_result(player_id, order, result)
 				if $GameBoardNode.is_enemy_structure_tile(step, unit.player_id):
 					if i != path.size() - 1:
 						result["reason"] = "invalid_path"
 						return _log_order_result(player_id, order, result)
-				var step_cost = float($GameBoardNode.get_move_cost(step, unit))
+				var step_cost = float($GameBoardNode.get_order_move_cost(step, unit, player_id))
 				var next_total = total_cost + step_cost
 				if next_total > max_budget + 1.0 + 0.001:
 					result["reason"] = "invalid_path"
@@ -4877,7 +5196,7 @@ func validate_and_add_order(player_id: String, order: Dictionary) -> Dictionary:
 				if not step in $GameBoardNode.get_offset_neighbors(prev):
 					result["reason"] = "invalid_path"
 					return _log_order_result(player_id, order, result)
-				if $GameBoardNode._terrain_is_impassable(step):
+				if not $GameBoardNode.is_move_tile_passable_for_orders(step, player_id):
 					result["reason"] = "invalid_path"
 					return _log_order_result(player_id, order, result)
 				if $GameBoardNode.is_enemy_structure_tile(step, player_id) and i != path.size() - 1:

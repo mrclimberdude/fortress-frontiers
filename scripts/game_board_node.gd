@@ -186,6 +186,32 @@ func _terrain_blocks_sight(cell: Vector2i) -> bool:
 		return false
 	return bool(td.get_custom_data("blocks_sight"))
 
+func get_visibility_state_for_player(cell: Vector2i, player_id: String) -> int:
+	if player_id == "":
+		return 2
+	var fog = get_node_or_null("FogOfWar")
+	if fog == null or not fog.visiblity.has(player_id):
+		return 2
+	return int(fog.visiblity[player_id].get(cell, 0))
+
+func is_tile_unseen_for_player(cell: Vector2i, player_id: String) -> bool:
+	return get_visibility_state_for_player(cell, player_id) == 0
+
+func is_move_tile_passable_for_orders(cell: Vector2i, player_id: String) -> bool:
+	var tm = $".."
+	if tm != null and tm.current_phase == tm.Phase.ORDERS and is_tile_unseen_for_player(cell, player_id):
+		return true
+	return not _terrain_is_impassable(cell)
+
+func get_order_move_cost(cell: Vector2i, unit = null, player_id: String = "") -> float:
+	var effective_player = player_id
+	if effective_player == "" and unit != null:
+		effective_player = str(unit.player_id)
+	var tm = $".."
+	if tm != null and tm.current_phase == tm.Phase.ORDERS and effective_player != "" and is_tile_unseen_for_player(cell, effective_player):
+		return 1.0
+	return get_move_cost(cell, unit)
+
 func get_move_cost(cell: Vector2i, unit = null) -> float:
 	var tm = $".."
 	if tm != null and unit != null and tm.current_phase == tm.Phase.ORDERS:
@@ -322,9 +348,9 @@ func get_reachable_tiles(start: Vector2i, range: float, mode: String, mover_over
 			for neighbor in get_offset_neighbors(current):
 				if not hex_map.is_cell_valid(neighbor):
 					continue
-				if _terrain_is_impassable(neighbor):
+				if not is_move_tile_passable_for_orders(neighbor, mover_player):
 					continue
-				var step_cost: float = get_move_cost(neighbor, mover)
+				var step_cost: float = get_order_move_cost(neighbor, mover, mover_player)
 				var new_cost: float = float(visited[current]) + step_cost
 				if new_cost > range_limit:
 					continue
@@ -342,6 +368,93 @@ func get_reachable_tiles(start: Vector2i, range: float, mode: String, mover_over
 						open.append(neighbor)
 	# Return both the reachable set and the back-pointer map
 	return {"tiles": reachable, "prev": prev}
+
+func get_queue_reachable(start: Vector2i, mode: String, unit: Node, player_id: String) -> Dictionary:
+	var result := {"tiles": [], "prev": {}, "costs": {}}
+	if unit == null or player_id == "":
+		return result
+	if not hex_map.is_cell_valid(start):
+		return result
+	var tm = $".."
+	if tm == null:
+		return result
+	var queue_mode = str(mode).to_lower()
+	var prev := {}
+	var costs := {start: 0.0}
+	var open: Array = [start]
+	while open.size() > 0:
+		var best_idx = 0
+		var best_cost = float(costs[open[0]])
+		for i in range(1, open.size()):
+			var cost = float(costs[open[i]])
+			if cost < best_cost:
+				best_cost = cost
+				best_idx = i
+		var current: Vector2i = open.pop_at(best_idx)
+		var current_cost = float(costs[current])
+		var neighbors = get_offset_neighbors(current)
+		var expand_neighbors = true
+		var edge_cost = 0.0
+		match queue_mode:
+			"move_to":
+				if is_enemy_structure_tile(current, player_id):
+					expand_neighbors = false
+			"build_road_to":
+				var road_status = tm._road_queue_tile_status(current, player_id, current == start)
+				if road_status == "invalid":
+					expand_neighbors = false
+				else:
+					edge_cost = 1.0
+					if road_status == "build":
+						var road_state = tm._structure_state(current)
+						var road_build_left = int(road_state.get("build_left", 0)) if road_state is Dictionary else 0
+						if road_build_left > 0:
+							edge_cost += float(road_build_left)
+						else:
+							edge_cost += float(tm._structure_build_turns("road", current))
+			"build_rail_to":
+				var rail_status = tm._rail_queue_tile_status(current, player_id, current == start)
+				if rail_status == "invalid":
+					expand_neighbors = false
+				else:
+					edge_cost = 1.0
+					if rail_status == "build":
+						var rail_state = tm._structure_state(current)
+						var rail_build_left = int(rail_state.get("build_left", 0)) if rail_state is Dictionary else 0
+						if rail_build_left > 0:
+							edge_cost += float(rail_build_left)
+						else:
+							edge_cost += float(tm._structure_build_turns("rail", current))
+			_:
+				return result
+		if not expand_neighbors:
+			continue
+		for neighbor in neighbors:
+			if not hex_map.is_cell_valid(neighbor):
+				continue
+			var next_cost = current_cost
+			match queue_mode:
+				"move_to":
+					if not is_move_tile_passable_for_orders(neighbor, player_id):
+						continue
+					next_cost += float(get_order_move_cost(neighbor, unit, player_id))
+				"build_road_to":
+					if not tm.is_road_queue_tile_valid(neighbor, player_id, false):
+						continue
+					next_cost += edge_cost
+				"build_rail_to":
+					if not tm.is_rail_queue_tile_valid(neighbor, player_id, false):
+						continue
+					next_cost += edge_cost
+			if not costs.has(neighbor) or next_cost < float(costs[neighbor]):
+				costs[neighbor] = next_cost
+				prev[neighbor] = current
+				if neighbor not in open:
+					open.append(neighbor)
+	result["tiles"] = costs.keys()
+	result["prev"] = prev
+	result["costs"] = costs
+	return result
 
 
 func clear_highlights() -> void:
