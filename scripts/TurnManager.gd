@@ -6044,11 +6044,27 @@ func _damage_lines_for_viewer(viewer_id: String, atkr, defr, atkr_in_dmg, defr_i
 			lines.append("Enemy %s #%d retaliated and dealt %d damage" % [defr.unit_type, defr.net_id, atkr_in_dmg])
 	return lines
 
-func _damage_entry_for_line(text: String, kind: String, attacker_tile, defender_tile, target_tile, attacker_unit_id: int = -1, defender_unit_id: int = -1, atk_mode: String = "") -> Dictionary:
+func _should_highlight_combat_unit_for_viewer(viewer_id: String, unit) -> bool:
+	if viewer_id == "" or unit == null:
+		return false
+	if unit.player_id == viewer_id:
+		return true
+	return _player_can_see_tile(viewer_id, unit.grid_pos)
+
+func _damage_entry_for_line(text: String, kind: String, attacker_tile, defender_tile, target_tile, attacker_unit_id: int = -1, defender_unit_id: int = -1, atk_mode: String = "", highlight_attacker: bool = true, highlight_defender: bool = true) -> Dictionary:
 	var tiles: Array = []
-	for tile in [attacker_tile, defender_tile, target_tile]:
-		if typeof(tile) == TYPE_VECTOR2I and not tiles.has(tile):
-			tiles.append(tile)
+	if highlight_attacker and typeof(attacker_tile) == TYPE_VECTOR2I and not tiles.has(attacker_tile):
+		tiles.append(attacker_tile)
+	if highlight_defender and typeof(defender_tile) == TYPE_VECTOR2I and not tiles.has(defender_tile):
+		tiles.append(defender_tile)
+	if typeof(target_tile) == TYPE_VECTOR2I:
+		var allow_target = true
+		if target_tile == attacker_tile:
+			allow_target = highlight_attacker
+		elif target_tile == defender_tile:
+			allow_target = highlight_defender
+		if allow_target and not tiles.has(target_tile):
+			tiles.append(target_tile)
 	return {
 		"text": text,
 		"kind": kind,
@@ -6058,7 +6074,9 @@ func _damage_entry_for_line(text: String, kind: String, attacker_tile, defender_
 		"target_tile": target_tile if typeof(target_tile) == TYPE_VECTOR2I else Vector2i(-9999, -9999),
 		"attacker_unit_net_id": attacker_unit_id,
 		"defender_unit_net_id": defender_unit_id,
-		"atk_mode": atk_mode
+		"atk_mode": atk_mode,
+		"highlight_attacker": highlight_attacker,
+		"highlight_defender": highlight_defender
 	}
 
 func _damage_entries_for_viewer(viewer_id: String, atkr, defr, atkr_in_dmg, defr_in_dmg, retaliate, atk_mode) -> Array:
@@ -6067,6 +6085,8 @@ func _damage_entries_for_viewer(viewer_id: String, atkr, defr, atkr_in_dmg, defr
 	if atkr.player_id != viewer_id and defr.player_id != viewer_id:
 		return []
 	var entries: Array = []
+	var highlight_attacker = _should_highlight_combat_unit_for_viewer(viewer_id, atkr)
+	var highlight_defender = _should_highlight_combat_unit_for_viewer(viewer_id, defr)
 	if defr.player_id == viewer_id:
 		entries.append(_damage_entry_for_line(
 			"Your %s #%d took %d %s damage from %s #%d" % [defr.unit_type, defr.net_id, defr_in_dmg, atk_mode, atkr.unit_type, atkr.net_id],
@@ -6076,7 +6096,9 @@ func _damage_entries_for_viewer(viewer_id: String, atkr, defr, atkr_in_dmg, defr
 			defr.grid_pos,
 			atkr.net_id,
 			defr.net_id,
-			atk_mode
+			atk_mode,
+			highlight_attacker,
+			highlight_defender
 		))
 		if retaliate:
 			entries.append(_damage_entry_for_line(
@@ -6087,7 +6109,9 @@ func _damage_entries_for_viewer(viewer_id: String, atkr, defr, atkr_in_dmg, defr
 				atkr.grid_pos,
 				defr.net_id,
 				atkr.net_id,
-				atk_mode
+				atk_mode,
+				highlight_defender,
+				highlight_attacker
 			))
 	else:
 		entries.append(_damage_entry_for_line(
@@ -6098,7 +6122,9 @@ func _damage_entries_for_viewer(viewer_id: String, atkr, defr, atkr_in_dmg, defr
 			defr.grid_pos,
 			atkr.net_id,
 			defr.net_id,
-			atk_mode
+			atk_mode,
+			highlight_attacker,
+			highlight_defender
 		))
 		if retaliate:
 			entries.append(_damage_entry_for_line(
@@ -6109,7 +6135,9 @@ func _damage_entries_for_viewer(viewer_id: String, atkr, defr, atkr_in_dmg, defr
 				atkr.grid_pos,
 				defr.net_id,
 				atkr.net_id,
-				atk_mode
+				atk_mode,
+				highlight_defender,
+				highlight_attacker
 			))
 	return entries
 

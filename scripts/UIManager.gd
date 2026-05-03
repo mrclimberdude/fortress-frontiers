@@ -2007,15 +2007,37 @@ func _update_auto_pass_for_damage() -> void:
 
 func _damage_entry_tiles(entry: Dictionary) -> Array:
 	var tiles: Array = []
-	if entry.has("tiles") and entry["tiles"] is Array:
-		for tile in entry["tiles"]:
-			if typeof(tile) == TYPE_VECTOR2I and not tiles.has(tile):
-				tiles.append(tile)
-	for key in ["attacker_tile", "defender_tile", "target_tile", "tile"]:
-		if entry.has(key):
-			var tile = entry.get(key)
-			if typeof(tile) == TYPE_VECTOR2I and tile != Vector2i(-9999, -9999) and not tiles.has(tile):
-				tiles.append(tile)
+	var has_combat_visibility_flags = entry.has("highlight_attacker") or entry.has("highlight_defender")
+	if has_combat_visibility_flags:
+		var attacker_tile = entry.get("attacker_tile", Vector2i(-9999, -9999))
+		var defender_tile = entry.get("defender_tile", Vector2i(-9999, -9999))
+		var target_tile = entry.get("target_tile", Vector2i(-9999, -9999))
+		if bool(entry.get("highlight_attacker", false)) and typeof(attacker_tile) == TYPE_VECTOR2I and attacker_tile != Vector2i(-9999, -9999):
+			tiles.append(attacker_tile)
+		if bool(entry.get("highlight_defender", false)) and typeof(defender_tile) == TYPE_VECTOR2I and defender_tile != Vector2i(-9999, -9999) and not tiles.has(defender_tile):
+			tiles.append(defender_tile)
+		if typeof(target_tile) == TYPE_VECTOR2I and target_tile != Vector2i(-9999, -9999):
+			var allow_target = true
+			if target_tile == attacker_tile:
+				allow_target = bool(entry.get("highlight_attacker", false))
+			elif target_tile == defender_tile:
+				allow_target = bool(entry.get("highlight_defender", false))
+			if allow_target and not tiles.has(target_tile):
+				tiles.append(target_tile)
+	else:
+		if entry.has("tiles") and entry["tiles"] is Array:
+			for tile in entry["tiles"]:
+				if typeof(tile) == TYPE_VECTOR2I and not tiles.has(tile):
+					tiles.append(tile)
+		for key in ["attacker_tile", "defender_tile", "target_tile", "tile"]:
+			if entry.has(key):
+				var tile = entry.get(key)
+				if typeof(tile) == TYPE_VECTOR2I and tile != Vector2i(-9999, -9999) and not tiles.has(tile):
+					tiles.append(tile)
+	if entry.has("tile"):
+		var single_tile = entry.get("tile")
+		if typeof(single_tile) == TYPE_VECTOR2I and single_tile != Vector2i(-9999, -9999) and not tiles.has(single_tile):
+			tiles.append(single_tile)
 	return tiles
 
 func _clear_damage_report_hover() -> void:
