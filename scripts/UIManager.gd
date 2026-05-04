@@ -288,6 +288,10 @@ func _ready():
 		_default_camera_zoom = cam.zoom
 	if username_edit != null:
 		username_edit.text = _load_username()
+	if $IPLineEdit != null:
+		$IPLineEdit.text = _load_saved_ip()
+	if $PortLineEdit != null:
+		$PortLineEdit.text = _load_saved_port()
 	if replay_browser_panel != null:
 		replay_browser_panel.visible = false
 	
@@ -3077,7 +3081,27 @@ func _load_username() -> String:
 
 func _save_username(name: String) -> void:
 	var cfg = ConfigFile.new()
+	cfg.load(USERNAME_SAVE_PATH)
 	cfg.set_value("user", "name", name.strip_edges())
+	cfg.save(USERNAME_SAVE_PATH)
+
+func _load_saved_ip() -> String:
+	var cfg = ConfigFile.new()
+	if cfg.load(USERNAME_SAVE_PATH) == OK:
+		return str(cfg.get_value("network", "ip", "")).strip_edges()
+	return ""
+
+func _load_saved_port() -> String:
+	var cfg = ConfigFile.new()
+	if cfg.load(USERNAME_SAVE_PATH) == OK:
+		return str(cfg.get_value("network", "port", "7777")).strip_edges()
+	return "7777"
+
+func _save_connection_settings(ip: String, port: String) -> void:
+	var cfg = ConfigFile.new()
+	cfg.load(USERNAME_SAVE_PATH)
+	cfg.set_value("network", "ip", ip.strip_edges())
+	cfg.set_value("network", "port", port.strip_edges())
 	cfg.save(USERNAME_SAVE_PATH)
 
 func _show_main_menu() -> void:
@@ -3236,6 +3260,7 @@ func _on_host_pressed():
 		turn_mgr.current_map_index = -1
 		turn_mgr._reset_map_state()
 	var port = $"PortLineEdit".text.strip_edges()
+	_save_connection_settings($"IPLineEdit".text.strip_edges(), port)
 	NetworkManager.host_game(int(port))
 	_show_lobby(true)
 
@@ -3249,6 +3274,7 @@ func _on_join_pressed():
 		username = "Player"
 	NetworkManager.set_local_username(username)
 	_save_username(username)
+	_save_connection_settings(ip, port)
 	print("[UI] Joining game at %s:%d" % [ip, port])
 	NetworkManager.join_game(ip, int(port))
 	_show_lobby(false)
