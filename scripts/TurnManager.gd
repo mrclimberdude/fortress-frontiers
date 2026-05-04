@@ -957,7 +957,7 @@ func _reset_replay_state_defaults() -> void:
 	last_snapshot_turn = -1
 	last_state_hash_turn = -1
 	last_stats_turn = -1
-	player_gold = _build_player_dict(active_players, 25)
+	player_gold = _build_player_dict(active_players, STARTING_GOLD)
 	player_income = _build_player_dict(active_players, 0)
 	player_mana = _build_player_dict(active_players, 0)
 	player_mana_income = _build_player_dict(active_players, 0)
@@ -1522,7 +1522,7 @@ func configure_match_players(player_ids: Array, preserve_existing: bool = true) 
 			if player_id in active_players and not previous_living.has(player_id):
 				previous_living.append(player_id)
 	living_players = previous_living if preserve_existing and not previous_living.is_empty() else active_players.duplicate()
-	player_gold = _build_player_dict(active_players, 25 if not preserve_existing else 0, player_gold if preserve_existing else {})
+	player_gold = _build_player_dict(active_players, STARTING_GOLD if not preserve_existing else 0, player_gold if preserve_existing else {})
 	player_income = _build_player_dict(active_players, 0, player_income if preserve_existing else {})
 	player_mana = _build_player_dict(active_players, 0, player_mana if preserve_existing else {})
 	player_mana_income = _build_player_dict(active_players, 0, player_mana_income if preserve_existing else {})
@@ -1748,7 +1748,8 @@ var movement_phase_count: int = 0
 const MAX_MOVEMENT_PHASES: int = 20
 
 # --- Economy State ---
-var player_gold       := { "player1": 25, "player2": 25 }
+const STARTING_GOLD : int = 25
+var player_gold       := { "player1": STARTING_GOLD, "player2": STARTING_GOLD }
 var player_income    := { "player1": 0, "player2": 0 }
 var player_mana       := { "player1": 0, "player2": 0 }
 var player_mana_income := { "player1": 0, "player2": 0 }
@@ -2985,9 +2986,42 @@ func _mine_connected_to_roads(pos: Vector2i, connected: Dictionary) -> bool:
 			return true
 	return false
 
+func _income_tower_tiles_for(player_id: String) -> Array:
+	var tiles_with_dist := []
+	var seen := {}
+	var spawn_tiles := {}
+	for pos in spawn_tower_positions.get(player_id, []):
+		spawn_tiles[pos] = true
+	var base_pos = base_positions.get(player_id, Vector2i(-9999, -9999))
+	for pos in tower_positions.get(player_id, []):
+		if spawn_tiles.has(pos):
+			continue
+		if seen.has(pos):
+			continue
+		seen[pos] = true
+		tiles_with_dist.append({
+			"pos": pos,
+			"dist": _hex_distance(pos, base_pos) if base_pos != Vector2i(-9999, -9999) else 0
+		})
+	tiles_with_dist.sort_custom(func(a, b):
+		if int(a["dist"]) == int(b["dist"]):
+			var ap: Vector2i = a["pos"]
+			var bp: Vector2i = b["pos"]
+			if ap.y == bp.y:
+				return ap.x < bp.x
+			return ap.y < bp.y
+		return int(a["dist"]) < int(b["dist"])
+	)
+	var tiles := []
+	for entry in tiles_with_dist:
+		tiles.append(entry["pos"])
+		if tiles.size() >= 3:
+			break
+	return tiles
+
 func get_spawn_points(player_id: String) -> Array:
 	var points := []
-	for pos in income_tower_positions.get(player_id, []):
+	for pos in _income_tower_tiles_for(player_id):
 		points.append(pos)
 	var connected = _connected_road_tiles(player_id)
 	for pos in spawn_tower_positions.get(player_id, []):
@@ -4294,8 +4328,6 @@ func _tick_neutral_respawns() -> void:
 	update_neutral_markers()
 
 func start_game() -> void:
-	if NetworkManager != null and NetworkManager.has_method("get_match_player_ids"):
-		configure_match_players(NetworkManager.get_match_player_ids(), false)
 	host_replay_log_path = ""
 	_maybe_log_match_init()
 	if $UI != null and $UI.has_method("_on_game_started"):
@@ -4578,7 +4610,7 @@ func _ensure_map_loaded() -> void:
 		push_error("TurnManager: map_data is empty.")
 		return
 	if NetworkManager != null and NetworkManager.has_method("get_match_player_ids"):
-		configure_match_players(NetworkManager.get_match_player_ids(), false)
+		configure_match_players(NetworkManager.get_match_player_ids(), true)
 	if NetworkManager.selected_map_index < 0:
 		NetworkManager.selected_map_index = _pick_random_map_index(NetworkManager.map_selection_mode, active_players.size())
 	if NetworkManager.match_seed < 0:
@@ -4622,7 +4654,7 @@ func _do_upkeep() -> void:
 		var connected_rails = _connected_rail_tiles(player)
 		if _controls_tile(player, base_positions.get(player, Vector2i(-9999, -9999))):
 			income += BASE_INCOME
-		for tower in income_tower_positions.get(player, []):
+		for tower in _income_tower_tiles_for(player):
 			income += TOWER_INCOME
 		for pos in mines.get(player, []):
 			if _controls_tile(player, pos):

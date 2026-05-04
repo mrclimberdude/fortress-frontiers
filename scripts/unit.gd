@@ -143,7 +143,8 @@ func set_grid_position(pos: Vector2i) -> void:
 	# 4) Register the new tile & recolor it for our player
 	if board and board.has_method("occupy"):
 		board.occupy(pos, self)
-		if pos in structure_tiles:
+		var is_mine_tile = turn_mgr != null and turn_mgr.has_method("_tile_is_mine") and turn_mgr._tile_is_mine(pos)
+		if is_mine_tile:
 			if not turn_mgr.mines.has(player_id):
 				turn_mgr.mines[player_id] = []
 			for mine_owner in turn_mgr.mines.keys():
