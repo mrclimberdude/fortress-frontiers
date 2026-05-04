@@ -24,6 +24,8 @@ var custom_proc_params: Dictionary = {}
 var _pending_start_ready_peers: Dictionary = {}
 var _awaiting_initial_state_ready: bool = false
 var _start_game_waiting_for_prewarm: bool = false
+var _start_game_handshake_active: bool = false
+var _start_game_snapshots_sent: bool = false
 
 
 var _step_ready_counts := {}
@@ -126,6 +128,9 @@ func _reset_lobby_state() -> void:
 	local_player_id = ""
 	_pending_start_ready_peers.clear()
 	_awaiting_initial_state_ready = false
+	_start_game_waiting_for_prewarm = false
+	_start_game_handshake_active = false
+	_start_game_snapshots_sent = false
 	reset_match_tracking(_default_player_ids())
 
 func _init_lobby_slots() -> void:
@@ -296,8 +301,11 @@ func _on_peer_disconnected(id: int) -> void:
 	if is_host():
 		var conceded_player = str(peer_id_to_player_id.get(id, "")).strip_edges()
 		_clear_peer_slot(id)
+		if (_start_game_handshake_active or (turn_mgr != null and int(turn_mgr.get("turn_number")) <= 0)) and turn_mgr != null and turn_mgr.has_method("configure_match_players"):
+			turn_mgr.configure_match_players(get_match_player_ids(), false)
 		if conceded_player != "" and turn_mgr != null and int(turn_mgr.get("turn_number")) > 0:
 			_handle_concede_request(conceded_player)
+		_try_complete_start_handshake()
 
 # RPC to receive the map data on clients
 @rpc("any_peer", "reliable")
@@ -713,6 +721,8 @@ func start_game_for_all() -> void:
 	reset_match_tracking(match_players)
 	if turn_mgr != null and turn_mgr.has_method("configure_match_players"):
 		turn_mgr.configure_match_players(match_players, false)
+	_start_game_handshake_active = true
+	_start_game_snapshots_sent = false
 	_pending_start_ready_peers.clear()
 	for peer_id in client_peer_ids:
 		_pending_start_ready_peers[peer_id] = true
@@ -746,9 +756,8 @@ func _finish_start_game_for_all_async(match_players: Array) -> void:
 				initial_state["procedural_map"] = map_state
 		initial_state["force_apply"] = true
 		rpc_id(peer_id, "rpc_state_snapshot", initial_state)
-	if _pending_start_ready_peers.is_empty():
-		if turn_mgr != null and turn_mgr.has_method("start_game"):
-			turn_mgr.start_game()
+	_start_game_snapshots_sent = true
+	_try_complete_start_handshake()
 
 @rpc("any_peer", "reliable")
 func rpc_client_start_ready() -> void:
@@ -759,9 +768,21 @@ func rpc_client_start_ready() -> void:
 		return
 	var sender = multiplayer.get_remote_sender_id()
 	_pending_start_ready_peers.erase(sender)
-	if _pending_start_ready_peers.is_empty():
-		if turn_mgr != null and turn_mgr.has_method("start_game"):
-			turn_mgr.start_game()
+	_try_complete_start_handshake()
+
+func _try_complete_start_handshake() -> void:
+	if not _start_game_handshake_active:
+		return
+	if not _start_game_snapshots_sent:
+		return
+	if not _pending_start_ready_peers.is_empty():
+		return
+	_start_game_handshake_active = false
+	_start_game_snapshots_sent = false
+	if turn_mgr != null and turn_mgr.has_method("configure_match_players"):
+		turn_mgr.configure_match_players(get_match_player_ids(), false)
+	if turn_mgr != null and turn_mgr.has_method("start_game"):
+		turn_mgr.start_game()
 
 @rpc("any_peer", "reliable")
 func rpc_game_over(player_id: String) -> void:

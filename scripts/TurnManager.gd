@@ -3506,6 +3506,7 @@ func _load_map_by_index(map_index: int, apply_generated_content: bool = true) ->
 	targeted_vision_active = _build_player_dict(active_players, {})
 	_next_ward_id = -1
 	mana_pool_mines.clear()
+	structure_positions.clear()
 	spawn_tower_positions = _build_player_dict(active_players, [])
 	income_tower_positions = _build_player_dict(active_players, [])
 	for player_id in active_players:
@@ -3691,25 +3692,178 @@ func _collect_state_for(viewer_id: String) -> Dictionary:
 	var state = _collect_state()
 	if viewer_id == "":
 		return state
-	if current_phase != Phase.ORDERS:
-		return state
+	var fog = $GameBoardNode.get_node_or_null("FogOfWar")
+	var viewer_vis: Dictionary = {}
+	if fog != null and fog.visiblity.has(viewer_id) and fog.visiblity[viewer_id] is Dictionary:
+		viewer_vis = fog.visiblity[viewer_id].duplicate(true)
 	var filtered := []
 	for data in state.get("units", []):
 		var owner = str(data.get("player_id", ""))
 		var just_purchased = bool(data.get("just_purchased", false))
+		var pos = _state_tile_from_value(data.get("grid_pos", Vector2i(-9999, -9999)))
+		var visible_to_viewer = owner == viewer_id or _viewer_can_see_snapshot_tile(viewer_id, viewer_vis, pos)
 		if just_purchased and owner != viewer_id:
+			continue
+		if not visible_to_viewer:
 			continue
 		filtered.append(data)
 	state["units"] = filtered
+	state["base_positions"] = _filter_player_pos_dict_for_viewer(state.get("base_positions", {}), viewer_id, viewer_vis)
+	state["tower_positions"] = _filter_player_tile_dict_for_viewer(state.get("tower_positions", {}), viewer_id, viewer_vis)
+	state["spawn_tower_positions"] = _filter_player_tile_dict_for_viewer(state.get("spawn_tower_positions", {}), viewer_id, viewer_vis)
+	state["income_tower_positions"] = _filter_player_tile_dict_for_viewer(state.get("income_tower_positions", {}), viewer_id, viewer_vis)
+	state["mines"] = _filter_mines_for_viewer(state.get("mines", {}), viewer_id, viewer_vis)
+	state["camps"] = _filter_camps_for_viewer(state.get("camps", {}), viewer_id, viewer_vis)
+	state["buildable_structures"] = _filter_buildable_structures_for_viewer(viewer_id, viewer_vis)
+	state["structure_positions"] = _filtered_structure_positions_for_viewer(state)
+	state["player_gold"] = _filter_player_scalar_dict_for_viewer(state.get("player_gold", {}), viewer_id, 0)
+	state["player_income"] = _filter_player_scalar_dict_for_viewer(state.get("player_income", {}), viewer_id, 0)
+	state["player_mana"] = _filter_player_scalar_dict_for_viewer(state.get("player_mana", {}), viewer_id, 0)
+	state["player_mana_income"] = _filter_player_scalar_dict_for_viewer(state.get("player_mana_income", {}), viewer_id, 0)
+	state["player_mana_cap"] = _filter_player_scalar_dict_for_viewer(state.get("player_mana_cap", {}), viewer_id, BASE_MANA_CAP)
+	state["player_melee_bonus"] = _filter_player_scalar_dict_for_viewer(state.get("player_melee_bonus", {}), viewer_id, 0)
+	state["player_ranged_bonus"] = _filter_player_scalar_dict_for_viewer(state.get("player_ranged_bonus", {}), viewer_id, 0)
+	state["player_mana_bonus"] = _filter_player_scalar_dict_for_viewer(state.get("player_mana_bonus", {}), viewer_id, 0)
+	state["player_mana_cap_bonus"] = _filter_player_scalar_dict_for_viewer(state.get("player_mana_cap_bonus", {}), viewer_id, 0)
+	state["player_global_vision_until"] = _filter_player_scalar_dict_for_viewer(state.get("player_global_vision_until", {}), viewer_id, 0)
+	state["ward_vision_active"] = _filter_player_dict_entry_for_viewer(state.get("ward_vision_active", {}), viewer_id, {})
+	state["targeted_vision_active"] = _filter_player_dict_entry_for_viewer(state.get("targeted_vision_active", {}), viewer_id, {})
+	state["structure_memory"] = _filter_player_dict_entry_for_viewer(state.get("structure_memory", {}), viewer_id, {})
+	state["neutral_tile_memory"] = _filter_player_dict_entry_for_viewer(state.get("neutral_tile_memory", {}), viewer_id, {})
+	state["mana_pool_mines"] = _filter_vec2i_key_dict_for_viewer(state.get("mana_pool_mines", {}), viewer_id, viewer_vis, false)
+	state["camp_respawns"] = _filter_vec2i_key_dict_for_viewer(state.get("camp_respawns", {}), viewer_id, viewer_vis, false)
+	state["dragon_respawns"] = _filter_vec2i_key_dict_for_viewer(state.get("dragon_respawns", {}), viewer_id, viewer_vis, false)
+	state["camp_respawn_counts"] = _filter_vec2i_key_dict_for_viewer(state.get("camp_respawn_counts", {}), viewer_id, viewer_vis, false)
+	state["dragon_rewards"] = _filter_vec2i_key_dict_for_viewer(state.get("dragon_rewards", {}), viewer_id, viewer_vis, false)
+	state["dragon_spawn_counts"] = _filter_vec2i_key_dict_for_viewer(state.get("dragon_spawn_counts", {}), viewer_id, viewer_vis, false)
 	var viewer_orders := {}
 	viewer_orders[viewer_id] = player_orders.get(viewer_id, {}).duplicate(true)
 	state["player_orders"] = viewer_orders
-	var fog = $GameBoardNode.get_node_or_null("FogOfWar")
-	if fog != null and fog.visiblity.has(viewer_id):
-		state["fog_visibility"] = { viewer_id: fog.visiblity[viewer_id].duplicate(true) }
+	state["committed_orders"] = _filter_player_dict_entry_for_viewer(committed_orders, viewer_id, {})
+	if not viewer_vis.is_empty():
+		state["fog_visibility"] = { viewer_id: viewer_vis }
 	state["damage_log"] = { viewer_id: damage_log.get(viewer_id, []).duplicate(true) }
 	state["damage_log_entries"] = { viewer_id: damage_log_entries.get(viewer_id, []).duplicate(true) }
 	return state
+
+func _state_tile_from_value(value) -> Vector2i:
+	if typeof(value) == TYPE_VECTOR2I:
+		return value
+	return _decode_log_vec2i(value)
+
+func _viewer_can_see_snapshot_tile(viewer_id: String, viewer_vis: Dictionary, tile: Vector2i) -> bool:
+	if viewer_id == "":
+		return true
+	if tile == Vector2i(-9999, -9999):
+		return false
+	if viewer_vis.is_empty():
+		return true
+	return int(viewer_vis.get(tile, 0)) == 2
+
+func _filter_tiles_for_viewer(tiles: Array, viewer_id: String, viewer_vis: Dictionary, include_all: bool) -> Array:
+	var filtered: Array = []
+	var seen := {}
+	for raw_tile in tiles:
+		var tile = _state_tile_from_value(raw_tile)
+		if tile == Vector2i(-9999, -9999):
+			continue
+		if seen.has(tile):
+			continue
+		if include_all or _viewer_can_see_snapshot_tile(viewer_id, viewer_vis, tile):
+			filtered.append(tile)
+			seen[tile] = true
+	return filtered
+
+func _filter_player_tile_dict_for_viewer(source: Dictionary, viewer_id: String, viewer_vis: Dictionary) -> Dictionary:
+	var filtered := {}
+	for player_id in active_players:
+		filtered[player_id] = _filter_tiles_for_viewer(source.get(player_id, []), viewer_id, viewer_vis, player_id == viewer_id)
+	return filtered
+
+func _filter_player_pos_dict_for_viewer(source: Dictionary, viewer_id: String, viewer_vis: Dictionary) -> Dictionary:
+	var filtered := {}
+	for player_id in active_players:
+		var tile = _state_tile_from_value(source.get(player_id, Vector2i(-9999, -9999)))
+		if tile == Vector2i(-9999, -9999):
+			continue
+		if player_id == viewer_id or _viewer_can_see_snapshot_tile(viewer_id, viewer_vis, tile):
+			filtered[player_id] = tile
+	return filtered
+
+func _filter_mines_for_viewer(source: Dictionary, viewer_id: String, viewer_vis: Dictionary) -> Dictionary:
+	var filtered := {"unclaimed": _filter_tiles_for_viewer(source.get("unclaimed", []), viewer_id, viewer_vis, false)}
+	for player_id in active_players:
+		filtered[player_id] = _filter_tiles_for_viewer(source.get(player_id, []), viewer_id, viewer_vis, player_id == viewer_id)
+	return filtered
+
+func _filter_camps_for_viewer(source: Dictionary, viewer_id: String, viewer_vis: Dictionary) -> Dictionary:
+	return {
+		"basic": _filter_tiles_for_viewer(source.get("basic", []), viewer_id, viewer_vis, false),
+		"dragon": _filter_tiles_for_viewer(source.get("dragon", []), viewer_id, viewer_vis, false)
+	}
+
+func _filter_buildable_structures_for_viewer(viewer_id: String, viewer_vis: Dictionary) -> Dictionary:
+	var filtered := {}
+	for cell in buildable_structures.keys():
+		var state = buildable_structures[cell]
+		var owner = str(state.get("owner", ""))
+		if owner == viewer_id or (_viewer_can_see_snapshot_tile(viewer_id, viewer_vis, cell) and _structure_is_visible_to_viewer(state, viewer_id, cell)):
+			filtered[cell] = state.duplicate(true)
+	return filtered
+
+func _filter_vec2i_key_dict_for_viewer(source: Dictionary, viewer_id: String, viewer_vis: Dictionary, include_all: bool) -> Dictionary:
+	var filtered := {}
+	for raw_key in source.keys():
+		var cell = _state_tile_from_value(raw_key)
+		if cell == Vector2i(-9999, -9999):
+			continue
+		if include_all or _viewer_can_see_snapshot_tile(viewer_id, viewer_vis, cell):
+			filtered[cell] = source[raw_key]
+	return filtered
+
+func _filter_player_scalar_dict_for_viewer(source: Dictionary, viewer_id: String, default_value) -> Dictionary:
+	var filtered := {}
+	for player_id in active_players:
+		if player_id == viewer_id and source.has(player_id):
+			filtered[player_id] = source[player_id]
+		else:
+			filtered[player_id] = _clone_default_value(default_value)
+	return filtered
+
+func _filter_player_dict_entry_for_viewer(source: Dictionary, viewer_id: String, default_value) -> Dictionary:
+	var filtered := {}
+	for player_id in active_players:
+		if player_id == viewer_id and source.has(player_id):
+			filtered[player_id] = _clone_default_value(source[player_id])
+		else:
+			filtered[player_id] = _clone_default_value(default_value)
+	return filtered
+
+func _filtered_structure_positions_for_viewer(state: Dictionary) -> Array:
+	var filtered: Array = []
+	var seen := {}
+	for tile in state.get("structure_positions", []):
+		var pos = _state_tile_from_value(tile)
+		if pos == Vector2i(-9999, -9999) or seen.has(pos):
+			continue
+		if _tile_is_in_filtered_state(pos, state):
+			filtered.append(pos)
+			seen[pos] = true
+	return filtered
+
+func _tile_is_in_filtered_state(tile: Vector2i, state: Dictionary) -> bool:
+	for pos in state.get("base_positions", {}).values():
+		if _state_tile_from_value(pos) == tile:
+			return true
+	for player_id in state.get("tower_positions", {}).keys():
+		if tile in state["tower_positions"].get(player_id, []):
+			return true
+	for owner in state.get("mines", {}).keys():
+		if tile in state["mines"].get(owner, []):
+			return true
+	if state.get("buildable_structures", {}).has(tile):
+		return true
+	return false
 
 func _collect_procedural_map_state() -> Dictionary:
 	if current_map_index < 0 or current_map_index >= map_data.size():
@@ -4055,6 +4209,7 @@ func apply_state(state: Dictionary, force_host: bool = false) -> void:
 	var match_seed = int(state.get("match_seed", NetworkManager.match_seed))
 	if match_seed > 0:
 		NetworkManager.match_seed = match_seed
+	configure_match_players(state.get("active_players", active_players), false)
 	var map_state = {}
 	if state.has("procedural_map") and state["procedural_map"] is Dictionary:
 		map_state = state["procedural_map"]
@@ -4069,7 +4224,6 @@ func apply_state(state: Dictionary, force_host: bool = false) -> void:
 		base_positions = state["base_positions"]
 	if state.has("tower_positions"):
 		tower_positions = state["tower_positions"]
-	configure_match_players(state.get("active_players", active_players), false)
 	if state.has("living_players") and state["living_players"] is Array:
 		var restored_living = _normalize_player_ids(state["living_players"])
 		living_players = []
@@ -4626,6 +4780,7 @@ func _ensure_map_loaded() -> void:
 					return
 			else:
 				return
+		_reset_map_state()
 	_load_map_by_index(map_index)
 	_spawn_neutral_units()
 	$GameBoardNode/FogOfWar._update_fog()
