@@ -6,6 +6,8 @@ extends Resource
 @export var map_category: String = "" # "normal" or "themed"; empty = infer from name
 @export var map_size: String = "normal" # "normal" or "small"
 @export var procedural: bool = false
+@export var min_players: int = 2
+@export var max_players: int = 2
 @export var proc_columns: int = 0
 @export var proc_rows: int = 0
 @export var proc_forest_ratio: float = 0.14

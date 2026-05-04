@@ -12,7 +12,16 @@ const TERRAIN_RIVER: String = "river"
 const TERRAIN_LAKE: String = "lake"
 const MINE_REPULSION_EXPONENT: float = 1.1
 
-static func generate(md: MapData, rng: RandomNumberGenerator) -> Dictionary:
+static func _default_player_ids(player_count: int) -> Array:
+	var ids: Array = []
+	for i in range(max(2, player_count)):
+		ids.append("player%d" % (i + 1))
+	return ids
+
+static func generate(md: MapData, rng: RandomNumberGenerator, player_ids: Array = []) -> Dictionary:
+	if player_ids.is_empty():
+		player_ids = _default_player_ids(2)
+	var player_count = max(2, player_ids.size())
 	var size_tag = str(md.map_size).strip_edges().to_lower()
 	var columns = int(md.proc_columns)
 	var rows = int(md.proc_rows)
@@ -20,16 +29,23 @@ static func generate(md: MapData, rng: RandomNumberGenerator) -> Dictionary:
 		if size_tag == "small":
 			columns = DEFAULT_COLUMNS_SMALL
 			rows = DEFAULT_ROWS_SMALL
+			if player_count >= 3:
+				columns = 32
+				rows = 26
 		else:
 			columns = DEFAULT_COLUMNS_NORMAL
 			rows = DEFAULT_ROWS_NORMAL
+			if player_count >= 3:
+				columns = 48
+				rows = 36
 
 	var bounds := []
 	var min_x = 0
 	var min_y = 0
 	var max_x = columns - 1
 	var max_y = rows - 1
-	if md.proc_columns <= 0 and md.proc_rows <= 0 and md.terrain_scene != null:
+	var use_template_bounds = md.proc_columns <= 0 and md.proc_rows <= 0 and md.terrain_scene != null and player_count <= 2
+	if use_template_bounds:
 		var ref_inst = md.terrain_scene.instantiate()
 		var ref_layer = ref_inst.get_node_or_null("UnderlyingReference")
 		if ref_layer != null and ref_layer is TileMapLayer:
@@ -57,14 +73,19 @@ static func generate(md: MapData, rng: RandomNumberGenerator) -> Dictionary:
 		bounds_set[cell] = true
 
 	var use_template_positions = md.proc_columns <= 0 and md.proc_rows <= 0 and md.base_positions.size() > 0 and md.tower_positions.size() > 0
+	if use_template_positions:
+		for pid in player_ids:
+			if not md.base_positions.has(pid) or not md.tower_positions.has(pid):
+				use_template_positions = false
+				break
 	var bases: Dictionary
 	var towers: Dictionary
 	if use_template_positions:
 		bases = md.base_positions.duplicate(true)
 		towers = md.tower_positions.duplicate(true)
 	else:
-		bases = _default_bases(min_x, max_x, min_y, max_y, size_tag)
-		towers = _default_towers(min_x, max_x, min_y, max_y, bases, size_tag)
+		bases = _default_bases(player_ids, min_x, max_x, min_y, max_y, size_tag)
+		towers = _default_towers(player_ids, min_x, max_x, min_y, max_y, bases, size_tag)
 	var structure_refs := []
 	for pid in bases.keys():
 		structure_refs.append(bases[pid])
@@ -205,34 +226,54 @@ static func generate(md: MapData, rng: RandomNumberGenerator) -> Dictionary:
 	for cell in camps_dragon:
 		blocked[cell] = true
 
+	var mine_owners := {"unclaimed": mines_unclaimed}
+	for pid in player_ids:
+		mine_owners[pid] = []
 	return {
 		"bounds": bounds,
 		"terrain_cells": terrain_cells,
 		"base_positions": bases,
 		"tower_positions": towers,
-		"mines": {
-			"unclaimed": mines_unclaimed,
-			"player1": [],
-			"player2": []
-		},
+		"mines": mine_owners,
 		"camps": {
 			"basic": camps_basic,
 			"dragon": camps_dragon
 		}
 	}
 
-static func _default_bases(min_x: int, max_x: int, min_y: int, max_y: int, _size_tag: String) -> Dictionary:
+static func _default_bases(player_ids: Array, min_x: int, max_x: int, min_y: int, max_y: int, size_tag: String) -> Dictionary:
+	var player_count = player_ids.size()
 	var y = int((min_y + max_y) / 2)
+	if player_count <= 2:
+		return {
+			player_ids[0]: Vector2i(min_x - 1, y),
+			player_ids[1]: Vector2i(max_x, y)
+		}
+	if player_count == 3:
+		var center_x = int((min_x + max_x) / 2)
+		var side_y = clampi(y + max(2, int((max_y - min_y) / 7)), min_y + 2, max_y - 2)
+		if size_tag == "small":
+			side_y = clampi(y + 2, min_y + 2, max_y - 2)
+		return {
+			player_ids[0]: Vector2i(min_x - 1, side_y),
+			player_ids[1]: Vector2i(max_x, side_y),
+			player_ids[2]: Vector2i(center_x, min_y - 1)
+		}
 	return {
-		"player1": Vector2i(min_x - 1, y),
-		"player2": Vector2i(max_x, y)
+		player_ids[0]: Vector2i(min_x - 1, y),
+		player_ids[1]: Vector2i(max_x, y)
 	}
 
-static func _default_towers(min_x: int, max_x: int, min_y: int, max_y: int, bases: Dictionary, size_tag: String) -> Dictionary:
-	var towers := {"player1": [], "player2": []}
+static func _default_towers(player_ids: Array, min_x: int, max_x: int, min_y: int, max_y: int, bases: Dictionary, size_tag: String) -> Dictionary:
+	var towers := {}
+	for pid in player_ids:
+		towers[pid] = []
+	var player_count = player_ids.size()
 	var offsets = [-5, 0, 5]
-	var p1 = bases.get("player1", Vector2i(min_x - 1, int((min_y + max_y) / 2)))
-	var p2 = bases.get("player2", Vector2i(max_x, int((min_y + max_y) / 2)))
+	if size_tag == "small":
+		offsets = [-3, 0, 3]
+	var p1 = bases.get(player_ids[0], Vector2i(min_x - 1, int((min_y + max_y) / 2)))
+	var p2 = bases.get(player_ids[1], Vector2i(max_x, int((min_y + max_y) / 2)))
 	var left_outer: int
 	var left_mid: int
 	var right_outer: int
@@ -255,8 +296,14 @@ static func _default_towers(min_x: int, max_x: int, min_y: int, max_y: int, base
 		if off != 0:
 			left_x = left_outer
 			right_x = right_outer
-		towers["player1"].append(Vector2i(clamp(left_x, min_x + 1, max_x - 1), y1))
-		towers["player2"].append(Vector2i(clamp(right_x, min_x + 1, max_x - 1), y2))
+		towers[player_ids[0]].append(Vector2i(clamp(left_x, min_x + 1, max_x - 1), y1))
+		towers[player_ids[1]].append(Vector2i(clamp(right_x, min_x + 1, max_x - 1), y2))
+	if player_count == 3:
+		var p3 = bases.get(player_ids[2], Vector2i(int((min_x + max_x) / 2), min_y - 1))
+		var top_y = min_y + (2 if size_tag == "small" else 3)
+		for off in offsets:
+			var x3 = clampi(p3.x + off, min_x + 1, max_x - 1)
+			towers[player_ids[2]].append(Vector2i(x3, clampi(top_y, min_y + 1, max_y - 1)))
 	return towers
 
 static func _build_blocked_set(terrain_cells: Dictionary, bases: Dictionary, towers: Dictionary) -> Dictionary:

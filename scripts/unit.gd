@@ -90,7 +90,10 @@ func _update_owner_overlay() -> void:
 	if map_layer == null:
 		owner_overlay.visible = false
 		return
-	if player_id not in ["player1", "player2"] or is_base or (is_tower and not is_spawn_tower):
+	if player_id == "neutral" or is_base or (is_tower and not is_spawn_tower):
+		owner_overlay.visible = false
+		return
+	if not map_layer.player_atlas_tiles.has(player_id):
 		owner_overlay.visible = false
 		return
 	var source_id = map_layer.tile_set.get_source_id(0)
@@ -141,18 +144,20 @@ func set_grid_position(pos: Vector2i) -> void:
 	if board and board.has_method("occupy"):
 		board.occupy(pos, self)
 		if pos in structure_tiles:
-			if pos in turn_mgr.mines["unclaimed"]:
-				var idx = turn_mgr.mines["unclaimed"].find(pos)
-				turn_mgr.mines["unclaimed"].remove_at(idx)
-				turn_mgr.mines[player_id].append(pos)
-			elif pos in turn_mgr.mines["player1"]:
-				var idx = turn_mgr.mines["player1"].find(pos)
-				turn_mgr.mines["player1"].remove_at(idx)
-				turn_mgr.mines[player_id].append(pos)
-			elif pos in turn_mgr.mines["player2"]:
-				var idx = turn_mgr.mines["player2"].find(pos)
-				turn_mgr.mines["player2"].remove_at(idx)
-				turn_mgr.mines[player_id].append(pos)
+			if not turn_mgr.mines.has(player_id):
+				turn_mgr.mines[player_id] = []
+			for mine_owner in turn_mgr.mines.keys():
+				var owned_tiles = turn_mgr.mines.get(mine_owner, [])
+				if not (owned_tiles is Array):
+					continue
+				var idx = owned_tiles.find(pos)
+				if idx != -1:
+					owned_tiles.remove_at(idx)
+					turn_mgr.mines[mine_owner] = owned_tiles
+			var player_mines = turn_mgr.mines.get(player_id, [])
+			if player_mines is Array and not player_mines.has(pos):
+				player_mines.append(pos)
+				turn_mgr.mines[player_id] = player_mines
 		if pos in structure_tiles:
 			map_layer.set_player_tile(pos, player_id)
 	else:
