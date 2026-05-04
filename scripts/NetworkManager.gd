@@ -23,6 +23,7 @@ var match_seed: int = -1
 var custom_proc_params: Dictionary = {}
 var _pending_start_ready_peers: Dictionary = {}
 var _awaiting_initial_state_ready: bool = false
+var _start_game_waiting_for_prewarm: bool = false
 
 
 var _step_ready_counts := {}
@@ -693,6 +694,16 @@ func start_game_for_all() -> void:
 	if turn_mgr != null and turn_mgr.has_method("ensure_selected_map_supports_player_count"):
 		if not turn_mgr.ensure_selected_map_supports_player_count(match_players.size()):
 			return
+	if turn_mgr != null and turn_mgr.has_method("is_selected_procedural_prewarm_ready"):
+		var procedural_ready = bool(turn_mgr.is_selected_procedural_prewarm_ready())
+		if not procedural_ready:
+			if turn_mgr.has_method("request_procedural_prewarm"):
+				turn_mgr.request_procedural_prewarm()
+			if not _start_game_waiting_for_prewarm:
+				_start_game_waiting_for_prewarm = true
+				call_deferred("_retry_start_game_after_prewarm")
+			return
+	_start_game_waiting_for_prewarm = false
 	if match_seed >= 0:
 		for peer_id in client_peer_ids:
 			rpc_id(peer_id, "rpc_set_match_seed", match_seed)
@@ -707,6 +718,12 @@ func start_game_for_all() -> void:
 		_pending_start_ready_peers[peer_id] = true
 		rpc_id(peer_id, "rpc_start_game", match_players)
 	call_deferred("_finish_start_game_for_all_async", match_players)
+
+func _retry_start_game_after_prewarm() -> void:
+	await get_tree().process_frame
+	await get_tree().process_frame
+	_start_game_waiting_for_prewarm = false
+	start_game_for_all()
 
 func _finish_start_game_for_all_async(match_players: Array) -> void:
 	await get_tree().process_frame

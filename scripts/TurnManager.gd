@@ -34,6 +34,9 @@ const MapGenerator = preload("res://scripts/MapGenerator.gd")
 var terrain_overlay: TileMapLayer
 var rng := RandomNumberGenerator.new()
 var current_map_index: int = -1
+var _procedural_generation_cache: Dictionary = {}
+var _procedural_prewarm_pending: bool = false
+var _prewarmed_map_key: String = ""
 var dev_log_path: String = ""
 var dev_log_file: FileAccess = null
 var host_replay_log_path: String = ""
@@ -1375,6 +1378,101 @@ func is_host() -> bool:
 
 func _default_player_ids() -> Array:
 	return ["player1", "player2"]
+
+func _sorted_dict_string(value: Dictionary) -> String:
+	var keys = value.keys()
+	keys.sort()
+	var parts: Array[String] = []
+	for key in keys:
+		var entry = value[key]
+		if entry is Dictionary:
+			parts.append("%s={%s}" % [str(key), _sorted_dict_string(entry)])
+		else:
+			parts.append("%s=%s" % [str(key), str(entry)])
+	return ";".join(parts)
+
+func _procedural_cache_key(map_index: int, player_ids: Array, seed_value: int, params: Dictionary) -> String:
+	var player_copy = player_ids.duplicate()
+	player_copy.sort()
+	return "%d|%d|%s|%s" % [map_index, seed_value, ",".join(player_copy), _sorted_dict_string(params)]
+
+func _prewarm_player_ids() -> Array:
+	if NetworkManager != null:
+		var target_count = max(2, int(NetworkManager.lobby_slot_count))
+		var ids: Array = []
+		for i in range(target_count):
+			ids.append("player%d" % (i + 1))
+		return _normalize_player_ids(ids)
+	return active_players
+
+func _generate_procedural_map_data(map_index: int, md: MapData, player_ids: Array, seed_value: int) -> Dictionary:
+	var gen_rng = RandomNumberGenerator.new()
+	gen_rng.seed = seed_value + map_index * 7919
+	return MapGenerator.generate(md, gen_rng, player_ids)
+
+func _get_or_build_procedural_map_data(map_index: int, md: MapData, player_ids: Array) -> Dictionary:
+	var seed_value = NetworkManager.match_seed
+	if seed_value <= 0:
+		seed_value = _rng_randi_range(1, 2147483646, "procedural_seed")
+		NetworkManager.match_seed = seed_value
+	var params = NetworkManager.custom_proc_params.duplicate(true)
+	var key = _procedural_cache_key(map_index, player_ids, seed_value, params)
+	if _procedural_generation_cache.has(key):
+		return (_procedural_generation_cache[key] as Dictionary).duplicate(true)
+	var generated = _generate_procedural_map_data(map_index, md, player_ids, seed_value)
+	_procedural_generation_cache.clear()
+	_procedural_generation_cache[key] = generated.duplicate(true)
+	return generated
+
+func request_procedural_prewarm() -> void:
+	if not _is_host():
+		return
+	if _procedural_prewarm_pending:
+		return
+	_procedural_prewarm_pending = true
+	call_deferred("_run_procedural_prewarm")
+
+func is_selected_procedural_prewarm_ready() -> bool:
+	if not _is_host():
+		return false
+	if map_data.is_empty():
+		return false
+	var map_index = NetworkManager.selected_map_index if NetworkManager != null else -1
+	if map_index < 0 or map_index >= map_data.size():
+		return false
+	var md = map_data[map_index] as MapData
+	if md == null:
+		return false
+	if not md.procedural:
+		return true
+	var players = _prewarm_player_ids()
+	if players.is_empty():
+		return false
+	if NetworkManager.match_seed <= 0:
+		return false
+	var desired_key = _procedural_cache_key(map_index, players, NetworkManager.match_seed, NetworkManager.custom_proc_params)
+	return _procedural_generation_cache.has(desired_key)
+
+func _run_procedural_prewarm() -> void:
+	_procedural_prewarm_pending = false
+	if not _is_host():
+		return
+	if map_data.is_empty():
+		return
+	if NetworkManager.selected_map_index < 0:
+		if NetworkManager.map_selection_mode != "procedural" and NetworkManager.map_selection_mode != "procedural_custom":
+			return
+		NetworkManager.selected_map_index = _pick_random_map_index("procedural", max(2, active_players.size()))
+	if NetworkManager.selected_map_index < 0 or NetworkManager.selected_map_index >= map_data.size():
+		return
+	var md = map_data[NetworkManager.selected_map_index] as MapData
+	if md == null or not md.procedural:
+		return
+	md = md.duplicate(true)
+	if NetworkManager.custom_proc_params.size() > 0:
+		_apply_custom_proc_params(md, NetworkManager.custom_proc_params)
+	var players = _prewarm_player_ids()
+	_get_or_build_procedural_map_data(NetworkManager.selected_map_index, md, players)
 
 func _normalize_player_ids(player_ids: Array) -> Array:
 	var result: Array = []
@@ -3316,17 +3414,16 @@ func _load_map_by_index(map_index: int, apply_generated_content: bool = true) ->
 		bounds_cells = tmap.get_used_cells()
 	var generated := {}
 	if md.procedural and apply_generated_content:
-		var gen_rng = RandomNumberGenerator.new()
 		var seed_val = NetworkManager.match_seed
 		if seed_val <= 0:
 			seed_val = _rng_randi_range(1, 2147483646, "procedural_seed")
-		gen_rng.seed = seed_val + idx * 7919
+			NetworkManager.match_seed = seed_val
 		_devlog({
 			"type": "map_generate",
 			"seed": seed_val,
-			"derived_seed": gen_rng.seed
+			"derived_seed": seed_val + idx * 7919
 		})
-		generated = MapGenerator.generate(md, gen_rng, active_players)
+		generated = _get_or_build_procedural_map_data(idx, md, active_players)
 		if generated.has("bounds"):
 			bounds_cells = generated["bounds"]
 	if bounds_cells.size() > 0:
@@ -4049,6 +4146,7 @@ func apply_state(state: Dictionary, force_host: bool = false) -> void:
 		_record_turn_stats()
 
 func _reset_map_state() -> void:
+	_prewarmed_map_key = ""
 	if terrain_overlay != null:
 		if is_instance_valid(terrain_overlay):
 			var parent = terrain_overlay.get_parent()
@@ -4475,8 +4573,6 @@ func _game_loop() -> void:
 	_do_execution()
 
 func _ensure_map_loaded() -> void:
-	if current_map_index >= 0 and terrain_overlay != null:
-		return
 	_ensure_dev_log_open()
 	if map_data.size() == 0:
 		push_error("TurnManager: map_data is empty.")
@@ -4488,9 +4584,23 @@ func _ensure_map_loaded() -> void:
 	if NetworkManager.match_seed < 0:
 		NetworkManager.match_seed = _rng_randi_range(1, 2147483646, "match_seed_fallback")
 	var map_index = NetworkManager.selected_map_index
+	var already_loaded = current_map_index == map_index and terrain_overlay != null
+	if already_loaded:
+		if map_index >= 0 and map_index < map_data.size():
+			var md = map_data[map_index] as MapData
+			if md != null and md.procedural:
+				var desired_key = _procedural_cache_key(map_index, active_players, NetworkManager.match_seed, NetworkManager.custom_proc_params)
+				if _prewarmed_map_key == desired_key:
+					return
+			else:
+				return
 	_load_map_by_index(map_index)
 	_spawn_neutral_units()
 	$GameBoardNode/FogOfWar._update_fog()
+	if map_index >= 0 and map_index < map_data.size():
+		var loaded_md = map_data[map_index] as MapData
+		if loaded_md != null and loaded_md.procedural:
+			_prewarmed_map_key = _procedural_cache_key(map_index, active_players, NetworkManager.match_seed, NetworkManager.custom_proc_params)
 
 # --------------------------------------------------------
 # Phase 1: Upkeep — award gold

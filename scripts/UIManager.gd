@@ -931,6 +931,8 @@ func _on_proc_custom_apply_pressed() -> void:
 	else:
 		NetworkManager.custom_proc_params = params
 	_populate_proc_custom_fields(params)
+	if NetworkManager.is_host() and turn_mgr != null and turn_mgr.has_method("request_procedural_prewarm"):
+		turn_mgr.request_procedural_prewarm()
 
 func _on_proc_custom_close_pressed() -> void:
 	_set_proc_custom_panel_visible(false)
@@ -1005,36 +1007,48 @@ func _apply_map_selection(id: int) -> void:
 		NetworkManager.map_selection_mode = "random_any"
 		if NetworkManager.is_host():
 			NetworkManager.broadcast_map_selection()
+			if turn_mgr != null and turn_mgr.has_method("request_procedural_prewarm"):
+				turn_mgr.request_procedural_prewarm()
 		return
 	if id == MAP_SELECT_RANDOM_NORMAL:
 		NetworkManager.selected_map_index = -1
 		NetworkManager.map_selection_mode = "random_normal"
 		if NetworkManager.is_host():
 			NetworkManager.broadcast_map_selection()
+			if turn_mgr != null and turn_mgr.has_method("request_procedural_prewarm"):
+				turn_mgr.request_procedural_prewarm()
 		return
 	if id == MAP_SELECT_RANDOM_THEMED:
 		NetworkManager.selected_map_index = -1
 		NetworkManager.map_selection_mode = "random_themed"
 		if NetworkManager.is_host():
 			NetworkManager.broadcast_map_selection()
+			if turn_mgr != null and turn_mgr.has_method("request_procedural_prewarm"):
+				turn_mgr.request_procedural_prewarm()
 		return
 	if id == MAP_SELECT_RANDOM_SMALL:
 		NetworkManager.selected_map_index = -1
 		NetworkManager.map_selection_mode = "random_small"
 		if NetworkManager.is_host():
 			NetworkManager.broadcast_map_selection()
+			if turn_mgr != null and turn_mgr.has_method("request_procedural_prewarm"):
+				turn_mgr.request_procedural_prewarm()
 		return
 	if id == MAP_SELECT_PROCEDURAL:
 		NetworkManager.selected_map_index = -1
 		NetworkManager.map_selection_mode = "procedural"
 		if NetworkManager.is_host():
 			NetworkManager.broadcast_map_selection()
+			if turn_mgr != null and turn_mgr.has_method("request_procedural_prewarm"):
+				turn_mgr.request_procedural_prewarm()
 		return
 	if id == MAP_SELECT_PROCEDURAL_CUSTOM:
 		NetworkManager.selected_map_index = -1
 		NetworkManager.map_selection_mode = "procedural_custom"
 		if NetworkManager.is_host():
 			NetworkManager.broadcast_map_selection()
+			if turn_mgr != null and turn_mgr.has_method("request_procedural_prewarm"):
+				turn_mgr.request_procedural_prewarm()
 		return
 	if id >= MAP_SELECT_MAP_BASE:
 		var idx = id - MAP_SELECT_MAP_BASE
@@ -1047,6 +1061,8 @@ func _apply_map_selection(id: int) -> void:
 			NetworkManager.map_selection_mode = "fixed"
 			if NetworkManager.is_host():
 				NetworkManager.broadcast_map_selection()
+				if turn_mgr != null and turn_mgr.has_method("request_procedural_prewarm"):
+					turn_mgr.request_procedural_prewarm()
 
 func _sync_menu_checks() -> void:
 	if menu_popup == null:
@@ -3144,6 +3160,8 @@ func _on_lobby_updated(slots: Array, slot_count: int) -> void:
 		if turn_mgr.ensure_selected_map_supports_player_count(max(2, int(slot_count))):
 			if prev_index != NetworkManager.selected_map_index or prev_mode != NetworkManager.map_selection_mode:
 				NetworkManager.broadcast_map_selection()
+			if turn_mgr.has_method("request_procedural_prewarm"):
+				turn_mgr.request_procedural_prewarm()
 	if map_select != null:
 		_init_map_select()
 	_update_lobby_list()
