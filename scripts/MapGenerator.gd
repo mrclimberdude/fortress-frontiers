@@ -207,9 +207,28 @@ static func _cube_orbit_score(orbit: Array, refs: Array) -> float:
 static func _cube_ring_distance(cell: Vector3i) -> int:
 	return _cube_distance(cell, Vector3i.ZERO)
 
-static func _pick_rotational_orbit3(bounds_cubes: Array, bounds_set_cube: Dictionary, blocked: Dictionary, rng: RandomNumberGenerator, max_tries: int, rules: Array = [], score_refs: Array = [], min_ring: int = -1, max_ring: int = -1, target_ring: float = -1.0, ring_weight: float = 1.0) -> Array:
+static func _radial_orbit_bias_score(ring: int, radius: int, target_ring: float = -1.0, ring_weight: float = 1.0, radial_weight: float = 0.0, edge_bias_start: float = 0.75, edge_bias_weight: float = 0.0, center_bonus_radius: float = 0.40, center_bonus_weight: float = 0.0) -> float:
+	if radius <= 0:
+		return 0.0
+	var ring_norm = clamp(float(ring) / float(radius), 0.0, 1.0)
+	var score = 0.0
+	if target_ring >= 0.0:
+		score += abs(float(ring) - target_ring) * ring_weight
+	if radial_weight != 0.0:
+		score += ring_norm * radial_weight
+	if edge_bias_weight > 0.0 and ring_norm > edge_bias_start:
+		var edge_norm = (ring_norm - edge_bias_start) / max(0.001, 1.0 - edge_bias_start)
+		score += edge_norm * edge_norm * edge_bias_weight
+	if center_bonus_weight > 0.0 and ring_norm < center_bonus_radius:
+		var center_norm = 1.0 - (ring_norm / max(0.001, center_bonus_radius))
+		score -= center_norm * center_bonus_weight
+	return score
+
+static func _pick_rotational_orbit3(bounds_cubes: Array, bounds_set_cube: Dictionary, blocked: Dictionary, rng: RandomNumberGenerator, max_tries: int, rules: Array = [], score_refs: Array = [], min_ring: int = -1, max_ring: int = -1, target_ring: float = -1.0, ring_weight: float = 1.0, radial_weight: float = 0.0, edge_bias_start: float = 0.75, edge_bias_weight: float = 0.0, center_bonus_radius: float = 0.40, center_bonus_weight: float = 0.0) -> Array:
 	var best_orbit: Array = []
 	var best_score = INF
+	var use_scoring = not score_refs.is_empty() or target_ring >= 0.0 or radial_weight != 0.0 or edge_bias_weight > 0.0 or center_bonus_weight > 0.0
+	var radius_limit = max(0, max_ring if max_ring >= 0 else 0)
 	for _i in range(max_tries):
 		if bounds_cubes.is_empty():
 			break
@@ -235,12 +254,10 @@ static func _pick_rotational_orbit3(bounds_cubes: Array, bounds_set_cube: Dictio
 				break
 		if not valid:
 			continue
-		if score_refs.is_empty():
-			if target_ring < 0.0:
-				return orbit
+		if not use_scoring:
+			return orbit
 		var score = _cube_orbit_score(orbit, score_refs)
-		if target_ring >= 0.0:
-			score += abs(float(ring) - target_ring) * ring_weight
+		score += _radial_orbit_bias_score(ring, radius_limit, target_ring, ring_weight, radial_weight, edge_bias_start, edge_bias_weight, center_bonus_radius, center_bonus_weight)
 		if score < best_score:
 			best_score = score
 			best_orbit = orbit
@@ -272,12 +289,12 @@ static func _orbit3_is_valid(orbit: Array, bounds_set_cube: Dictionary, blocked:
 			return false
 	return true
 
-static func _place_rotational_tiles3(count: int, bounds_cubes: Array, bounds_set_cube: Dictionary, blocked: Dictionary, rng: RandomNumberGenerator, max_tries: int, rules: Array = [], score_refs: Array = [], min_ring: int = -1, max_ring: int = -1, target_ring: float = -1.0, ring_weight: float = 1.0) -> Array:
+static func _place_rotational_tiles3(count: int, bounds_cubes: Array, bounds_set_cube: Dictionary, blocked: Dictionary, rng: RandomNumberGenerator, max_tries: int, rules: Array = [], score_refs: Array = [], min_ring: int = -1, max_ring: int = -1, target_ring: float = -1.0, ring_weight: float = 1.0, radial_weight: float = 0.0, edge_bias_start: float = 0.75, edge_bias_weight: float = 0.0, center_bonus_radius: float = 0.40, center_bonus_weight: float = 0.0) -> Array:
 	var placed := []
 	var remaining = count
 	while remaining >= 3:
 		var orbit_score_refs = score_refs + placed
-		var orbit = _pick_rotational_orbit3(bounds_cubes, bounds_set_cube, blocked, rng, max_tries, rules, orbit_score_refs, min_ring, max_ring, target_ring, ring_weight)
+		var orbit = _pick_rotational_orbit3(bounds_cubes, bounds_set_cube, blocked, rng, max_tries, rules, orbit_score_refs, min_ring, max_ring, target_ring, ring_weight, radial_weight, edge_bias_start, edge_bias_weight, center_bonus_radius, center_bonus_weight)
 		if orbit.is_empty():
 			break
 		for cell in orbit:
@@ -286,28 +303,45 @@ static func _place_rotational_tiles3(count: int, bounds_cubes: Array, bounds_set
 		remaining -= 3
 	return placed
 
-static func _grow_rotational_cluster3(seed_orbit: Array, bounds_set_cube: Dictionary, blocked: Dictionary, rng: RandomNumberGenerator, rules: Array, max_orbits: int, min_ring: int = -1, max_ring: int = -1) -> Array:
+static func _grow_rotational_cluster3(seed_orbit: Array, bounds_set_cube: Dictionary, blocked: Dictionary, rng: RandomNumberGenerator, rules: Array, max_orbits: int, min_ring: int = -1, max_ring: int = -1, score_refs: Array = [], radial_weight: float = 0.0, edge_bias_start: float = 0.75, edge_bias_weight: float = 0.0, center_bonus_radius: float = 0.40, center_bonus_weight: float = 0.0) -> Array:
 	var cluster := []
 	if seed_orbit.is_empty() or max_orbits <= 0:
 		return cluster
 	var frontier: Array = seed_orbit.duplicate()
 	var seen_orbits := {}
 	var orbits_added = 0
+	var radius_limit = max(0, max_ring if max_ring >= 0 else 0)
 	while not frontier.is_empty() and orbits_added < max_orbits:
-		var idx = rng.randi_range(0, frontier.size() - 1)
-		var cell: Vector3i = frontier.pop_at(idx)
-		var orbit = _cube_orbit3(cell)
-		var orbit_key = _cube_orbit_key(orbit)
-		if seen_orbits.has(orbit_key):
-			continue
-		seen_orbits[orbit_key] = true
-		if not _orbit3_is_valid(orbit, bounds_set_cube, blocked, rules, min_ring, max_ring):
-			continue
-		for orbit_cell in orbit:
+		var best_idx = -1
+		var best_orbit: Array = []
+		var best_orbit_key = ""
+		var best_score = INF
+		for idx in range(frontier.size()):
+			var cell: Vector3i = frontier[idx]
+			var orbit = _cube_orbit3(cell)
+			var orbit_key = _cube_orbit_key(orbit)
+			if seen_orbits.has(orbit_key):
+				continue
+			if not _orbit3_is_valid(orbit, bounds_set_cube, blocked, rules, min_ring, max_ring):
+				seen_orbits[orbit_key] = true
+				continue
+			var ring = _cube_ring_distance(orbit[0])
+			var score = _cube_orbit_score(orbit, score_refs + cluster)
+			score += _radial_orbit_bias_score(ring, radius_limit, -1.0, 1.0, radial_weight, edge_bias_start, edge_bias_weight, center_bonus_radius, center_bonus_weight)
+			if score < best_score:
+				best_score = score
+				best_idx = idx
+				best_orbit = orbit
+				best_orbit_key = orbit_key
+		if best_idx < 0 or best_orbit.is_empty():
+			break
+		frontier.remove_at(best_idx)
+		seen_orbits[best_orbit_key] = true
+		for orbit_cell in best_orbit:
 			cluster.append(orbit_cell)
 			blocked[orbit_cell] = true
 		orbits_added += 1
-		for orbit_cell in orbit:
+		for orbit_cell in best_orbit:
 			for neighbor in _cube_neighbors(orbit_cell):
 				var neighbor_orbit = _cube_orbit3(neighbor)
 				var neighbor_key = _cube_orbit_key(neighbor_orbit)
@@ -316,22 +350,349 @@ static func _grow_rotational_cluster3(seed_orbit: Array, bounds_set_cube: Dictio
 				frontier.append(neighbor)
 	return cluster
 
-static func _generate_clustered_rotational_tiles3(target: int, bounds_cubes: Array, bounds_set_cube: Dictionary, blocked: Dictionary, rng: RandomNumberGenerator, max_tries: int, rules: Array = [], score_refs: Array = [], cluster_orbit_min: int = 1, cluster_orbit_max: int = 2, min_ring: int = -1, max_ring: int = -1, target_ring: float = -1.0, ring_weight: float = 1.0) -> Array:
+static func _generate_clustered_rotational_tiles3(target: int, bounds_cubes: Array, bounds_set_cube: Dictionary, blocked: Dictionary, rng: RandomNumberGenerator, max_tries: int, rules: Array = [], score_refs: Array = [], cluster_orbit_min: int = 1, cluster_orbit_max: int = 2, min_ring: int = -1, max_ring: int = -1, target_ring: float = -1.0, ring_weight: float = 1.0, radial_weight: float = 0.0, edge_bias_start: float = 0.75, edge_bias_weight: float = 0.0, center_bonus_radius: float = 0.40, center_bonus_weight: float = 0.0) -> Array:
 	var placed := []
 	var remaining = target
 	while remaining >= 3:
 		var seed_refs = score_refs + placed
-		var seed_orbit = _pick_rotational_orbit3(bounds_cubes, bounds_set_cube, blocked, rng, max_tries, rules, seed_refs, min_ring, max_ring, target_ring, ring_weight)
+		var seed_orbit = _pick_rotational_orbit3(bounds_cubes, bounds_set_cube, blocked, rng, max_tries, rules, seed_refs, min_ring, max_ring, target_ring, ring_weight, radial_weight, edge_bias_start, edge_bias_weight, center_bonus_radius, center_bonus_weight)
 		if seed_orbit.is_empty():
 			break
 		var orbit_limit = min(int(remaining / 3), rng.randi_range(cluster_orbit_min, cluster_orbit_max))
-		var cluster = _grow_rotational_cluster3(seed_orbit, bounds_set_cube, blocked, rng, rules, orbit_limit, min_ring, max_ring)
+		var cluster = _grow_rotational_cluster3(seed_orbit, bounds_set_cube, blocked, rng, rules, orbit_limit, min_ring, max_ring, score_refs + placed, radial_weight, edge_bias_start, edge_bias_weight, center_bonus_radius, center_bonus_weight)
 		if cluster.is_empty():
 			break
 		for cell in cluster:
 			placed.append(cell)
 		remaining -= cluster.size()
 	return placed
+
+static func _group_orbits_by_key(cells: Array) -> Dictionary:
+	var grouped := {}
+	for cell in cells:
+		if typeof(cell) != TYPE_VECTOR3I:
+			continue
+		var orbit = _cube_orbit3(cell)
+		var key = _cube_orbit_key(orbit)
+		if not grouped.has(key):
+			grouped[key] = orbit
+	return grouped
+
+static func _ring_band_density(cells: Array, bounds_cubes: Array, radius: int, min_ratio: float, max_ratio: float) -> float:
+	if radius <= 0 or bounds_cubes.is_empty():
+		return 0.0
+	var min_ring = int(floor(float(radius) * min_ratio))
+	var max_ring = int(floor(float(radius) * max_ratio))
+	var band_total = 0
+	for cube in bounds_cubes:
+		var ring = _cube_ring_distance(cube)
+		if ring >= min_ring and ring <= max_ring:
+			band_total += 1
+	if band_total <= 0:
+		return 0.0
+	var occupied = 0
+	for cell in cells:
+		if typeof(cell) != TYPE_VECTOR3I:
+			continue
+		var ring = _cube_ring_distance(cell)
+		if ring >= min_ring and ring <= max_ring:
+			occupied += 1
+	return float(occupied) / float(band_total)
+
+static func _try_rebalance_hex_terrain3(terrain_cells: Dictionary, bounds_cubes: Array, bounds_set_cube: Dictionary, blocked_neutral: Dictionary, structure_refs: Array, neutral_refs: Array, rng: RandomNumberGenerator, radius: int, inner_ring: int) -> void:
+	var all_cells: Array = []
+	for key in [TERRAIN_FOREST, TERRAIN_MOUNTAIN, TERRAIN_LAKE]:
+		all_cells += terrain_cells.get(key, [])
+	var inner_density = _ring_band_density(all_cells, bounds_cubes, radius, 0.0, 0.38)
+	var outer_density = _ring_band_density(all_cells, bounds_cubes, radius, 0.68, 1.0)
+	if outer_density <= inner_density + 0.02:
+		return
+	var move_budget = min(3, max(1, int(round((outer_density - inner_density) * 12.0))))
+	var type_rules = {
+		TERRAIN_FOREST: [{"refs": structure_refs, "min_dist": 2}],
+		TERRAIN_MOUNTAIN: [{"refs": structure_refs, "min_dist": 3}],
+		TERRAIN_LAKE: [{"refs": structure_refs, "min_dist": 3}]
+	}
+	for _i in range(move_budget):
+		var chosen_type = ""
+		var chosen_orbit: Array = []
+		var chosen_ring = -1.0
+		for key in [TERRAIN_FOREST, TERRAIN_MOUNTAIN, TERRAIN_LAKE]:
+			var grouped = _group_orbits_by_key(terrain_cells.get(key, []))
+			for orbit in grouped.values():
+				var orbit_ring = 0.0
+				for cell in orbit:
+					orbit_ring += float(_cube_ring_distance(cell))
+				orbit_ring /= max(1.0, float(orbit.size()))
+				if orbit_ring < float(radius) * 0.72:
+					continue
+				if orbit_ring > chosen_ring:
+					chosen_ring = orbit_ring
+					chosen_type = key
+					chosen_orbit = orbit
+		if chosen_type == "" or chosen_orbit.is_empty():
+			break
+		var terrain_blocked = blocked_neutral.duplicate(true)
+		var remaining_cells := []
+		for key in [TERRAIN_FOREST, TERRAIN_MOUNTAIN, TERRAIN_LAKE]:
+			for cell in terrain_cells.get(key, []):
+				if key == chosen_type and chosen_orbit.has(cell):
+					continue
+				terrain_blocked[cell] = true
+				remaining_cells.append(cell)
+		var replacement_refs = neutral_refs + remaining_cells
+		var replacement = _pick_rotational_orbit3(
+			bounds_cubes,
+			bounds_set_cube,
+			terrain_blocked,
+			rng,
+			300,
+			type_rules.get(chosen_type, []),
+			replacement_refs,
+			max(1, inner_ring - 1),
+			int(round(float(radius) * 0.62)),
+			-1.0,
+			1.0,
+			0.45,
+			0.72,
+			1.0,
+			0.32,
+			0.18
+		)
+		if replacement.is_empty():
+			continue
+		var kept := []
+		for cell in terrain_cells.get(chosen_type, []):
+			if not chosen_orbit.has(cell):
+				kept.append(cell)
+		for cell in replacement:
+			kept.append(cell)
+		terrain_cells[chosen_type] = kept
+
+static func _pick_rotational_edge_orbit3(bounds_cubes: Array, bounds_set_cube: Dictionary, blocked: Dictionary, rng: RandomNumberGenerator, refs: Array, min_dist: int, radius: int, min_ring: int = -1) -> Array:
+	var edge_candidates := []
+	for cube in bounds_cubes:
+		var ring = _cube_ring_distance(cube)
+		if ring < radius:
+			continue
+		if min_ring >= 0 and ring < min_ring:
+			continue
+		var orbit = _cube_orbit3(cube)
+		if not _orbit3_is_valid(orbit, bounds_set_cube, blocked, [{"refs": refs, "min_dist": min_dist}], min_ring, radius):
+			continue
+		var key = _cube_orbit_key(orbit)
+		if key in edge_candidates:
+			continue
+		edge_candidates.append(key)
+	if edge_candidates.is_empty():
+		return []
+	var chosen_key = edge_candidates[rng.randi_range(0, edge_candidates.size() - 1)]
+	for cube in bounds_cubes:
+		var orbit = _cube_orbit3(cube)
+		if _cube_orbit_key(orbit) == chosen_key:
+			return orbit
+	return []
+
+static func _pick_rotational_open_orbit3(bounds_cubes: Array, bounds_set_cube: Dictionary, blocked: Dictionary, rng: RandomNumberGenerator, refs: Array, min_dist: int, min_ring: int, max_ring: int) -> Array:
+	return _pick_rotational_orbit3(
+		bounds_cubes,
+		bounds_set_cube,
+		blocked,
+		rng,
+		300,
+		[{"refs": refs, "min_dist": min_dist}],
+		[],
+		min_ring,
+		max_ring,
+		-1.0,
+		1.0,
+		0.15,
+		0.8,
+		0.3,
+		0.45,
+		0.05
+	)
+
+static func _pick_rotational_mid_river_target_orbit3(bounds_cubes: Array, bounds_set_cube: Dictionary, blocked: Dictionary, rng: RandomNumberGenerator, refs: Array, min_dist: int, radius: int) -> Array:
+	var ring_center = float(radius) * rng.randf_range(0.43, 0.52)
+	var ring_span = max(2, int(round(float(radius) * 0.08)))
+	var min_ring = max(2, int(floor(ring_center)) - ring_span)
+	var max_ring = min(radius - 2, int(ceil(ring_center)) + ring_span)
+	return _pick_rotational_orbit3(
+		bounds_cubes,
+		bounds_set_cube,
+		blocked,
+		rng,
+		400,
+		[{"refs": refs, "min_dist": min_dist}],
+		[],
+		min_ring,
+		max_ring,
+		ring_center,
+		0.18,
+		0.05,
+		0.82,
+		0.18,
+		0.40,
+		0.02
+	)
+
+static func _build_rotational_river_path3(start_orbit: Array, target_orbit: Array, bounds_set_cube: Dictionary, occupied: Dictionary, river_set: Dictionary, rng: RandomNumberGenerator, refs: Array, min_dist: int, stop_on_river: bool, early_stop_bias: float, radius: int) -> Array:
+	var path := []
+	if start_orbit.is_empty() or target_orbit.is_empty():
+		return path
+	var current = start_orbit[0]
+	var target = target_orbit[0]
+	var visited := {}
+	var max_steps = max(20, int(bounds_set_cube.size() / 4))
+	var last_dir = Vector3i.ZERO
+	var start_dist = _cube_distance(current, target)
+	var max_len = max(6, int(float(start_dist) * 1.2) + 4)
+	for _i in range(max_steps):
+		var current_orbit = _cube_orbit3(current)
+		if not _orbit3_is_valid(current_orbit, bounds_set_cube, river_set if stop_on_river else {}, [], -1, radius):
+			break
+		path.append(current)
+		if early_stop_bias > 0.0 and path.size() >= max_len and rng.randf() < early_stop_bias:
+			break
+		if current == target:
+			break
+		if stop_on_river:
+			var orbit_hits_river = false
+			for orbit_cell in current_orbit:
+				if river_set.has(orbit_cell):
+					orbit_hits_river = true
+					break
+			if orbit_hits_river:
+				break
+		if early_stop_bias > 0.0 and _cube_distance(current, target) <= 2 and rng.randf() < early_stop_bias * 0.6:
+			break
+		visited[current] = true
+		var best = Vector3i(9999, 9999, 9999)
+		var best_score = INF
+		var candidate_scores := []
+		for n in _cube_neighbors(current):
+			if visited.has(n):
+				continue
+			var orbit = _cube_orbit3(n)
+			if not _orbit3_is_valid(orbit, bounds_set_cube, occupied, [{"refs": refs, "min_dist": min_dist}], -1, radius):
+				continue
+			var dist = _cube_distance(n, target)
+			for orbit_cell in orbit:
+				if river_set.has(orbit_cell):
+					dist = max(0, dist - 2)
+					break
+			var dir = n - current
+			var score = float(dist) + rng.randf() * 0.55
+			var ring = _cube_ring_distance(n)
+			score += _radial_orbit_bias_score(ring, radius, -1.0, 1.0, 0.18, 0.8, 0.55, 0.42, 0.05)
+			if last_dir != Vector3i.ZERO:
+				if dir == last_dir:
+					score += 0.8
+				else:
+					score -= 0.15
+			candidate_scores.append({"cube": n, "score": score, "dir": dir})
+			if score < best_score:
+				best_score = score
+				best = n
+		if candidate_scores.is_empty():
+			break
+		if candidate_scores.size() > 1 and rng.randf() < 0.3:
+			candidate_scores.sort_custom(func(a, b): return a["score"] < b["score"])
+			var pick_count = min(3, candidate_scores.size())
+			var choice = candidate_scores[rng.randi_range(0, pick_count - 1)]
+			best = choice["cube"]
+			last_dir = choice["dir"]
+		else:
+			for entry in candidate_scores:
+				if entry["cube"] == best:
+					last_dir = entry["dir"]
+					break
+		current = best
+	return path
+
+static func _add_rotational_river_path3(path: Array, river: Array, river_set: Dictionary, bounds_set_cube: Dictionary, occupied: Dictionary) -> void:
+	for cell in path:
+		var orbit = _cube_orbit3(cell)
+		for orbit_cell in orbit:
+			if not bounds_set_cube.has(orbit_cell):
+				continue
+			if not river_set.has(orbit_cell):
+				river.append(orbit_cell)
+				river_set[orbit_cell] = true
+			occupied[orbit_cell] = true
+
+static func _pick_rotational_branch_start3(bounds_cubes: Array, bounds_set_cube: Dictionary, river_set: Dictionary, occupied: Dictionary, rng: RandomNumberGenerator, refs: Array, min_dist: int, radius: int, min_ring: int, max_ring: int) -> Array:
+	for _i in range(250):
+		if bounds_cubes.is_empty():
+			break
+		var cube: Vector3i = bounds_cubes[rng.randi_range(0, bounds_cubes.size() - 1)]
+		var ring = _cube_ring_distance(cube)
+		if ring < min_ring or ring > max_ring:
+			continue
+		var orbit = _cube_orbit3(cube)
+		if not _orbit3_is_valid(orbit, bounds_set_cube, occupied, [{"refs": refs, "min_dist": min_dist}], min_ring, radius):
+			continue
+		var min_river_dist = 999
+		for orbit_cell in orbit:
+			if river_set.has(orbit_cell):
+				min_river_dist = 0
+				break
+			for river_cell in river_set.keys():
+				min_river_dist = min(min_river_dist, _cube_distance(orbit_cell, river_cell))
+		if min_river_dist < 3:
+			continue
+		return orbit
+	return []
+
+static func _nearest_rotational_river_orbit3(cell: Vector3i, river_set: Dictionary) -> Array:
+	if river_set.is_empty():
+		return []
+	var best_orbit: Array = []
+	var best_dist = INF
+	var seen := {}
+	for river_cell in river_set.keys():
+		var orbit = _cube_orbit3(river_cell)
+		var key = _cube_orbit_key(orbit)
+		if seen.has(key):
+			continue
+		seen[key] = true
+		var dist = _cube_distance(cell, orbit[0])
+		if dist < best_dist:
+			best_dist = dist
+			best_orbit = orbit
+	return best_orbit
+
+static func _generate_rotational_river_cells3(bounds_cubes: Array, bounds_set_cube: Dictionary, blocked: Dictionary, rng: RandomNumberGenerator, target: int, refs: Array, min_dist: int, radius: int, inner_ring: int) -> Array:
+	var river := []
+	if target <= 0 or bounds_cubes.is_empty():
+		return river
+	var river_set := {}
+	var main_start = _pick_rotational_edge_orbit3(bounds_cubes, bounds_set_cube, blocked, rng, refs, min_dist, radius, max(inner_ring + 1, radius - 1))
+	if main_start.is_empty():
+		main_start = _pick_rotational_open_orbit3(bounds_cubes, bounds_set_cube, blocked, rng, refs, min_dist, max(inner_ring + 1, radius - 2), radius)
+	if main_start.is_empty():
+		return river
+	var main_target = _pick_rotational_mid_river_target_orbit3(bounds_cubes, bounds_set_cube, blocked, rng, refs, min_dist, radius)
+	if main_target.is_empty():
+		main_target = _pick_rotational_open_orbit3(bounds_cubes, bounds_set_cube, blocked, rng, refs, min_dist, max(inner_ring + 1, int(round(float(radius) * 0.38))), max(inner_ring + 4, int(round(float(radius) * 0.56))))
+	if main_target.is_empty():
+		return river
+	var main_path = _build_rotational_river_path3(main_start, main_target, bounds_set_cube, blocked, river_set, rng, refs, min_dist, false, 0.12, radius)
+	_add_rotational_river_path3(main_path, river, river_set, bounds_set_cube, blocked)
+	var branch_attempts = max(3, int(target / 6))
+	var tries = 0
+	while river.size() < target and tries < branch_attempts * 4:
+		tries += 1
+		var start_orbit = _pick_rotational_branch_start3(bounds_cubes, bounds_set_cube, river_set, blocked, rng, refs, min_dist, radius, max(inner_ring + 1, int(round(float(radius) * 0.35))), radius - 1)
+		if start_orbit.is_empty():
+			break
+		var target_orbit = _nearest_rotational_river_orbit3(start_orbit[0], river_set)
+		if target_orbit.is_empty():
+			break
+		var path = _build_rotational_river_path3(start_orbit, target_orbit, bounds_set_cube, blocked, river_set, rng, refs, min_dist, true, 0.28, radius)
+		_add_rotational_river_path3(path, river, river_set, bounds_set_cube, blocked)
+	return river
 
 static func _quantize_orbit_count(count: int, orbit_size: int = 3) -> int:
 	if count <= 0:
@@ -382,16 +743,15 @@ static func _generate_hex_3p(md: MapData, rng: RandomNumberGenerator, player_ids
 		camp_count = max(3, int(area / 145))
 	if dragon_count <= 0:
 		dragon_count = max(1, int(area / 320))
+	camp_count = max(3, int(round(float(camp_count) * 0.75)))
+	dragon_count = max(1, int(round(float(dragon_count) * 0.5)))
 	mine_count = _quantize_orbit_count(mine_count, 3)
 	camp_count = _quantize_orbit_count(camp_count, 3)
 	dragon_count = _quantize_orbit_count(dragon_count, 3)
+	dragon_count = min(3, dragon_count)
 	var inner_ring = max(3, int(round(float(radius) * 0.16)))
 	var neutral_edge_ring = max(inner_ring + 3, radius - 4)
 	var terrain_edge_ring = radius
-	var terrain_target_ring = float(radius) * 0.54
-	var forest_target_ring = terrain_target_ring
-	var mountain_target_ring = terrain_target_ring - 0.5
-	var lake_target_ring = terrain_target_ring - 0.25
 
 	var mines_cube = _place_rotational_tiles3(
 		mine_count,
@@ -438,17 +798,31 @@ static func _generate_hex_3p(md: MapData, rng: RandomNumberGenerator, player_ids
 
 	var forest_ratio = clamp(float(md.proc_forest_ratio), 0.0, 1.0)
 	var mountain_ratio = clamp(float(md.proc_mountain_ratio), 0.0, 1.0)
+	var river_ratio = clamp(float(md.proc_river_ratio), 0.0, 1.0)
 	var lake_ratio = clamp(float(md.proc_lake_ratio), 0.0, 1.0)
-	var total_ratio = forest_ratio + mountain_ratio + lake_ratio
+	var total_ratio = forest_ratio + mountain_ratio + river_ratio + lake_ratio
 	if total_ratio > 0.65:
 		var scale = 0.65 / total_ratio
 		forest_ratio *= scale
 		mountain_ratio *= scale
+		river_ratio *= scale
 		lake_ratio *= scale
 	var forest_target = _quantize_orbit_count(int(round(float(area) * forest_ratio)), 3)
 	var mountain_target = _quantize_orbit_count(int(round(float(area) * mountain_ratio)), 3)
+	var river_target = _quantize_orbit_count(int(round(float(area) * river_ratio * 0.459)), 3)
 	var lake_target = _quantize_orbit_count(int(round(float(area) * lake_ratio)), 3)
 	var terrain_blocked = blocked_neutral.duplicate(true)
+	var river_cells = _generate_rotational_river_cells3(
+		bounds_cubes,
+		bounds_set_cube,
+		terrain_blocked,
+		rng,
+		river_target,
+		structure_refs,
+		3,
+		radius,
+		inner_ring
+	)
 	var terrain_cells := {
 		TERRAIN_FOREST: _generate_clustered_rotational_tiles3(
 			forest_target,
@@ -458,13 +832,18 @@ static func _generate_hex_3p(md: MapData, rng: RandomNumberGenerator, player_ids
 			rng,
 			400,
 			[{"refs": structure_refs, "min_dist": 2}],
-			mines_cube + camps_basic_cube + camps_dragon_cube,
+			[],
 			1,
 			2,
 			max(1, inner_ring - 1),
 			terrain_edge_ring,
-			forest_target_ring,
-			0.4
+			-1.0,
+			1.0,
+			0.35,
+			0.72,
+			2.45,
+			0.30,
+			0.14
 		),
 		TERRAIN_MOUNTAIN: _generate_clustered_rotational_tiles3(
 			mountain_target,
@@ -474,15 +853,20 @@ static func _generate_hex_3p(md: MapData, rng: RandomNumberGenerator, player_ids
 			rng,
 			400,
 			[{"refs": structure_refs, "min_dist": 3}],
-			mines_cube + camps_basic_cube + camps_dragon_cube,
+			[],
 			1,
 			2,
 			inner_ring,
 			terrain_edge_ring,
-			mountain_target_ring,
-			0.45
+			-1.0,
+			1.0,
+			0.42,
+			0.72,
+			2.55,
+			0.28,
+			0.10
 		),
-		TERRAIN_RIVER: [],
+		TERRAIN_RIVER: river_cells,
 		TERRAIN_LAKE: _generate_clustered_rotational_tiles3(
 			lake_target,
 			bounds_cubes,
@@ -491,15 +875,21 @@ static func _generate_hex_3p(md: MapData, rng: RandomNumberGenerator, player_ids
 			rng,
 			400,
 			[{"refs": structure_refs, "min_dist": 3}],
-			camps_basic_cube + camps_dragon_cube,
+			[],
 			1,
 			1,
 			inner_ring,
 			max(inner_ring + 2, radius - 1),
-			lake_target_ring,
-			0.35
+			-1.0,
+			1.0,
+			0.30,
+			0.74,
+			2.15,
+			0.26,
+			0.08
 		)
 	}
+	_try_rebalance_hex_terrain3(terrain_cells, bounds_cubes, bounds_set_cube, blocked_neutral, structure_refs, [], rng, radius, inner_ring)
 
 	var mine_owners := {"unclaimed": _convert_cube_positions(mines_cube, cube_to_cell)}
 	for pid in player_ids:
@@ -509,7 +899,7 @@ static func _generate_hex_3p(md: MapData, rng: RandomNumberGenerator, player_ids
 		"terrain_cells": {
 			TERRAIN_FOREST: _convert_cube_positions(terrain_cells[TERRAIN_FOREST], cube_to_cell),
 			TERRAIN_MOUNTAIN: _convert_cube_positions(terrain_cells[TERRAIN_MOUNTAIN], cube_to_cell),
-			TERRAIN_RIVER: [],
+			TERRAIN_RIVER: _convert_cube_positions(terrain_cells[TERRAIN_RIVER], cube_to_cell),
 			TERRAIN_LAKE: _convert_cube_positions(terrain_cells[TERRAIN_LAKE], cube_to_cell)
 		},
 		"base_positions": _convert_cube_dict_positions(base_cubes, cube_to_cell),
