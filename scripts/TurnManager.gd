@@ -1299,6 +1299,189 @@ func _is_host() -> bool:
 func is_host() -> bool:
 	return _is_host()
 
+func _dev_result(ok: bool, reason: String = "", extra: Dictionary = {}) -> Dictionary:
+	var result := {
+		"ok": ok,
+		"reason": reason
+	}
+	for key in extra.keys():
+		result[key] = extra[key]
+	return result
+
+func _clear_orders_for_unit_id(unit_id: int) -> void:
+	if unit_id < 0:
+		return
+	for player_id in ["player1", "player2"]:
+		player_orders.get(player_id, {}).erase(unit_id)
+		committed_orders.get(player_id, {}).erase(unit_id)
+		NetworkManager.player_orders.get(player_id, {}).erase(unit_id)
+
+func _finalize_dev_mutation() -> void:
+	_recalculate_mana_caps()
+	_clamp_unit_healths()
+	var fog = $GameBoardNode.get_node_or_null("FogOfWar")
+	if fog != null:
+		fog._update_fog()
+	update_neutral_markers()
+	refresh_structure_markers()
+	refresh_mine_tiles()
+	_render_damage_log_for_local()
+	emit_signal("state_applied")
+	_broadcast_state(true)
+
+func apply_dev_state_patch(patch: Dictionary) -> Dictionary:
+	if not _is_host():
+		return _dev_result(false, "host_only")
+	if replay_mode:
+		return _dev_result(false, "replay_mode")
+	if patch.is_empty():
+		return _dev_result(false, "empty_patch")
+	if patch.has("turn_number"):
+		turn_number = max(0, int(patch.get("turn_number", turn_number)))
+	if patch.has("player_gold") and patch["player_gold"] is Dictionary:
+		for player_id in ["player1", "player2"]:
+			if patch["player_gold"].has(player_id):
+				player_gold[player_id] = max(0, int(patch["player_gold"][player_id]))
+	if patch.has("player_mana") and patch["player_mana"] is Dictionary:
+		for player_id in ["player1", "player2"]:
+			if patch["player_mana"].has(player_id):
+				player_mana[player_id] = max(0, int(patch["player_mana"][player_id]))
+	if patch.has("player_income") and patch["player_income"] is Dictionary:
+		for player_id in ["player1", "player2"]:
+			if patch["player_income"].has(player_id):
+				player_income[player_id] = max(0, int(patch["player_income"][player_id]))
+	_finalize_dev_mutation()
+	return _dev_result(true)
+
+func _is_dev_mobile_unit_type(unit_type: String) -> bool:
+	return unit_type.to_lower() in [
+		"archer",
+		"soldier",
+		"scout",
+		"miner",
+		"crystal_miner",
+		"builder",
+		"phalanx",
+		"cavalry",
+		"wizard",
+		"camp_archer",
+		"dragon"
+	]
+
+func _can_dev_edit_mobile_units() -> Dictionary:
+	if not _is_host():
+		return _dev_result(false, "host_only")
+	if replay_mode:
+		return _dev_result(false, "replay_mode")
+	if current_phase != Phase.ORDERS:
+		return _dev_result(false, "orders_only")
+	return _dev_result(true)
+
+func dev_spawn_unit(unit_type: String, owner: String, tile: Vector2i) -> Dictionary:
+	var gate = _can_dev_edit_mobile_units()
+	if not bool(gate.get("ok", false)):
+		return gate
+	if owner not in ["player1", "player2", NEUTRAL_PLAYER_ID]:
+		return _dev_result(false, "invalid_owner")
+	if not _is_dev_mobile_unit_type(unit_type):
+		return _dev_result(false, "invalid_unit_type")
+	if not $GameBoardNode/HexTileMap.is_cell_valid(tile):
+		return _dev_result(false, "invalid_tile")
+	if $GameBoardNode.is_occupied(tile):
+		return _dev_result(false, "tile_occupied")
+	if $GameBoardNode._terrain_is_impassable(tile):
+		return _dev_result(false, "impassable_tile")
+	var unit = unit_manager.spawn_unit(unit_type, tile, owner, false)
+	if unit == null:
+		return _dev_result(false, "spawn_failed")
+	unit.just_purchased = false
+	unit.first_turn_move = false
+	unit.ordered = false
+	unit.is_moving = false
+	unit.is_healing = false
+	unit.is_defending = false
+	unit.is_looking_out = false
+	unit.auto_heal = false
+	unit.auto_defend = false
+	unit.auto_lookout = false
+	unit.auto_build = false
+	unit.auto_build_type = ""
+	unit.curr_health = unit.max_health
+	unit.set_health_bar()
+	_finalize_dev_mutation()
+	return _dev_result(true, "", {"unit_net_id": int(unit.net_id)})
+
+func dev_delete_unit_at(tile: Vector2i) -> Dictionary:
+	var gate = _can_dev_edit_mobile_units()
+	if not bool(gate.get("ok", false)):
+		return gate
+	if not $GameBoardNode/HexTileMap.is_cell_valid(tile):
+		return _dev_result(false, "invalid_tile")
+	var unit = $GameBoardNode.get_unit_at(tile)
+	if unit == null:
+		var structure = $GameBoardNode.get_structure_unit_at(tile)
+		if structure != null:
+			return _dev_result(false, "structures_not_supported")
+		return _dev_result(false, "unit_missing")
+	var unit_id = int(unit.net_id)
+	_clear_orders_for_unit_id(unit_id)
+	_clear_build_queue(unit)
+	_clear_move_queue(unit)
+	$GameBoardNode.vacate(unit.grid_pos, unit)
+	_refresh_tile_after_unit_change(unit.grid_pos)
+	unit_manager.unit_by_net_id.erase(unit_id)
+	unit.queue_free()
+	_finalize_dev_mutation()
+	return _dev_result(true)
+
+func dev_move_unit(unit_net_id: int, dest_tile: Vector2i) -> Dictionary:
+	var gate = _can_dev_edit_mobile_units()
+	if not bool(gate.get("ok", false)):
+		return gate
+	if not $GameBoardNode/HexTileMap.is_cell_valid(dest_tile):
+		return _dev_result(false, "invalid_tile")
+	if $GameBoardNode._terrain_is_impassable(dest_tile):
+		return _dev_result(false, "impassable_tile")
+	var unit = unit_manager.get_unit_by_net_id(unit_net_id)
+	if unit == null:
+		return _dev_result(false, "unit_missing")
+	if unit.is_base or unit.is_tower:
+		return _dev_result(false, "structures_not_supported")
+	var occupant = $GameBoardNode.get_unit_at(dest_tile)
+	if occupant != null and occupant != unit:
+		return _dev_result(false, "tile_occupied")
+	_clear_orders_for_unit_id(unit_net_id)
+	_clear_build_queue(unit)
+	_clear_move_queue(unit)
+	unit.ordered = false
+	unit.is_moving = false
+	unit.is_healing = false
+	unit.is_defending = false
+	unit.is_looking_out = false
+	unit.moving_to = unit.grid_pos
+	unit.set_grid_position(dest_tile)
+	_finalize_dev_mutation()
+	return _dev_result(true)
+
+func dev_set_unit_health(unit_net_id: int, new_health: int) -> Dictionary:
+	var gate = _can_dev_edit_mobile_units()
+	if not bool(gate.get("ok", false)):
+		return gate
+	var unit = unit_manager.get_unit_by_net_id(unit_net_id)
+	if unit == null:
+		return _dev_result(false, "unit_missing")
+	if unit.is_base or unit.is_tower:
+		return _dev_result(false, "structures_not_supported")
+	if new_health <= 0:
+		var delete_result = dev_delete_unit_at(unit.grid_pos)
+		if bool(delete_result.get("ok", false)):
+			delete_result["deleted"] = true
+		return delete_result
+	unit.curr_health = min(int(unit.max_health), max(1, int(new_health)))
+	unit.set_health_bar()
+	_finalize_dev_mutation()
+	return _dev_result(true, "", {"health": int(unit.curr_health)})
+
 # --- Turn & Phase State ---
 var turn_number:   int    = 0
 var current_phase: Phase  = Phase.UPKEEP

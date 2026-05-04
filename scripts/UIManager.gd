@@ -62,6 +62,42 @@ var _default_camera_zoom: Vector2 = Vector2.ZERO
 var replay_metric_ids: Array = []
 var replay_browser_entries: Array = []
 var _replay_name_syncing: bool = false
+var dev_state_inputs: Dictionary = {}
+var dev_owner_option: OptionButton = null
+var dev_unit_type_option: OptionButton = null
+var dev_board_tool_option: OptionButton = null
+var dev_selected_unit_label: Label = null
+var dev_tool_hint_label: Label = null
+var dev_state_apply_button: Button = null
+var dev_state_refresh_button: Button = null
+var dev_selected_unit_id: int = -1
+var dev_panel_scroll: ScrollContainer = null
+var dev_panel_toggle_button: Button = null
+var dev_panel_minimized: bool = false
+var dev_panel_expanded_size: Vector2 = Vector2(420, 300)
+var dev_panel_minimized_size: Vector2 = Vector2(420, 28)
+var dev_health_dialog: ConfirmationDialog = null
+var dev_health_input: LineEdit = null
+var dev_health_target_unit_id: int = -1
+
+const DEV_TOOL_SELECT: int = 0
+const DEV_TOOL_SPAWN: int = 1
+const DEV_TOOL_MOVE: int = 2
+const DEV_TOOL_DELETE: int = 3
+const DEV_TOOL_HEALTH: int = 4
+const DEV_SPAWN_UNIT_TYPES = [
+	"archer",
+	"soldier",
+	"scout",
+	"miner",
+	"crystal_miner",
+	"builder",
+	"phalanx",
+	"cavalry",
+	"wizard",
+	"camp_archer",
+	"dragon"
+]
 
 @onready var turn_mgr = get_node(turn_manager_path) as Node
 @onready var unit_mgr = get_node(unit_manager_path) as Node
@@ -92,6 +128,7 @@ var _replay_name_syncing: bool = false
 @onready var confirm_concede_dialog = $ConfirmConcedeDialog as ConfirmationDialog
 @onready var dev_mode_toggle = get_node(dev_mode_toggle_path) as CheckButton
 @onready var dev_panel = $DevPanel
+@onready var dev_panel_vbox = $DevPanel/VBoxContainer as VBoxContainer
 @onready var respawn_timers_toggle = $DevPanel/VBoxContainer/RespawnTimersCheckButton as CheckButton
 @onready var resync_button = $DevPanel/VBoxContainer/ResyncButton as Button
 @onready var skip_movement_button = $DevPanel/VBoxContainer/SkipMovementButton as Button
@@ -312,6 +349,8 @@ func _ready():
 					 Callable(self, "_on_resync_pressed"))
 	$DevPanel/VBoxContainer/SkipMovementButton.connect("pressed",
 					 Callable(self, "_on_skip_movement_pressed"))
+	_init_dev_panel_layout()
+	_init_dev_tools_ui()
 	if damage_toggle_button != null:
 		damage_toggle_button.connect("pressed",
 					 Callable(self, "_on_damage_toggle_pressed"))
@@ -1888,14 +1927,523 @@ func _cancel_purchase_mode() -> void:
 	game_board.clear_highlights()
 	_update_done_button_state()
 
+func _make_dev_caption(text: String, min_width: float = 0.0) -> Label:
+	var label := Label.new()
+	label.text = text
+	if min_width > 0.0:
+		label.custom_minimum_size = Vector2(min_width, 0.0)
+	return label
+
+func _make_dev_input(width: float = 56.0) -> LineEdit:
+	var input := LineEdit.new()
+	input.custom_minimum_size = Vector2(width, 0.0)
+	input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	return input
+
+func _init_dev_panel_layout() -> void:
+	if dev_panel == null or dev_panel_vbox == null:
+		return
+	if dev_panel.get_node_or_null("DevHeader") != null:
+		return
+	dev_panel.anchor_left = 0.0
+	dev_panel.anchor_right = 0.0
+	dev_panel.anchor_top = 1.0
+	dev_panel.anchor_bottom = 1.0
+	var header := HBoxContainer.new()
+	header.name = "DevHeader"
+	header.position = Vector2(6.0, 2.0)
+	header.size = Vector2(dev_panel_expanded_size.x - 12.0, 24.0)
+	var title := Label.new()
+	title.text = "Dev Tools"
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header.add_child(title)
+	dev_panel_toggle_button = Button.new()
+	dev_panel_toggle_button.text = "-"
+	dev_panel_toggle_button.custom_minimum_size = Vector2(36.0, 22.0)
+	dev_panel_toggle_button.connect("pressed", Callable(self, "_on_dev_panel_toggle_pressed"))
+	header.add_child(dev_panel_toggle_button)
+	dev_panel_scroll = ScrollContainer.new()
+	dev_panel_scroll.name = "DevScroll"
+	dev_panel_scroll.position = Vector2(4.0, 26.0)
+	dev_panel_scroll.size = Vector2(dev_panel_expanded_size.x - 8.0, dev_panel_expanded_size.y - 30.0)
+	dev_panel.remove_child(dev_panel_vbox)
+	dev_panel.add_child(header)
+	dev_panel.add_child(dev_panel_scroll)
+	dev_panel_scroll.add_child(dev_panel_vbox)
+	dev_panel_vbox.position = Vector2(4.0, 4.0)
+	dev_panel_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	dev_panel_vbox.custom_minimum_size = Vector2(dev_panel_expanded_size.x - 24.0, 0.0)
+	_apply_dev_panel_layout()
+
+func _apply_dev_panel_layout() -> void:
+	if dev_panel == null:
+		return
+	if dev_panel_toggle_button != null:
+		dev_panel_toggle_button.text = "+" if dev_panel_minimized else "-"
+	if dev_panel_scroll != null:
+		dev_panel_scroll.visible = not dev_panel_minimized
+		if not dev_panel_minimized:
+			dev_panel_scroll.position = Vector2(4.0, 26.0)
+			dev_panel_scroll.size = Vector2(dev_panel_expanded_size.x - 8.0, dev_panel_expanded_size.y - 30.0)
+	if dev_panel_vbox != null:
+		dev_panel_vbox.custom_minimum_size = Vector2(dev_panel_expanded_size.x - 24.0, 0.0)
+	var panel_size = dev_panel_minimized_size if dev_panel_minimized else dev_panel_expanded_size
+	dev_panel.offset_left = 6.0
+	dev_panel.offset_right = 6.0 + panel_size.x
+	dev_panel.offset_bottom = -6.0
+	dev_panel.offset_top = dev_panel.offset_bottom - panel_size.y
+
+func _on_dev_panel_toggle_pressed() -> void:
+	dev_panel_minimized = not dev_panel_minimized
+	_apply_dev_panel_layout()
+
+func _init_dev_tools_ui() -> void:
+	if dev_panel_vbox == null or dev_board_tool_option != null:
+		return
+	var sep := HSeparator.new()
+	dev_panel_vbox.add_child(sep)
+	var state_title := Label.new()
+	state_title.text = "State"
+	dev_panel_vbox.add_child(state_title)
+	var turn_row := HBoxContainer.new()
+	turn_row.add_child(_make_dev_caption("Turn", 42.0))
+	var turn_input = _make_dev_input(72.0)
+	dev_state_inputs["turn_number"] = turn_input
+	turn_row.add_child(turn_input)
+	dev_panel_vbox.add_child(turn_row)
+	for player_id in ["player1", "player2"]:
+		var row := HBoxContainer.new()
+		row.add_child(_make_dev_caption("P1" if player_id == "player1" else "P2", 24.0))
+		row.add_child(_make_dev_caption("Gold", 34.0))
+		var gold_input = _make_dev_input()
+		dev_state_inputs["%s_gold" % player_id] = gold_input
+		row.add_child(gold_input)
+		row.add_child(_make_dev_caption("Mana", 38.0))
+		var mana_input = _make_dev_input()
+		dev_state_inputs["%s_mana" % player_id] = mana_input
+		row.add_child(mana_input)
+		row.add_child(_make_dev_caption("Inc", 26.0))
+		var income_input = _make_dev_input()
+		dev_state_inputs["%s_income" % player_id] = income_input
+		row.add_child(income_input)
+		dev_panel_vbox.add_child(row)
+	var state_buttons := HBoxContainer.new()
+	dev_state_apply_button = Button.new()
+	dev_state_apply_button.text = "Apply State"
+	dev_state_apply_button.connect("pressed", Callable(self, "_on_dev_state_apply_pressed"))
+	state_buttons.add_child(dev_state_apply_button)
+	dev_state_refresh_button = Button.new()
+	dev_state_refresh_button.text = "Refresh"
+	dev_state_refresh_button.connect("pressed", Callable(self, "_refresh_dev_state_inputs"))
+	state_buttons.add_child(dev_state_refresh_button)
+	dev_panel_vbox.add_child(state_buttons)
+	var sep2 := HSeparator.new()
+	dev_panel_vbox.add_child(sep2)
+	var board_title := Label.new()
+	board_title.text = "Board Edit"
+	dev_panel_vbox.add_child(board_title)
+	var tool_row := HBoxContainer.new()
+	tool_row.add_child(_make_dev_caption("Tool", 42.0))
+	dev_board_tool_option = OptionButton.new()
+	dev_board_tool_option.add_item("Select", DEV_TOOL_SELECT)
+	dev_board_tool_option.add_item("Spawn", DEV_TOOL_SPAWN)
+	dev_board_tool_option.add_item("Move", DEV_TOOL_MOVE)
+	dev_board_tool_option.add_item("Delete", DEV_TOOL_DELETE)
+	dev_board_tool_option.add_item("Health", DEV_TOOL_HEALTH)
+	dev_board_tool_option.connect("item_selected", Callable(self, "_on_dev_board_tool_changed"))
+	tool_row.add_child(dev_board_tool_option)
+	dev_panel_vbox.add_child(tool_row)
+	var owner_row := HBoxContainer.new()
+	owner_row.add_child(_make_dev_caption("Owner", 42.0))
+	dev_owner_option = OptionButton.new()
+	dev_owner_option.add_item("Player 1", 0)
+	dev_owner_option.add_item("Player 2", 1)
+	dev_owner_option.add_item("Neutral", 2)
+	dev_owner_option.connect("item_selected", Callable(self, "_refresh_dev_board_highlights"))
+	owner_row.add_child(dev_owner_option)
+	dev_panel_vbox.add_child(owner_row)
+	var unit_row := HBoxContainer.new()
+	unit_row.add_child(_make_dev_caption("Unit", 42.0))
+	dev_unit_type_option = OptionButton.new()
+	for i in range(DEV_SPAWN_UNIT_TYPES.size()):
+		dev_unit_type_option.add_item(DEV_SPAWN_UNIT_TYPES[i], i)
+	dev_unit_type_option.connect("item_selected", Callable(self, "_refresh_dev_board_highlights"))
+	unit_row.add_child(dev_unit_type_option)
+	dev_panel_vbox.add_child(unit_row)
+	dev_selected_unit_label = Label.new()
+	dev_selected_unit_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	dev_panel_vbox.add_child(dev_selected_unit_label)
+	dev_tool_hint_label = Label.new()
+	dev_tool_hint_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	dev_panel_vbox.add_child(dev_tool_hint_label)
+	_init_dev_health_dialog()
+	_refresh_dev_state_inputs()
+	_refresh_dev_selected_unit_label()
+	_refresh_dev_tool_hint()
+
+func _current_dev_board_tool() -> int:
+	if dev_board_tool_option == null:
+		return DEV_TOOL_SELECT
+	return dev_board_tool_option.get_selected_id()
+
+func _current_dev_owner() -> String:
+	if dev_owner_option == null:
+		return "player1"
+	match dev_owner_option.get_selected_id():
+		1:
+			return "player2"
+		2:
+			return "neutral"
+		_:
+			return "player1"
+
+func _current_dev_unit_type() -> String:
+	if dev_unit_type_option == null:
+		return "archer"
+	var idx = max(0, dev_unit_type_option.selected)
+	if idx >= DEV_SPAWN_UNIT_TYPES.size():
+		idx = 0
+	return str(DEV_SPAWN_UNIT_TYPES[idx])
+
+func _get_dev_selected_unit():
+	if dev_selected_unit_id < 0 or unit_mgr == null:
+		return null
+	var unit = unit_mgr.get_unit_by_net_id(dev_selected_unit_id)
+	if unit == null or not is_instance_valid(unit) or unit.is_base or unit.is_tower:
+		return null
+	return unit
+
+func _set_dev_selected_unit(unit) -> void:
+	if unit == null or not is_instance_valid(unit) or unit.is_base or unit.is_tower:
+		dev_selected_unit_id = -1
+	else:
+		dev_selected_unit_id = int(unit.net_id)
+	_refresh_dev_selected_unit_label()
+	_refresh_dev_board_highlights()
+
+func _refresh_dev_selected_unit_label() -> void:
+	if dev_selected_unit_label == null:
+		return
+	var unit = _get_dev_selected_unit()
+	if unit == null:
+		dev_selected_unit_label.text = "Selected: none"
+		return
+	dev_selected_unit_label.text = "Selected: %s #%d %s @ %s HP %d/%d" % [unit.player_id, int(unit.net_id), str(unit.unit_type), str(unit.grid_pos), int(unit.curr_health), int(unit.max_health)]
+
+func _refresh_dev_tool_hint() -> void:
+	if dev_tool_hint_label == null:
+		return
+	match _current_dev_board_tool():
+		DEV_TOOL_SPAWN:
+			dev_tool_hint_label.text = "Spawn mobile units on empty, passable tiles."
+		DEV_TOOL_MOVE:
+			dev_tool_hint_label.text = "Move: click a mobile unit, then click its destination tile."
+		DEV_TOOL_DELETE:
+			dev_tool_hint_label.text = "Delete: click a mobile unit to remove it."
+		DEV_TOOL_HEALTH:
+			dev_tool_hint_label.text = "Health: click a mobile unit, then enter HP. Use 0 to delete it."
+		_:
+			dev_tool_hint_label.text = "Select keeps normal gameplay clicks intact while showing a dev-side unit readout."
+
+func _refresh_dev_state_inputs() -> void:
+	if turn_mgr == null:
+		return
+	if dev_state_inputs.has("turn_number"):
+		dev_state_inputs["turn_number"].text = str(int(turn_mgr.turn_number))
+	for player_id in ["player1", "player2"]:
+		if dev_state_inputs.has("%s_gold" % player_id):
+			dev_state_inputs["%s_gold" % player_id].text = str(int(turn_mgr.player_gold.get(player_id, 0)))
+		if dev_state_inputs.has("%s_mana" % player_id):
+			dev_state_inputs["%s_mana" % player_id].text = str(int(turn_mgr.player_mana.get(player_id, 0)))
+		if dev_state_inputs.has("%s_income" % player_id):
+			dev_state_inputs["%s_income" % player_id].text = str(int(turn_mgr.player_income.get(player_id, 0)))
+	_refresh_dev_selected_unit_label()
+	_refresh_dev_tool_hint()
+
+func _dev_parse_input_value(key: String, label_text: String) -> Dictionary:
+	if not dev_state_inputs.has(key):
+		return {"ok": false, "reason": "%s missing" % label_text}
+	var text = str(dev_state_inputs[key].text).strip_edges()
+	if not text.is_valid_int():
+		return {"ok": false, "reason": "%s must be an integer" % label_text}
+	return {"ok": true, "value": int(text)}
+
+func _on_dev_state_apply_pressed() -> void:
+	if turn_mgr == null or not turn_mgr.is_host():
+		status_lbl.text = "[Dev state: host only]"
+		return
+	var turn_value = _dev_parse_input_value("turn_number", "Turn")
+	if not bool(turn_value.get("ok", false)):
+		status_lbl.text = "[%s]" % str(turn_value.get("reason", "Invalid turn"))
+		return
+	var patch := {"turn_number": int(turn_value["value"]), "player_gold": {}, "player_mana": {}, "player_income": {}}
+	for player_id in ["player1", "player2"]:
+		for field in ["gold", "mana", "income"]:
+			var parsed = _dev_parse_input_value("%s_%s" % [player_id, field], "%s %s" % [player_id, field])
+			if not bool(parsed.get("ok", false)):
+				status_lbl.text = "[%s]" % str(parsed.get("reason", "Invalid value"))
+				return
+			var patch_key = "player_%s" % field
+			var bucket: Dictionary = patch[patch_key]
+			bucket[player_id] = int(parsed["value"])
+			patch[patch_key] = bucket
+	var result = turn_mgr.apply_dev_state_patch(patch)
+	if bool(result.get("ok", false)):
+		status_lbl.text = "Dev state applied"
+		_refresh_dev_state_inputs()
+	else:
+		status_lbl.text = "[Dev state failed: %s]" % str(result.get("reason", "unknown"))
+
+func _init_dev_health_dialog() -> void:
+	if dev_health_dialog != null:
+		return
+	dev_health_dialog = ConfirmationDialog.new()
+	dev_health_dialog.title = "Set Unit Health"
+	dev_health_dialog.ok_button_text = "Apply"
+	dev_health_dialog.cancel_button_text = "Cancel"
+	dev_health_dialog.min_size = Vector2i(260, 110)
+	dev_health_dialog.connect("confirmed", Callable(self, "_on_dev_health_dialog_confirmed"))
+	var vbox := VBoxContainer.new()
+	vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var label := Label.new()
+	label.text = "Enter unit health (0 deletes the unit)."
+	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	vbox.add_child(label)
+	dev_health_input = LineEdit.new()
+	dev_health_input.placeholder_text = "Health"
+	dev_health_input.connect("text_submitted", Callable(self, "_on_dev_health_text_submitted"))
+	vbox.add_child(dev_health_input)
+	dev_health_dialog.add_child(vbox)
+	add_child(dev_health_dialog)
+
+func _show_dev_health_dialog(unit) -> void:
+	if unit == null or not is_instance_valid(unit):
+		return
+	if dev_health_dialog == null:
+		_init_dev_health_dialog()
+	if dev_health_dialog == null or dev_health_input == null:
+		return
+	dev_health_target_unit_id = int(unit.net_id)
+	dev_health_dialog.title = "Set Health: %s #%d" % [str(unit.unit_type), int(unit.net_id)]
+	dev_health_input.text = str(int(unit.curr_health))
+	dev_health_dialog.popup_centered()
+	dev_health_input.grab_focus()
+	dev_health_input.select_all()
+
+func _on_dev_health_text_submitted(_text: String) -> void:
+	_on_dev_health_dialog_confirmed()
+
+func _on_dev_health_dialog_confirmed() -> void:
+	if dev_health_input == null:
+		return
+	var selected = _get_dev_selected_unit()
+	if dev_health_target_unit_id < 0 and selected != null:
+		dev_health_target_unit_id = int(selected.net_id)
+	if dev_health_target_unit_id < 0:
+		status_lbl.text = "[Health edit: no unit selected]"
+		if dev_health_dialog != null:
+			dev_health_dialog.hide()
+		return
+	var text = dev_health_input.text.strip_edges()
+	if not text.is_valid_int():
+		status_lbl.text = "[Health edit: value must be an integer]"
+		return
+	var result = turn_mgr.dev_set_unit_health(dev_health_target_unit_id, int(text))
+	if bool(result.get("ok", false)):
+		if bool(result.get("deleted", false)):
+			status_lbl.text = "Unit deleted"
+			dev_selected_unit_id = -1
+		else:
+			status_lbl.text = "Unit health set to %d" % int(result.get("health", int(text)))
+			dev_selected_unit_id = dev_health_target_unit_id
+		if dev_health_dialog != null:
+			dev_health_dialog.hide()
+		_refresh_dev_selected_unit_label()
+		_refresh_dev_board_highlights()
+	else:
+		status_lbl.text = "[Health edit failed: %s]" % str(result.get("reason", "unknown"))
+
+func _clear_current_interaction_for_dev() -> void:
+	action_menu.hide()
+	build_menu.hide()
+	spell_menu.hide()
+	finish_move_button.visible = false
+	_clear_queue_preview()
+	placing_unit = ""
+	action_mode = ""
+	current_reachable = {}
+	enemy_tiles = []
+	support_tiles = []
+	repair_tiles = []
+	current_path = []
+	current_spell_type = ""
+	current_spell_mana_spent = 0
+	pending_spell_type = ""
+	spell_tiles = []
+	spell_caster = null
+	selected_structure_tile = Vector2i(-9999, -9999)
+	selected_structure_type = ""
+	remaining_moves = 0.0
+	_reset_cavalry_bonus_state()
+	game_board.clear_highlights()
+	_clear_all_drawings()
+	_hide_build_hover()
+	_hide_queue_hover()
+	if dev_health_dialog != null:
+		dev_health_dialog.hide()
+	dev_health_target_unit_id = -1
+
+func _dev_mobile_unit_tiles() -> Array:
+	var tiles: Array = []
+	if game_board == null:
+		return tiles
+	for unit in game_board.get_all_mobile_units():
+		if unit == null or not is_instance_valid(unit):
+			continue
+		if not tiles.has(unit.grid_pos):
+			tiles.append(unit.grid_pos)
+	return tiles
+
+func _dev_valid_spawn_tiles() -> Array:
+	var tiles: Array = []
+	if game_board == null or hex == null:
+		return tiles
+	for tile in hex.used_cells:
+		if game_board.is_occupied(tile):
+			continue
+		if game_board._terrain_is_impassable(tile):
+			continue
+		tiles.append(tile)
+	return tiles
+
+func _dev_valid_move_tiles(unit) -> Array:
+	var tiles: Array = []
+	if unit == null or game_board == null or hex == null:
+		return tiles
+	for tile in hex.used_cells:
+		if game_board._terrain_is_impassable(tile):
+			continue
+		var occupant = game_board.get_unit_at(tile)
+		if occupant != null and occupant != unit:
+			continue
+		tiles.append(tile)
+	return tiles
+
+func _refresh_dev_board_highlights(_arg = null) -> void:
+	if game_board == null or dev_mode_toggle == null or not dev_mode_toggle.button_pressed:
+		return
+	game_board.clear_highlights()
+	match _current_dev_board_tool():
+		DEV_TOOL_SPAWN:
+			game_board.show_highlights(_dev_valid_spawn_tiles())
+		DEV_TOOL_DELETE:
+			game_board.show_highlights(_dev_mobile_unit_tiles())
+		DEV_TOOL_HEALTH:
+			game_board.show_highlights(_dev_mobile_unit_tiles())
+		DEV_TOOL_MOVE:
+			var unit = _get_dev_selected_unit()
+			if unit == null:
+				game_board.show_highlights(_dev_mobile_unit_tiles())
+			else:
+				var tiles = _dev_valid_move_tiles(unit)
+				if tiles.has(unit.grid_pos):
+					tiles.erase(unit.grid_pos)
+				game_board.show_highlights(tiles)
+
+func _on_dev_board_tool_changed(_index: int) -> void:
+	_refresh_dev_tool_hint()
+	if _current_dev_board_tool() == DEV_TOOL_SELECT:
+		game_board.clear_highlights()
+		return
+	_clear_current_interaction_for_dev()
+	_refresh_dev_board_highlights()
+
+func _handle_dev_board_click(cell: Vector2i) -> bool:
+	if dev_mode_toggle == null or not dev_mode_toggle.button_pressed:
+		return false
+	var tool = _current_dev_board_tool()
+	if tool == DEV_TOOL_SELECT:
+		var clicked_unit = game_board.get_unit_at(cell)
+		if clicked_unit != null:
+			_set_dev_selected_unit(clicked_unit)
+		return false
+	if not turn_mgr.is_host():
+		status_lbl.text = "[Dev tools: host only]"
+		return true
+	if turn_mgr.current_phase != turn_mgr.Phase.ORDERS:
+		status_lbl.text = "[Dev tools: orders phase only]"
+		return true
+	if not hex.is_cell_valid(cell):
+		status_lbl.text = "[Invalid tile]"
+		return true
+	if tool == DEV_TOOL_SPAWN:
+		var result = turn_mgr.dev_spawn_unit(_current_dev_unit_type(), _current_dev_owner(), cell)
+		if bool(result.get("ok", false)):
+			status_lbl.text = "Spawned %s for %s" % [_current_dev_unit_type(), _current_dev_owner()]
+			var new_unit = unit_mgr.get_unit_by_net_id(int(result.get("unit_net_id", -1)))
+			_set_dev_selected_unit(new_unit)
+		else:
+			status_lbl.text = "[Spawn failed: %s]" % str(result.get("reason", "unknown"))
+		_refresh_dev_board_highlights()
+		return true
+	if tool == DEV_TOOL_DELETE:
+		var selected = _get_dev_selected_unit()
+		var selected_tile = selected.grid_pos if selected != null else Vector2i(-9999, -9999)
+		var result = turn_mgr.dev_delete_unit_at(cell)
+		if bool(result.get("ok", false)):
+			if selected != null and selected_tile == cell:
+				dev_selected_unit_id = -1
+			status_lbl.text = "Unit deleted"
+		else:
+			status_lbl.text = "[Delete failed: %s]" % str(result.get("reason", "unknown"))
+		_refresh_dev_selected_unit_label()
+		_refresh_dev_board_highlights()
+		return true
+	if tool == DEV_TOOL_HEALTH:
+		var clicked_unit = game_board.get_unit_at(cell)
+		if clicked_unit == null:
+			status_lbl.text = "[Health: click a mobile unit]"
+			return true
+		_set_dev_selected_unit(clicked_unit)
+		_show_dev_health_dialog(clicked_unit)
+		return true
+	if tool == DEV_TOOL_MOVE:
+		var clicked_unit = game_board.get_unit_at(cell)
+		if clicked_unit != null:
+			_set_dev_selected_unit(clicked_unit)
+			status_lbl.text = "Move source selected"
+			return true
+		var selected = _get_dev_selected_unit()
+		if selected == null:
+			status_lbl.text = "[Move: select a unit first]"
+			_refresh_dev_board_highlights()
+			return true
+		var result = turn_mgr.dev_move_unit(int(selected.net_id), cell)
+		if bool(result.get("ok", false)):
+			status_lbl.text = "Unit moved"
+			_refresh_dev_selected_unit_label()
+		else:
+			status_lbl.text = "[Move failed: %s]" % str(result.get("reason", "unknown"))
+		_refresh_dev_board_highlights()
+		return true
+	return false
+
 func _on_dev_mode_toggled(pressed:bool):
 	print("Dev Mode → ", pressed)
 	if pressed:
 		dev_panel.visible = true
+		_refresh_dev_state_inputs()
+		_refresh_dev_board_highlights()
 	else:
 		dev_panel.visible = false
 		respawn_timers_toggle.button_pressed = false
 		_on_respawn_timers_toggled(false)
+		dev_selected_unit_id = -1
+		_refresh_dev_selected_unit_label()
+		if dev_health_dialog != null:
+			dev_health_dialog.hide()
+		dev_health_target_unit_id = -1
+		game_board.clear_highlights()
 	_set_menu_checked(MENU_ID_DEV_MODE, pressed)
 
 func _on_fog_toggled(pressed:bool):
@@ -3035,6 +3583,7 @@ func _on_next_unordered_pressed() -> void:
 func _on_unit_selected(unit: Node) -> void:
 	game_board.clear_highlights()
 	currently_selected_unit = unit
+	_set_dev_selected_unit(unit)
 	selected_structure_tile = Vector2i(-9999, -9999)
 	selected_structure_type = ""
 	# Show action selection menu
@@ -3340,6 +3889,11 @@ func _reset_ui_for_snapshot() -> void:
 	_hide_build_hover()
 	_hide_queue_hover()
 	_clear_damage_report_hover()
+	dev_selected_unit_id = -1
+	_refresh_dev_selected_unit_label()
+	if dev_health_dialog != null:
+		dev_health_dialog.hide()
+	dev_health_target_unit_id = -1
 
 func _submit_orders() -> void:
 	game_board.clear_highlights()
@@ -4409,6 +4963,8 @@ func _on_state_applied() -> void:
 	_draw_all()
 	render_damage_report()
 	_update_auto_pass_for_damage()
+	_refresh_dev_state_inputs()
+	_refresh_dev_board_highlights()
 
 func _update_turn_label() -> void:
 	if turn_label == null or turn_mgr == null:
@@ -4430,6 +4986,9 @@ func _unhandled_input(ev):
 	game_board.clear_highlights()
 	var world_pos = get_viewport().get_camera_2d().get_global_mouse_position()
 	var cell = hex.world_to_map(world_pos)
+
+	if _handle_dev_board_click(cell):
+		return
 
 	if placing_unit != "":
 		# Placement logic

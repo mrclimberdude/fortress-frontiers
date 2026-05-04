@@ -270,7 +270,10 @@ func _update_fog():
 					var structure_unit = $"..".get_structure_unit_at(cell)
 					if structure_unit != null:
 						structure_unit.visible = true
-	if not $"../../UI/DevPanel/VBoxContainer/FogCheckButton".button_pressed:
+	var fog_toggle = $"../../UI".get_node_or_null("DevPanel/VBoxContainer/FogCheckButton")
+	if fog_toggle == null:
+		fog_toggle = $"../../UI".get_node_or_null("DevPanel/DevScroll/VBoxContainer/FogCheckButton")
+	if fog_toggle == null or not fog_toggle.button_pressed:
 		for unit in all_units:
 			if tm_root != null and tm_root.has_method("is_unit_hidden_to_local") and tm_root.is_unit_hidden_to_local(unit):
 				unit.visible = false
