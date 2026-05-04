@@ -8,6 +8,8 @@ extends Resource
 @export var procedural: bool = false
 @export var min_players: int = 2
 @export var max_players: int = 2
+@export var proc_shape: String = "rectangle" # "rectangle" or "hex_3p"
+@export var proc_hex_radius: int = 0
 @export var proc_columns: int = 0
 @export var proc_rows: int = 0
 @export var proc_forest_ratio: float = 0.14

@@ -2827,6 +2827,17 @@ func refresh_mine_tiles() -> void:
 		var tiles = mines.get(owner, [])
 		for pos in tiles:
 			hex.set_player_tile(pos, owner)
+			if $GameBoardNode.get_structure_at(pos) == null:
+				if terrain_overlay != null:
+					terrain_overlay.set_cell(pos)
+				var mine = MineScene.instantiate() as Sprite2D
+				mine.position = hex.map_to_world(pos) + hex.tile_size * 0.5
+				mine.z_index = 6
+				mine.grid_pos = pos
+				var structure_root = hex.get_node_or_null("Structures")
+				if structure_root != null:
+					structure_root.add_child(mine)
+				$GameBoardNode.set_structure_at(pos, mine)
 
 func _connected_road_tiles(player_id: String) -> Dictionary:
 	var connected := {}
@@ -3264,7 +3275,7 @@ func _ready():
 	
 	rng.randomize()
 
-func _load_map_by_index(map_index: int) -> void:
+func _load_map_by_index(map_index: int, apply_generated_content: bool = true) -> void:
 	if map_data.size() == 0:
 		push_error("TurnManager: map_data is empty.")
 		return
@@ -3304,7 +3315,7 @@ func _load_map_by_index(map_index: int) -> void:
 	if bounds_cells.is_empty() and tmap != null:
 		bounds_cells = tmap.get_used_cells()
 	var generated := {}
-	if md.procedural:
+	if md.procedural and apply_generated_content:
 		var gen_rng = RandomNumberGenerator.new()
 		var seed_val = NetworkManager.match_seed
 		if seed_val <= 0:
@@ -3325,7 +3336,7 @@ func _load_map_by_index(map_index: int) -> void:
 			var fog = $GameBoardNode.get_node_or_null("FogOfWar")
 			if fog != null and fog.has_method("reset_fog"):
 				fog.reset_fog()
-	if md.procedural:
+	if md.procedural and apply_generated_content:
 		if tmap != null:
 			tmap.clear()
 			var forest_src = 1
@@ -3346,14 +3357,14 @@ func _load_map_by_index(map_index: int) -> void:
 		tower_positions = generated.get("tower_positions", md.tower_positions)
 		mines = generated.get("mines", md.mines)
 		camps = generated.get("camps", md.camps)
-	else:
+	elif not md.procedural:
 		md.populate_from_terrain(terrain_overlay)
 		base_positions = md.base_positions
 		tower_positions = md.tower_positions
 		mines = md.mines
 		camps = md.camps
 	var hex_map = $GameBoardNode/HexTileMap
-	if hex_map != null:
+	if apply_generated_content and hex_map != null:
 		for tile in camps.get("basic", []):
 			hex_map.set_player_tile(tile, "camp")
 		for tile in camps.get("dragon", []):
@@ -3369,24 +3380,25 @@ func _load_map_by_index(map_index: int) -> void:
 	for player_id in active_players:
 		income_tower_positions[player_id] = tower_positions.get(player_id, []).duplicate()
 	
-	for player in tower_positions.keys():
-		for tile in tower_positions[player]:
+	if apply_generated_content:
+		for player in tower_positions.keys():
+			for tile in tower_positions[player]:
+				structure_positions.append(tile)
+				unit_manager.spawn_unit("tower", tile, player, false)
+		for player in base_positions.keys():
+			var tile = base_positions[player]
 			structure_positions.append(tile)
-			unit_manager.spawn_unit("tower", tile, player, false)
-	for player in base_positions.keys():
-		var tile = base_positions[player]
-		structure_positions.append(tile)
-		unit_manager.spawn_unit("base", tile, player, false)
-	for tile in mines["unclaimed"]:
-		structure_positions.append(tile)
-		$GameBoardNode/HexTileMap.set_player_tile(tile, "unclaimed")
-		tmap.set_cell(tile)
-		var mine = MineScene.instantiate() as Sprite2D
-		mine.position = $GameBoardNode/HexTileMap.map_to_world(tile) + $GameBoardNode/HexTileMap.tile_size * 0.5
-		mine.z_index = 6
-		mine.grid_pos = tile
-		$GameBoardNode/HexTileMap/Structures.add_child(mine)
-		$GameBoardNode.set_structure_at(tile, mine)
+			unit_manager.spawn_unit("base", tile, player, false)
+		for tile in mines["unclaimed"]:
+			structure_positions.append(tile)
+			$GameBoardNode/HexTileMap.set_player_tile(tile, "unclaimed")
+			tmap.set_cell(tile)
+			var mine = MineScene.instantiate() as Sprite2D
+			mine.position = $GameBoardNode/HexTileMap.map_to_world(tile) + $GameBoardNode/HexTileMap.tile_size * 0.5
+			mine.z_index = 6
+			mine.grid_pos = tile
+			$GameBoardNode/HexTileMap/Structures.add_child(mine)
+			$GameBoardNode.set_structure_at(tile, mine)
 
 func _serialize_unit(unit) -> Dictionary:
 	return {
@@ -3912,12 +3924,13 @@ func apply_state(state: Dictionary, force_host: bool = false) -> void:
 	var match_seed = int(state.get("match_seed", NetworkManager.match_seed))
 	if match_seed > 0:
 		NetworkManager.match_seed = match_seed
-	if map_index != current_map_index:
-		_reset_map_state()
-		_load_map_by_index(map_index)
 	var map_state = {}
 	if state.has("procedural_map") and state["procedural_map"] is Dictionary:
 		map_state = state["procedural_map"]
+	if map_index != current_map_index:
+		_reset_map_state()
+		var should_apply_generated = not (not _is_host() and not map_state.is_empty())
+		_load_map_by_index(map_index, should_apply_generated)
 	if not map_state.is_empty():
 		var should_reset_fog = not state.has("fog_visibility")
 		_apply_procedural_map_state(map_state, should_reset_fog)
@@ -4092,6 +4105,8 @@ func _on_map_index_received(map_index: int) -> void:
 	var mp = get_tree().get_multiplayer()
 	if mp != null and mp.multiplayer_peer != null and mp.is_server():
 		return
+	if NetworkManager != null and bool(NetworkManager.get("_awaiting_initial_state_ready")):
+		return
 	if current_map_index == -1:
 		return
 	if map_index == current_map_index:
@@ -4187,7 +4202,8 @@ func start_game() -> void:
 	_maybe_log_match_init()
 	if $UI != null and $UI.has_method("_on_game_started"):
 		$UI._on_game_started()
-	call_deferred("_game_loop")
+	if _is_host():
+		call_deferred("_game_loop")
 
 func update_neutral_markers() -> void:
 	var root = _get_neutral_marker_root()

@@ -30,7 +30,7 @@ var _next_net_id_neutral: int = 1000001
 var unit_by_net_id: Dictionary = {}
 
 func _ready():
-	print("UnitManager: hex_map =", hex_map, "script=", hex_map.get_script())
+	pass
 
 # spawns a unit by type ("archer" or "soldier") at grid_pos for owner
 func spawn_unit(unit_type: String, cell: Vector2i, owner: String, undo: bool, forced_net_id: int = -1) -> Node2D:
@@ -116,7 +116,6 @@ func spawn_unit(unit_type: String, cell: Vector2i, owner: String, undo: bool, fo
 	if unit_type == "base" or unit_type == "tower":
 		$"..".set_structure_at(cell, unit)
 	
-	print("Spawned %s for %s at %s" % [unit_type, owner, cell])
 	return unit
 
 func find_end(unit, path, enemy, enemy_flag):

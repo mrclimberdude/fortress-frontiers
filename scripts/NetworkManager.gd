@@ -21,6 +21,8 @@ var selected_map_index: int = -1
 var map_selection_mode: String = "random_normal"
 var match_seed: int = -1
 var custom_proc_params: Dictionary = {}
+var _pending_start_ready_peers: Dictionary = {}
+var _awaiting_initial_state_ready: bool = false
 
 
 var _step_ready_counts := {}
@@ -121,6 +123,8 @@ func _reset_lobby_state() -> void:
 	client_peer_ids.clear()
 	lobby_slot_count = 2
 	local_player_id = ""
+	_pending_start_ready_peers.clear()
+	_awaiting_initial_state_ready = false
 	reset_match_tracking(_default_player_ids())
 
 func _init_lobby_slots() -> void:
@@ -212,6 +216,7 @@ func _clear_peer_slot(peer_id: int) -> void:
 			slot["peer_id"] = 0
 			slot["username"] = ""
 			peer_id_to_player_id.erase(peer_id)
+			_pending_start_ready_peers.erase(peer_id)
 			reset_match_tracking(get_match_player_ids())
 			_emit_lobby_update()
 			return
@@ -273,12 +278,15 @@ func _on_peer_connected(id: int) -> void:
 		if match_seed >= 0:
 			rpc_id(id, "rpc_set_match_seed", match_seed)
 	else:
-		# Client sees the host
-		server_peer_id = id
-		print("Connected to host peer %d" % id)
-		if local_username == "":
-			local_username = "Player"
-		rpc_id(server_peer_id, "rpc_register_username", local_username)
+		var is_host_peer = id == 1
+		if is_host_peer or server_peer_id == 0:
+			server_peer_id = id
+			print("Connected to host peer %d" % id)
+			if local_username == "":
+				local_username = "Player"
+			rpc_id(server_peer_id, "rpc_register_username", local_username)
+		else:
+			print("Connected to peer %d" % id)
 
 func _on_peer_disconnected(id: int) -> void:
 	print("Peer disconnected with ID %d" % id)
@@ -375,12 +383,17 @@ func rpc_lobby_update(slot_count: int, slots_payload: Array) -> void:
 	emit_signal("lobby_updated", lobby_slots, lobby_slot_count)
 
 @rpc("any_peer", "reliable")
-func rpc_start_game() -> void:
+func rpc_start_game(match_players: Array = []) -> void:
 	if _ignore_rpc_in_replay():
 		return
 	var mp_local = get_tree().get_multiplayer()
 	if mp_local != null and mp_local.is_server():
 		return
+	_awaiting_initial_state_ready = true
+	if not match_players.is_empty():
+		reset_match_tracking(match_players)
+		if turn_mgr != null and turn_mgr.has_method("configure_match_players"):
+			turn_mgr.configure_match_players(match_players, false)
 	if turn_mgr != null and turn_mgr.has_method("start_game"):
 		turn_mgr.start_game()
 
@@ -406,6 +419,9 @@ func rpc_state_snapshot(state: Dictionary) -> void:
 	if mp.is_server():
 		return
 	emit_signal("state_snapshot_received", state)
+	if _awaiting_initial_state_ready:
+		_awaiting_initial_state_ready = false
+		rpc_id(server_peer_id, "rpc_client_start_ready")
 
 @rpc("any_peer", "reliable")
 func rpc_request_state() -> void:
@@ -673,25 +689,62 @@ func start_game_for_all() -> void:
 		return
 	if not is_lobby_full():
 		return
+	var match_players = get_match_player_ids()
 	if turn_mgr != null and turn_mgr.has_method("ensure_selected_map_supports_player_count"):
-		if not turn_mgr.ensure_selected_map_supports_player_count(get_match_player_ids().size()):
+		if not turn_mgr.ensure_selected_map_supports_player_count(match_players.size()):
 			return
-	if turn_mgr != null and turn_mgr.has_method("_ensure_map_loaded"):
-		turn_mgr._ensure_map_loaded()
-	broadcast_map_selection()
 	if match_seed >= 0:
 		for peer_id in client_peer_ids:
 			rpc_id(peer_id, "rpc_set_match_seed", match_seed)
 	if custom_proc_params.size() > 0:
 		for peer_id in client_peer_ids:
 			rpc_id(peer_id, "rpc_set_custom_proc_params", custom_proc_params)
-	reset_match_tracking(get_match_player_ids())
+	reset_match_tracking(match_players)
 	if turn_mgr != null and turn_mgr.has_method("configure_match_players"):
-		turn_mgr.configure_match_players(get_match_player_ids(), false)
-	if turn_mgr != null and turn_mgr.has_method("start_game"):
-		turn_mgr.start_game()
+		turn_mgr.configure_match_players(match_players, false)
+	_pending_start_ready_peers.clear()
 	for peer_id in client_peer_ids:
-		rpc_id(peer_id, "rpc_start_game")
+		_pending_start_ready_peers[peer_id] = true
+		rpc_id(peer_id, "rpc_start_game", match_players)
+	call_deferred("_finish_start_game_for_all_async", match_players)
+
+func _finish_start_game_for_all_async(match_players: Array) -> void:
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var mp = get_tree().get_multiplayer()
+	if mp == null or mp.multiplayer_peer == null or not mp.is_server():
+		return
+	if turn_mgr != null and turn_mgr.has_method("_ensure_map_loaded"):
+		turn_mgr._ensure_map_loaded()
+	for peer_id in client_peer_ids:
+		if not _pending_start_ready_peers.has(peer_id):
+			continue
+		var viewer = _peer_id_to_player_id(peer_id)
+		var initial_state = turn_mgr.get_state_snapshot(true)
+		if viewer != "" and turn_mgr.has_method("get_state_snapshot_for"):
+			initial_state = turn_mgr.get_state_snapshot_for(viewer)
+		if turn_mgr != null and turn_mgr.has_method("_collect_procedural_map_state"):
+			var map_state = turn_mgr._collect_procedural_map_state()
+			if map_state is Dictionary and not map_state.is_empty():
+				initial_state["procedural_map"] = map_state
+		initial_state["force_apply"] = true
+		rpc_id(peer_id, "rpc_state_snapshot", initial_state)
+	if _pending_start_ready_peers.is_empty():
+		if turn_mgr != null and turn_mgr.has_method("start_game"):
+			turn_mgr.start_game()
+
+@rpc("any_peer", "reliable")
+func rpc_client_start_ready() -> void:
+	if _ignore_rpc_in_replay():
+		return
+	var mp = get_tree().get_multiplayer()
+	if mp == null or not mp.is_server():
+		return
+	var sender = multiplayer.get_remote_sender_id()
+	_pending_start_ready_peers.erase(sender)
+	if _pending_start_ready_peers.is_empty():
+		if turn_mgr != null and turn_mgr.has_method("start_game"):
+			turn_mgr.start_game()
 
 @rpc("any_peer", "reliable")
 func rpc_game_over(player_id: String) -> void:
