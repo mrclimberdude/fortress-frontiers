@@ -61,6 +61,11 @@ func _set_base_tile_for_fog(cell: Vector2i, pid: String) -> void:
 	var tint = ground
 	var is_camp = cell in tm.camps["basic"]
 	var is_dragon = cell in tm.camps["dragon"]
+	var is_base = false
+	for player in _get_player_ids():
+		if tm.base_positions.get(player, Vector2i(-9999, -9999)) == cell:
+			is_base = true
+			break
 	if is_camp or is_dragon:
 		if pid in ["", "neutral", "camp", "dragon"]:
 			var camp_key = "dragon" if is_dragon else "camp"
@@ -68,7 +73,7 @@ func _set_base_tile_for_fog(cell: Vector2i, pid: String) -> void:
 		else:
 			tint = hex_map.player_atlas_tiles.get(pid, ground)
 	elif cell in tm.structure_positions:
-		tint = hex_map.structure_atlas_tiles.get(pid, ground)
+		tint = hex_map.player_atlas_tiles.get(pid, ground) if is_base else hex_map.structure_atlas_tiles.get(pid, ground)
 		for player in tm.mines.keys():
 			if cell in tm.mines.get(player, []):
 				tint = hex_map.structure_atlas_tiles.get(player, ground)

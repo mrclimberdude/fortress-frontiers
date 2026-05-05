@@ -90,7 +90,7 @@ func _update_owner_overlay() -> void:
 	if map_layer == null:
 		owner_overlay.visible = false
 		return
-	if player_id == "neutral" or is_base or (is_tower and not is_spawn_tower):
+	if player_id == "neutral" or (is_tower and not is_spawn_tower):
 		owner_overlay.visible = false
 		return
 	if not map_layer.player_atlas_tiles.has(player_id):

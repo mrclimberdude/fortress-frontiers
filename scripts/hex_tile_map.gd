@@ -14,15 +14,15 @@ var valid_cells := {}
 # Coloring API you already have:
 var ground_tile: Vector2i = Vector2i(2, 0)
 var player_atlas_tiles := {
-	"player1": Vector2i(0, 1),
-	"player2": Vector2i(2, 2),
-	"player3": Vector2i(5, 1)
+	"player1": Vector2i(1, 3),
+	"player2": Vector2i(3, 3),
+	"player3": Vector2i(3, 2)
 }
 var structure_atlas_tiles:= {
 	"unclaimed": Vector2i(1,1),
 	"player1": Vector2i(1, 3),
 	"player2": Vector2i(3, 3),
-	"player3": Vector2i(5, 2)
+	"player3": Vector2i(3, 2)
 }
 var camp_atlas_tiles := {
 	"camp": Vector2i(1, 2),
@@ -87,6 +87,11 @@ func set_player_tile(pos: Vector2i, pid: String) -> void:
 		return
 	var is_camp = pos in $"../..".camps["basic"]
 	var is_dragon = pos in $"../..".camps["dragon"]
+	var is_base = false
+	for player in _get_player_ids():
+		if $"../..".base_positions.get(player, Vector2i(-9999, -9999)) == pos:
+			is_base = true
+			break
 	if is_camp or is_dragon:
 		if pid in ["", "neutral", "camp", "dragon"]:
 			var camp_key = "dragon" if is_dragon else "camp"
@@ -94,7 +99,7 @@ func set_player_tile(pos: Vector2i, pid: String) -> void:
 		else:
 			tint = player_atlas_tiles.get(pid, ground_tile)
 	elif pos in structure_tiles:
-		tint = structure_atlas_tiles.get(pid, ground_tile)
+		tint = player_atlas_tiles.get(pid, ground_tile) if is_base else structure_atlas_tiles.get(pid, ground_tile)
 		for player in $"../..".mines.keys():
 			if pos in $"../..".mines.get(player, []):
 				tint = structure_atlas_tiles.get(player, ground_tile)
