@@ -83,6 +83,8 @@ var dev_panel_minimized_size: Vector2 = Vector2(420, 28)
 var dev_health_dialog: ConfirmationDialog = null
 var dev_health_input: LineEdit = null
 var dev_health_target_unit_id: int = -1
+var host_player_count_dialog: ConfirmationDialog = null
+var host_player_count_spinbox: SpinBox = null
 
 const DEV_TOOL_SELECT: int = 0
 const DEV_TOOL_SPAWN: int = 1
@@ -320,6 +322,7 @@ func _ready():
 					Callable(self, "_on_map_selection_changed"))
 	_init_map_select()
 	_init_proc_custom_panel()
+	_init_host_player_count_dialog()
 	_show_main_menu()
 	if keep_logs_game_over_check != null and not keep_logs_game_over_check.is_connected("toggled", Callable(self, "_on_keep_logs_toggled")):
 		keep_logs_game_over_check.connect("toggled", Callable(self, "_on_keep_logs_toggled"))
@@ -797,6 +800,33 @@ func _init_proc_custom_panel() -> void:
 		proc_custom_apply.connect("pressed", Callable(self, "_on_proc_custom_apply_pressed"))
 	if proc_custom_close != null and not proc_custom_close.is_connected("pressed", Callable(self, "_on_proc_custom_close_pressed")):
 		proc_custom_close.connect("pressed", Callable(self, "_on_proc_custom_close_pressed"))
+
+func _init_host_player_count_dialog() -> void:
+	if host_player_count_dialog != null:
+		return
+	host_player_count_dialog = ConfirmationDialog.new()
+	host_player_count_dialog.title = "Host Game"
+	host_player_count_dialog.min_size = Vector2i(320, 0)
+	host_player_count_dialog.initial_position = Window.WINDOW_INITIAL_POSITION_CENTER_MAIN_WINDOW_SCREEN
+	host_player_count_dialog.ok_button_text = "Open Lobby"
+	host_player_count_dialog.cancel_button_text = "Cancel"
+	add_child(host_player_count_dialog)
+	var content = VBoxContainer.new()
+	content.custom_minimum_size = Vector2(260, 0)
+	host_player_count_dialog.add_child(content)
+	var label = Label.new()
+	label.text = "How many players?"
+	content.add_child(label)
+	host_player_count_spinbox = SpinBox.new()
+	host_player_count_spinbox.min_value = 2
+	host_player_count_spinbox.max_value = NetworkManager.MAX_PLAYERS
+	host_player_count_spinbox.step = 1
+	host_player_count_spinbox.rounded = true
+	host_player_count_spinbox.value = 2
+	host_player_count_spinbox.custom_minimum_size = Vector2(120, 0)
+	content.add_child(host_player_count_spinbox)
+	if not host_player_count_dialog.is_connected("confirmed", Callable(self, "_on_host_player_count_confirmed")):
+		host_player_count_dialog.connect("confirmed", Callable(self, "_on_host_player_count_confirmed"))
 
 func _get_procedural_map_data() -> MapData:
 	if turn_mgr == null:
@@ -3248,6 +3278,12 @@ func _on_game_started() -> void:
 	_reset_replay_name_inputs()
 
 func _on_host_pressed():
+	if host_player_count_spinbox != null:
+		host_player_count_spinbox.value = 2
+	if host_player_count_dialog != null:
+		host_player_count_dialog.popup_centered()
+
+func _on_host_player_count_confirmed() -> void:
 	var username = ""
 	if username_edit != null:
 		username = username_edit.text.strip_edges()
@@ -3260,8 +3296,11 @@ func _on_host_pressed():
 		turn_mgr.current_map_index = -1
 		turn_mgr._reset_map_state()
 	var port = $"PortLineEdit".text.strip_edges()
+	var slot_count = 2
+	if host_player_count_spinbox != null:
+		slot_count = int(host_player_count_spinbox.value)
 	_save_connection_settings($"IPLineEdit".text.strip_edges(), port)
-	NetworkManager.host_game(int(port))
+	NetworkManager.host_game(int(port), slot_count)
 	_show_lobby(true)
 
 func _on_join_pressed():

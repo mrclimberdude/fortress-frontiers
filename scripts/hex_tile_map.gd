@@ -16,13 +16,19 @@ var ground_tile: Vector2i = Vector2i(2, 0)
 var player_atlas_tiles := {
 	"player1": Vector2i(1, 3),
 	"player2": Vector2i(3, 3),
-	"player3": Vector2i(3, 2)
+	"player3": Vector2i(3, 2),
+	"player4": Vector2i(3, 1),
+	"player5": Vector2i(0, 3),
+	"player6": Vector2i(2, 1)
 }
 var structure_atlas_tiles:= {
 	"unclaimed": Vector2i(1,1),
 	"player1": Vector2i(1, 3),
 	"player2": Vector2i(3, 3),
-	"player3": Vector2i(3, 2)
+	"player3": Vector2i(3, 2),
+	"player4": Vector2i(3, 1),
+	"player5": Vector2i(0, 3),
+	"player6": Vector2i(2, 1)
 }
 var camp_atlas_tiles := {
 	"camp": Vector2i(1, 2),

@@ -247,12 +247,13 @@ func _assign_peer_to_slot(peer_id: int, username: String) -> void:
 	var mp_local = get_tree().get_multiplayer()
 	if mp_local != null and mp_local.multiplayer_peer != null:
 		mp_local.multiplayer_peer.disconnect_peer(peer_id)
-func host_game(port: int) -> void:
+func host_game(port: int, initial_slot_count: int = 2) -> void:
 	#print("NetworkManager.host_game called with port:", port)
 	var peer = ENetMultiplayerPeer.new()
 	peer.create_server(port, MAX_PLAYERS - 1)
 	get_tree().get_multiplayer().multiplayer_peer = peer
 	server_peer_id = get_tree().get_multiplayer().get_unique_id()
+	lobby_slot_count = int(clamp(initial_slot_count, 2, MAX_PLAYERS))
 	_init_lobby_slots()
 	print("Hosting game on port %d" % port)
 

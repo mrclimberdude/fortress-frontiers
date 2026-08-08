@@ -47,8 +47,14 @@ static func _cube_neighbors(cell: Vector3i) -> Array:
 static func _rotate_cube_120(cell: Vector3i) -> Vector3i:
 	return Vector3i(cell.y, cell.z, cell.x)
 
+static func _rotate_cube_60(cell: Vector3i) -> Vector3i:
+	return Vector3i(-cell.z, -cell.x, -cell.y)
+
 static func _rotate_cube_240(cell: Vector3i) -> Vector3i:
 	return Vector3i(cell.z, cell.x, cell.y)
+
+static func _rotate_cube_300(cell: Vector3i) -> Vector3i:
+	return Vector3i(-cell.y, -cell.z, -cell.x)
 
 static func _cube_orbit3(cell: Vector3i) -> Array:
 	var orbit := [cell]
@@ -156,6 +162,73 @@ static func _three_player_hex_towers(player_ids: Array, base_cubes: Dictionary, 
 			towers[bottom_left_player].append(bottom_left)
 	return towers
 
+static func _cube_rotate_steps(cell: Vector3i, steps: int) -> Vector3i:
+	var normalized = int(posmod(steps, 6))
+	var rotated = cell
+	for _i in range(normalized):
+		rotated = _rotate_cube_60(rotated)
+	return rotated
+
+static func _six_side_center_cubes(radius: int) -> Array:
+	var half_low = int(floor(float(radius) * 0.5))
+	var half_high = radius - half_low
+	var top = Vector3i(half_low, half_high, -radius)
+	var sides := []
+	for i in range(6):
+		sides.append(_cube_rotate_steps(top, i))
+	return sides
+
+static func _four_player_hex_bases(player_ids: Array, radius: int) -> Dictionary:
+	var sides = _six_side_center_cubes(radius)
+	var bases := {}
+	var side_indices = [4, 0, 1, 3]
+	for i in range(min(player_ids.size(), side_indices.size())):
+		var idx = side_indices[i]
+		if idx >= 0 and idx < sides.size():
+			bases[player_ids[i]] = sides[idx]
+	return bases
+
+static func _four_player_hex_towers(player_ids: Array, bounds_set_cube: Dictionary, radius: int) -> Dictionary:
+	var towers := {}
+	for player_id in player_ids:
+		towers[player_id] = []
+	var top_pattern = _three_player_top_tower_pattern(radius)
+	var side_steps = [4, 0, 1, 3]
+	for i in range(min(player_ids.size(), side_steps.size())):
+		var player_id = player_ids[i]
+		var step = side_steps[i]
+		for cube in top_pattern:
+			var rotated = _cube_rotate_steps(cube, step)
+			if bounds_set_cube.has(rotated):
+				towers[player_id].append(rotated)
+	return towers
+
+static func _six_player_side_steps() -> Array:
+	return [4, 5, 0, 1, 2, 3]
+
+static func _multi_side_hex_bases(player_ids: Array, radius: int, side_steps: Array) -> Dictionary:
+	var sides = _six_side_center_cubes(radius)
+	var bases := {}
+	for i in range(min(player_ids.size(), side_steps.size())):
+		var idx = int(side_steps[i])
+		if idx >= 0 and idx < sides.size():
+			bases[player_ids[i]] = sides[idx]
+	return bases
+
+static func _multi_side_hex_towers(player_ids: Array, bounds_set_cube: Dictionary, radius: int, side_steps: Array) -> Dictionary:
+	var towers := {}
+	for player_id in player_ids:
+		towers[player_id] = []
+	var top_pattern = _three_player_top_tower_pattern(radius)
+	for i in range(min(player_ids.size(), side_steps.size())):
+		var player_id = player_ids[i]
+		var step = int(side_steps[i])
+		for cube in top_pattern:
+			var rotated = _cube_rotate_steps(cube, step)
+			if bounds_set_cube.has(rotated):
+				towers[player_id].append(rotated)
+	return towers
+
 static func _cube_refs_from_structures(base_cubes: Dictionary, tower_cubes: Dictionary) -> Array:
 	var refs := []
 	for pid in base_cubes.keys():
@@ -164,6 +237,258 @@ static func _cube_refs_from_structures(base_cubes: Dictionary, tower_cubes: Dict
 		for cell in tower_cubes[pid]:
 			refs.append(cell)
 	return refs
+
+static func _reflect_cube_swap_xz(cell: Vector3i) -> Vector3i:
+	return Vector3i(cell.z, cell.y, cell.x)
+
+static func _cube_orbit4(cell: Vector3i) -> Array:
+	var orbit := []
+	var candidates = [
+		cell,
+		_reflect_cube_swap_xz(cell),
+		Vector3i(-cell.x, -cell.y, -cell.z),
+		_reflect_cube_swap_xz(Vector3i(-cell.x, -cell.y, -cell.z))
+	]
+	for candidate in candidates:
+		if not orbit.has(candidate):
+			orbit.append(candidate)
+	return orbit
+
+static func _cube_orbit4_score(orbit: Array, refs: Array) -> float:
+	var score = 0.0
+	for cell in orbit:
+		score += _cube_repulsion_score(cell, refs)
+	return score
+
+static func _cube_orbit4_key(orbit: Array) -> String:
+	return _cube_orbit_key(orbit)
+
+static func _cube_orbit6(cell: Vector3i) -> Array:
+	var orbit := []
+	for i in range(6):
+		var rotated = _cube_rotate_steps(cell, i)
+		if not orbit.has(rotated):
+			orbit.append(rotated)
+	return orbit
+
+static func _orbit4_is_valid(orbit: Array, bounds_set_cube: Dictionary, blocked: Dictionary, rules: Array = [], require_full: bool = true, min_ring: int = -1, max_ring: int = -1) -> bool:
+	if require_full and orbit.size() != 4:
+		return false
+	for orbit_cell in orbit:
+		if not bounds_set_cube.has(orbit_cell):
+			return false
+		if blocked.has(orbit_cell):
+			return false
+		var ring = _cube_ring_distance(orbit_cell)
+		if min_ring >= 0 and ring < min_ring:
+			return false
+		if max_ring >= 0 and ring > max_ring:
+			return false
+		if not _cube_meets_distance_rules(orbit_cell, rules):
+			return false
+	return not orbit.is_empty()
+
+static func _pick_rotational_orbit4(bounds_cubes: Array, bounds_set_cube: Dictionary, blocked: Dictionary, rng: RandomNumberGenerator, max_tries: int, rules: Array = [], score_refs: Array = [], require_full: bool = true, min_ring: int = -1, max_ring: int = -1) -> Array:
+	var best_orbit: Array = []
+	var best_score = INF
+	var seen := {}
+	for _i in range(max_tries):
+		if bounds_cubes.is_empty():
+			break
+		var cell: Vector3i = bounds_cubes[rng.randi_range(0, bounds_cubes.size() - 1)]
+		var orbit = _cube_orbit4(cell)
+		var orbit_key = _cube_orbit4_key(orbit)
+		if seen.has(orbit_key):
+			continue
+		seen[orbit_key] = true
+		if not _orbit4_is_valid(orbit, bounds_set_cube, blocked, rules, require_full, min_ring, max_ring):
+			continue
+		if score_refs.is_empty():
+			return orbit
+		var score = _cube_orbit4_score(orbit, score_refs)
+		if score < best_score:
+			best_score = score
+			best_orbit = orbit
+	return best_orbit
+
+static func _place_rotational_tiles4(count: int, bounds_cubes: Array, bounds_set_cube: Dictionary, blocked: Dictionary, rng: RandomNumberGenerator, max_tries: int, rules: Array = [], score_refs: Array = [], min_ring: int = -1, max_ring: int = -1) -> Array:
+	var placed := []
+	var remaining = count
+	while remaining >= 4:
+		var orbit = _pick_rotational_orbit4(bounds_cubes, bounds_set_cube, blocked, rng, max_tries, rules, score_refs + placed, true, min_ring, max_ring)
+		if orbit.is_empty():
+			break
+		for cell in orbit:
+			placed.append(cell)
+			blocked[cell] = true
+		remaining -= orbit.size()
+	return placed
+
+static func _grow_rotational_cluster4(seed_orbit: Array, bounds_set_cube: Dictionary, blocked: Dictionary, rng: RandomNumberGenerator, rules: Array, max_orbits: int, score_refs: Array = [], min_ring: int = -1, max_ring: int = -1) -> Array:
+	var cluster := []
+	if seed_orbit.is_empty() or max_orbits <= 0:
+		return cluster
+	var frontier: Array = seed_orbit.duplicate()
+	var seen_orbits := {}
+	var orbits_added = 0
+	while not frontier.is_empty() and orbits_added < max_orbits:
+		var best_idx = -1
+		var best_orbit: Array = []
+		var best_orbit_key = ""
+		var best_score = INF
+		for idx in range(frontier.size()):
+			var cell: Vector3i = frontier[idx]
+			var orbit = _cube_orbit4(cell)
+			var orbit_key = _cube_orbit4_key(orbit)
+			if seen_orbits.has(orbit_key):
+				continue
+			if not _orbit4_is_valid(orbit, bounds_set_cube, blocked, rules, true, min_ring, max_ring):
+				seen_orbits[orbit_key] = true
+				continue
+			var score = _cube_orbit4_score(orbit, score_refs + cluster)
+			if score < best_score:
+				best_score = score
+				best_idx = idx
+				best_orbit = orbit
+				best_orbit_key = orbit_key
+		if best_idx < 0 or best_orbit.is_empty():
+			break
+		frontier.remove_at(best_idx)
+		seen_orbits[best_orbit_key] = true
+		for orbit_cell in best_orbit:
+			cluster.append(orbit_cell)
+			blocked[orbit_cell] = true
+			for neighbor in _cube_neighbors(orbit_cell):
+				frontier.append(neighbor)
+		orbits_added += 1
+	return cluster
+
+static func _generate_clustered_rotational_tiles4(target: int, bounds_cubes: Array, bounds_set_cube: Dictionary, blocked: Dictionary, rng: RandomNumberGenerator, max_tries: int, rules: Array = [], score_refs: Array = [], cluster_orbit_min: int = 1, cluster_orbit_max: int = 2, min_ring: int = -1, max_ring: int = -1) -> Array:
+	var placed := []
+	var remaining = target
+	while remaining >= 4:
+		var seed_orbit = _pick_rotational_orbit4(bounds_cubes, bounds_set_cube, blocked, rng, max_tries, rules, score_refs + placed, true, min_ring, max_ring)
+		if seed_orbit.is_empty():
+			break
+		var orbit_limit = min(int(remaining / 4), rng.randi_range(cluster_orbit_min, cluster_orbit_max))
+		var cluster = _grow_rotational_cluster4(seed_orbit, bounds_set_cube, blocked, rng, rules, orbit_limit, score_refs + placed, min_ring, max_ring)
+		if cluster.is_empty():
+			break
+		for cell in cluster:
+			placed.append(cell)
+		remaining -= cluster.size()
+	return placed
+
+static func _cube_orbit6_score(orbit: Array, refs: Array) -> float:
+	return _cube_orbit_score(orbit, refs)
+
+static func _orbit6_is_valid(orbit: Array, bounds_set_cube: Dictionary, blocked: Dictionary, rules: Array = [], require_full: bool = true, min_ring: int = -1, max_ring: int = -1) -> bool:
+	if require_full and orbit.size() != 6:
+		return false
+	for orbit_cell in orbit:
+		if not bounds_set_cube.has(orbit_cell):
+			return false
+		if blocked.has(orbit_cell):
+			return false
+		var ring = _cube_ring_distance(orbit_cell)
+		if min_ring >= 0 and ring < min_ring:
+			return false
+		if max_ring >= 0 and ring > max_ring:
+			return false
+		if not _cube_meets_distance_rules(orbit_cell, rules):
+			return false
+	return not orbit.is_empty()
+
+static func _pick_rotational_orbit6(bounds_cubes: Array, bounds_set_cube: Dictionary, blocked: Dictionary, rng: RandomNumberGenerator, max_tries: int, rules: Array = [], score_refs: Array = [], require_full: bool = true, min_ring: int = -1, max_ring: int = -1) -> Array:
+	var best_orbit: Array = []
+	var best_score = INF
+	var seen := {}
+	for _i in range(max_tries):
+		if bounds_cubes.is_empty():
+			break
+		var cell: Vector3i = bounds_cubes[rng.randi_range(0, bounds_cubes.size() - 1)]
+		var orbit = _cube_orbit6(cell)
+		var orbit_key = _cube_orbit_key(orbit)
+		if seen.has(orbit_key):
+			continue
+		seen[orbit_key] = true
+		if not _orbit6_is_valid(orbit, bounds_set_cube, blocked, rules, require_full, min_ring, max_ring):
+			continue
+		if score_refs.is_empty():
+			return orbit
+		var score = _cube_orbit6_score(orbit, score_refs)
+		if score < best_score:
+			best_score = score
+			best_orbit = orbit
+	return best_orbit
+
+static func _place_rotational_tiles6(count: int, bounds_cubes: Array, bounds_set_cube: Dictionary, blocked: Dictionary, rng: RandomNumberGenerator, max_tries: int, rules: Array = [], score_refs: Array = [], min_ring: int = -1, max_ring: int = -1) -> Array:
+	var placed := []
+	var remaining = count
+	while remaining >= 6:
+		var orbit = _pick_rotational_orbit6(bounds_cubes, bounds_set_cube, blocked, rng, max_tries, rules, score_refs + placed, true, min_ring, max_ring)
+		if orbit.is_empty():
+			break
+		for cell in orbit:
+			placed.append(cell)
+			blocked[cell] = true
+		remaining -= orbit.size()
+	return placed
+
+static func _grow_rotational_cluster6(seed_orbit: Array, bounds_set_cube: Dictionary, blocked: Dictionary, rng: RandomNumberGenerator, rules: Array, max_orbits: int, score_refs: Array = [], min_ring: int = -1, max_ring: int = -1) -> Array:
+	var cluster := []
+	if seed_orbit.is_empty() or max_orbits <= 0:
+		return cluster
+	var frontier: Array = seed_orbit.duplicate()
+	var seen_orbits := {}
+	var orbits_added = 0
+	while not frontier.is_empty() and orbits_added < max_orbits:
+		var best_idx = -1
+		var best_orbit: Array = []
+		var best_orbit_key = ""
+		var best_score = INF
+		for idx in range(frontier.size()):
+			var cell: Vector3i = frontier[idx]
+			var orbit = _cube_orbit6(cell)
+			var orbit_key = _cube_orbit_key(orbit)
+			if seen_orbits.has(orbit_key):
+				continue
+			if not _orbit6_is_valid(orbit, bounds_set_cube, blocked, rules, true, min_ring, max_ring):
+				seen_orbits[orbit_key] = true
+				continue
+			var score = _cube_orbit6_score(orbit, score_refs + cluster)
+			if score < best_score:
+				best_score = score
+				best_idx = idx
+				best_orbit = orbit
+				best_orbit_key = orbit_key
+		if best_idx < 0 or best_orbit.is_empty():
+			break
+		frontier.remove_at(best_idx)
+		seen_orbits[best_orbit_key] = true
+		for orbit_cell in best_orbit:
+			cluster.append(orbit_cell)
+			blocked[orbit_cell] = true
+			for neighbor in _cube_neighbors(orbit_cell):
+				frontier.append(neighbor)
+		orbits_added += 1
+	return cluster
+
+static func _generate_clustered_rotational_tiles6(target: int, bounds_cubes: Array, bounds_set_cube: Dictionary, blocked: Dictionary, rng: RandomNumberGenerator, max_tries: int, rules: Array = [], score_refs: Array = [], cluster_orbit_min: int = 1, cluster_orbit_max: int = 2, min_ring: int = -1, max_ring: int = -1) -> Array:
+	var placed := []
+	var remaining = target
+	while remaining >= 6:
+		var seed_orbit = _pick_rotational_orbit6(bounds_cubes, bounds_set_cube, blocked, rng, max_tries, rules, score_refs + placed, true, min_ring, max_ring)
+		if seed_orbit.is_empty():
+			break
+		var orbit_limit = min(int(remaining / 6), rng.randi_range(cluster_orbit_min, cluster_orbit_max))
+		var cluster = _grow_rotational_cluster6(seed_orbit, bounds_set_cube, blocked, rng, rules, orbit_limit, score_refs + placed, min_ring, max_ring)
+		if cluster.is_empty():
+			break
+		for cell in cluster:
+			placed.append(cell)
+		remaining -= cluster.size()
+	return placed
 
 static func _cube_meets_min_distance(cell: Vector3i, refs: Array, min_dist: int) -> bool:
 	if min_dist <= 0 or refs.is_empty():
@@ -911,6 +1236,349 @@ static func _generate_hex_3p(md: MapData, rng: RandomNumberGenerator, player_ids
 		}
 	}
 
+static func _generate_hex_4p(md: MapData, rng: RandomNumberGenerator, player_ids: Array, size_tag: String) -> Dictionary:
+	var radius = _default_hex_radius(md, size_tag)
+	var geom = _build_hex_geometry(radius)
+	var bounds_cubes: Array = geom["bounds_cubes"]
+	var cube_to_cell: Dictionary = geom["cube_to_cell"]
+	var bounds = geom["bounds"]
+	var bounds_set_cube := {}
+	for cube in bounds_cubes:
+		bounds_set_cube[cube] = true
+	var base_cubes = _four_player_hex_bases(player_ids, radius)
+	var tower_cubes = _four_player_hex_towers(player_ids, bounds_set_cube, radius)
+	var structure_refs = _cube_refs_from_structures(base_cubes, tower_cubes)
+	var blocked_neutral := {}
+	for cell in structure_refs:
+		blocked_neutral[cell] = true
+
+	var area = bounds.size()
+	var mine_count = int(md.proc_mine_count)
+	var camp_count = int(md.proc_camp_count)
+	var dragon_count = int(md.proc_dragon_count)
+	if mine_count <= 0:
+		mine_count = max(4, int(area / 150))
+	if camp_count <= 0:
+		camp_count = max(4, int(area / 175))
+	if dragon_count <= 0:
+		dragon_count = max(4, int(area / 420))
+	mine_count = _quantize_orbit_count(mine_count, 4)
+	camp_count = _quantize_orbit_count(camp_count, 4)
+	dragon_count = _quantize_orbit_count(dragon_count, 4)
+	var inner_ring = max(3, int(round(float(radius) * 0.16)))
+	var neutral_edge_ring = max(inner_ring + 3, radius - 4)
+	var terrain_edge_ring = radius
+
+	var mines_cube = _place_rotational_tiles4(
+		mine_count,
+		bounds_cubes,
+		bounds_set_cube,
+		blocked_neutral,
+		rng,
+		350,
+		[{"refs": structure_refs, "min_dist": 4}],
+		structure_refs,
+		inner_ring,
+		neutral_edge_ring
+	)
+	var camps_basic_cube = _place_rotational_tiles4(
+		camp_count,
+		bounds_cubes,
+		bounds_set_cube,
+		blocked_neutral,
+		rng,
+		350,
+		[
+			{"refs": structure_refs, "min_dist": 5},
+			{"refs": mines_cube, "min_dist": 3}
+		],
+		mines_cube + structure_refs,
+		inner_ring + 1,
+		neutral_edge_ring
+	)
+	var camps_dragon_cube = _place_rotational_tiles4(
+		dragon_count,
+		bounds_cubes,
+		bounds_set_cube,
+		blocked_neutral,
+		rng,
+		350,
+		[
+			{"refs": structure_refs, "min_dist": 6},
+			{"refs": camps_basic_cube, "min_dist": 4}
+		],
+		camps_basic_cube + structure_refs,
+		inner_ring,
+		max(inner_ring + 3, radius - 6)
+	)
+
+	var forest_ratio = clamp(float(md.proc_forest_ratio), 0.0, 1.0)
+	var mountain_ratio = clamp(float(md.proc_mountain_ratio), 0.0, 1.0)
+	var river_ratio = clamp(float(md.proc_river_ratio), 0.0, 1.0)
+	var lake_ratio = clamp(float(md.proc_lake_ratio), 0.0, 1.0)
+	var total_ratio = forest_ratio + mountain_ratio + river_ratio + lake_ratio
+	if total_ratio > 0.65:
+		var scale = 0.65 / total_ratio
+		forest_ratio *= scale
+		mountain_ratio *= scale
+		river_ratio *= scale
+		lake_ratio *= scale
+	var forest_target = _quantize_orbit_count(int(round(float(area) * forest_ratio)), 4)
+	var mountain_target = _quantize_orbit_count(int(round(float(area) * mountain_ratio)), 4)
+	var river_target = _quantize_orbit_count(int(round(float(area) * river_ratio * 0.42)), 4)
+	var lake_target = _quantize_orbit_count(int(round(float(area) * lake_ratio)), 4)
+	var terrain_blocked = blocked_neutral.duplicate(true)
+	var terrain_cells := {
+		TERRAIN_FOREST: _generate_clustered_rotational_tiles4(
+			forest_target,
+			bounds_cubes,
+			bounds_set_cube,
+			terrain_blocked,
+			rng,
+			450,
+			[{"refs": structure_refs, "min_dist": 2}],
+			[],
+			1,
+			2,
+			max(1, inner_ring - 1),
+			terrain_edge_ring
+		),
+		TERRAIN_MOUNTAIN: _generate_clustered_rotational_tiles4(
+			mountain_target,
+			bounds_cubes,
+			bounds_set_cube,
+			terrain_blocked,
+			rng,
+			450,
+			[{"refs": structure_refs, "min_dist": 3}],
+			[],
+			1,
+			2,
+			inner_ring,
+			terrain_edge_ring
+		),
+		TERRAIN_RIVER: _generate_clustered_rotational_tiles4(
+			river_target,
+			bounds_cubes,
+			bounds_set_cube,
+			terrain_blocked,
+			rng,
+			450,
+			[{"refs": structure_refs, "min_dist": 3}],
+			[],
+			2,
+			4,
+			inner_ring,
+			terrain_edge_ring
+		),
+		TERRAIN_LAKE: _generate_clustered_rotational_tiles4(
+			lake_target,
+			bounds_cubes,
+			bounds_set_cube,
+			terrain_blocked,
+			rng,
+			450,
+			[{"refs": structure_refs, "min_dist": 3}],
+			[],
+			1,
+			1,
+			inner_ring,
+			max(inner_ring + 2, radius - 1)
+		)
+	}
+
+	var mine_owners := {"unclaimed": _convert_cube_positions(mines_cube, cube_to_cell)}
+	for pid in player_ids:
+		mine_owners[pid] = []
+	return {
+		"bounds": bounds,
+		"terrain_cells": {
+			TERRAIN_FOREST: _convert_cube_positions(terrain_cells[TERRAIN_FOREST], cube_to_cell),
+			TERRAIN_MOUNTAIN: _convert_cube_positions(terrain_cells[TERRAIN_MOUNTAIN], cube_to_cell),
+			TERRAIN_RIVER: _convert_cube_positions(terrain_cells[TERRAIN_RIVER], cube_to_cell),
+			TERRAIN_LAKE: _convert_cube_positions(terrain_cells[TERRAIN_LAKE], cube_to_cell)
+		},
+		"base_positions": _convert_cube_dict_positions(base_cubes, cube_to_cell),
+		"tower_positions": _convert_cube_dict_positions(tower_cubes, cube_to_cell),
+		"mines": mine_owners,
+		"camps": {
+			"basic": _convert_cube_positions(camps_basic_cube, cube_to_cell),
+			"dragon": _convert_cube_positions(camps_dragon_cube, cube_to_cell)
+		}
+	}
+
+static func _generate_hex_6p_layout(md: MapData, rng: RandomNumberGenerator, player_ids: Array, size_tag: String) -> Dictionary:
+	var radius = _default_hex_radius(md, size_tag) + 2
+	var geom = _build_hex_geometry(radius)
+	var bounds_cubes: Array = geom["bounds_cubes"]
+	var cube_to_cell: Dictionary = geom["cube_to_cell"]
+	var bounds = geom["bounds"]
+	var bounds_set_cube := {}
+	for cube in bounds_cubes:
+		bounds_set_cube[cube] = true
+	var side_steps = _six_player_side_steps()
+	var base_cubes = _multi_side_hex_bases(player_ids, radius, side_steps)
+	var tower_cubes = _multi_side_hex_towers(player_ids, bounds_set_cube, radius, side_steps)
+	var structure_refs = _cube_refs_from_structures(base_cubes, tower_cubes)
+	var blocked_neutral := {}
+	for cell in structure_refs:
+		blocked_neutral[cell] = true
+
+	var area = bounds.size()
+	var mine_count = int(md.proc_mine_count)
+	var camp_count = int(md.proc_camp_count)
+	var dragon_count = int(md.proc_dragon_count)
+	if mine_count <= 0:
+		mine_count = max(6, int(area / 165))
+	if camp_count <= 0:
+		camp_count = max(6, int(area / 195))
+	if dragon_count <= 0:
+		dragon_count = max(6, int(area / 520))
+	mine_count = _quantize_orbit_count(mine_count, 6)
+	camp_count = _quantize_orbit_count(camp_count, 6)
+	dragon_count = _quantize_orbit_count(dragon_count, 6)
+	var inner_ring = max(4, int(round(float(radius) * 0.18)))
+	var neutral_edge_ring = max(inner_ring + 3, radius - 4)
+	var terrain_edge_ring = radius
+
+	var mines_cube = _place_rotational_tiles6(
+		mine_count,
+		bounds_cubes,
+		bounds_set_cube,
+		blocked_neutral,
+		rng,
+		500,
+		[{"refs": structure_refs, "min_dist": 4}],
+		structure_refs,
+		inner_ring,
+		neutral_edge_ring
+	)
+	var camps_basic_cube = _place_rotational_tiles6(
+		camp_count,
+		bounds_cubes,
+		bounds_set_cube,
+		blocked_neutral,
+		rng,
+		500,
+		[
+			{"refs": structure_refs, "min_dist": 5},
+			{"refs": mines_cube, "min_dist": 3}
+		],
+		mines_cube + structure_refs,
+		inner_ring + 1,
+		neutral_edge_ring
+	)
+	var camps_dragon_cube = _place_rotational_tiles6(
+		dragon_count,
+		bounds_cubes,
+		bounds_set_cube,
+		blocked_neutral,
+		rng,
+		500,
+		[
+			{"refs": structure_refs, "min_dist": 6},
+			{"refs": camps_basic_cube, "min_dist": 4}
+		],
+		camps_basic_cube + structure_refs,
+		inner_ring,
+		max(inner_ring + 3, radius - 6)
+	)
+
+	var forest_ratio = clamp(float(md.proc_forest_ratio), 0.0, 1.0)
+	var mountain_ratio = clamp(float(md.proc_mountain_ratio), 0.0, 1.0)
+	var river_ratio = clamp(float(md.proc_river_ratio), 0.0, 1.0)
+	var lake_ratio = clamp(float(md.proc_lake_ratio), 0.0, 1.0)
+	var total_ratio = forest_ratio + mountain_ratio + river_ratio + lake_ratio
+	if total_ratio > 0.65:
+		var scale = 0.65 / total_ratio
+		forest_ratio *= scale
+		mountain_ratio *= scale
+		river_ratio *= scale
+		lake_ratio *= scale
+	var forest_target = _quantize_orbit_count(int(round(float(area) * forest_ratio)), 6)
+	var mountain_target = _quantize_orbit_count(int(round(float(area) * mountain_ratio)), 6)
+	var river_target = _quantize_orbit_count(int(round(float(area) * river_ratio * 0.38)), 6)
+	var lake_target = _quantize_orbit_count(int(round(float(area) * lake_ratio)), 6)
+	var terrain_blocked = blocked_neutral.duplicate(true)
+	var terrain_cells := {
+		TERRAIN_FOREST: _generate_clustered_rotational_tiles6(
+			forest_target,
+			bounds_cubes,
+			bounds_set_cube,
+			terrain_blocked,
+			rng,
+			550,
+			[{"refs": structure_refs, "min_dist": 2}],
+			[],
+			1,
+			2,
+			max(1, inner_ring - 1),
+			terrain_edge_ring
+		),
+		TERRAIN_MOUNTAIN: _generate_clustered_rotational_tiles6(
+			mountain_target,
+			bounds_cubes,
+			bounds_set_cube,
+			terrain_blocked,
+			rng,
+			550,
+			[{"refs": structure_refs, "min_dist": 3}],
+			[],
+			1,
+			2,
+			inner_ring,
+			terrain_edge_ring
+		),
+		TERRAIN_RIVER: _generate_clustered_rotational_tiles6(
+			river_target,
+			bounds_cubes,
+			bounds_set_cube,
+			terrain_blocked,
+			rng,
+			550,
+			[{"refs": structure_refs, "min_dist": 3}],
+			[],
+			2,
+			4,
+			inner_ring,
+			terrain_edge_ring
+		),
+		TERRAIN_LAKE: _generate_clustered_rotational_tiles6(
+			lake_target,
+			bounds_cubes,
+			bounds_set_cube,
+			terrain_blocked,
+			rng,
+			550,
+			[{"refs": structure_refs, "min_dist": 3}],
+			[],
+			1,
+			1,
+			inner_ring,
+			max(inner_ring + 2, radius - 1)
+		)
+	}
+
+	var mine_owners := {"unclaimed": _convert_cube_positions(mines_cube, cube_to_cell)}
+	for pid in player_ids:
+		mine_owners[pid] = []
+	return {
+		"bounds": bounds,
+		"terrain_cells": {
+			TERRAIN_FOREST: _convert_cube_positions(terrain_cells[TERRAIN_FOREST], cube_to_cell),
+			TERRAIN_MOUNTAIN: _convert_cube_positions(terrain_cells[TERRAIN_MOUNTAIN], cube_to_cell),
+			TERRAIN_RIVER: _convert_cube_positions(terrain_cells[TERRAIN_RIVER], cube_to_cell),
+			TERRAIN_LAKE: _convert_cube_positions(terrain_cells[TERRAIN_LAKE], cube_to_cell)
+		},
+		"base_positions": _convert_cube_dict_positions(base_cubes, cube_to_cell),
+		"tower_positions": _convert_cube_dict_positions(tower_cubes, cube_to_cell),
+		"mines": mine_owners,
+		"camps": {
+			"basic": _convert_cube_positions(camps_basic_cube, cube_to_cell),
+			"dragon": _convert_cube_positions(camps_dragon_cube, cube_to_cell)
+		}
+	}
+
 static func generate(md: MapData, rng: RandomNumberGenerator, player_ids: Array = []) -> Dictionary:
 	if player_ids.is_empty():
 		player_ids = _default_player_ids(2)
@@ -918,6 +1586,10 @@ static func generate(md: MapData, rng: RandomNumberGenerator, player_ids: Array 
 	var size_tag = str(md.map_size).strip_edges().to_lower()
 	if player_count == 3 and _proc_shape(md) == "hex_3p":
 		return _generate_hex_3p(md, rng, player_ids, size_tag)
+	if player_count == 4:
+		return _generate_hex_4p(md, rng, player_ids, size_tag)
+	if player_count >= 5:
+		return _generate_hex_6p_layout(md, rng, player_ids, size_tag)
 	var columns = int(md.proc_columns)
 	var rows = int(md.proc_rows)
 	if columns <= 0 or rows <= 0:

@@ -6,8 +6,8 @@ var colors := {
 	"player2": Color(1.0, 0.45, 0.45),
 	"player3": Color(0.35, 0.9, 0.45),
 	"player4": Color(0.95, 0.8, 0.3),
-	"player5": Color(0.8, 0.45, 0.95),
-	"player6": Color(0.35, 0.9, 0.9)
+	"player5": Color(0.66, 0.5, 0.92),
+	"player6": Color(0.82, 0.3, 0.66)
 }
 var padding: float = 12.0
 var axis_label_padding: float = 18.0
