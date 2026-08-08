@@ -7,9 +7,13 @@ signal orders_phase_end()
 signal state_applied()
 signal replay_state_changed(turn: int, phase: int)
 signal host_replay_ready_changed(ready: bool)
+signal ui_refresh_requested(kind: String)
+signal damage_log_refresh_requested()
+signal ui_action_requested(action: String, payload: Dictionary)
 
 signal execution_paused(phase)   # emitted after each phase
 signal execution_complete()      # emitted at the end
+signal procedural_prewarm_ready()
 
 enum Phase { UPKEEP, ORDERS, EXECUTION }
 
@@ -29,9 +33,13 @@ enum Phase { UPKEEP, ORDERS, EXECUTION }
 
 const MineScene = preload("res://scenes/GemMine.tscn")
 const MapGenerator = preload("res://scripts/MapGenerator.gd")
+const TurnStateSyncService = preload("res://scripts/turn_state_sync.gd")
+const TurnPersistenceService = preload("res://scripts/turn_persistence.gd")
 
 @export var map_data: Array[Resource] = []
 var terrain_overlay: TileMapLayer
+var _state_sync
+var _persistence
 var rng := RandomNumberGenerator.new()
 var current_map_index: int = -1
 var _procedural_generation_cache: Dictionary = {}
@@ -824,22 +832,16 @@ func stop_replay() -> void:
 func exit_replay_to_game_over() -> void:
 	stop_replay()
 	_set_game_over_controls_visible(true)
-	if $UI != null and $UI.has_method("_exit_replay_mode"):
-		$UI._exit_replay_mode()
-	$UI.visible = false
+	_request_ui_action("exit_replay_mode")
+	_request_ui_action("set_ui_visible", {"visible": false})
 	$GameOver.visible = true
 
 func exit_replay_to_lobby() -> void:
 	stop_replay()
 	if has_node("GameOver"):
 		$GameOver.visible = false
-	if $UI != null and $UI.has_method("_exit_replay_mode"):
-		$UI._exit_replay_mode()
-	if $UI != null and $UI.has_method("_on_cancel_game_pressed"):
-		$UI.visible = true
-		$UI._on_cancel_game_pressed()
-	else:
-		reset_to_lobby()
+	_request_ui_action("exit_replay_mode")
+	_request_ui_action("cancel_game")
 
 func replay_step_forward() -> void:
 	if not replay_mode:
@@ -1376,6 +1378,15 @@ func _is_host() -> bool:
 func is_host() -> bool:
 	return _is_host()
 
+func _request_ui_refresh(kind: String = "all") -> void:
+	emit_signal("ui_refresh_requested", kind)
+
+func _request_damage_log_refresh() -> void:
+	emit_signal("damage_log_refresh_requested")
+
+func _request_ui_action(action: String, payload: Dictionary = {}) -> void:
+	emit_signal("ui_action_requested", action, payload)
+
 func _default_player_ids() -> Array:
 	return ["player1", "player2"]
 
@@ -1473,6 +1484,7 @@ func _run_procedural_prewarm() -> void:
 		_apply_custom_proc_params(md, NetworkManager.custom_proc_params)
 	var players = _prewarm_player_ids()
 	_get_or_build_procedural_map_data(NetworkManager.selected_map_index, md, players)
+	emit_signal("procedural_prewarm_ready")
 
 func _normalize_player_ids(player_ids: Array) -> Array:
 	var result: Array = []
@@ -3388,6 +3400,8 @@ var local_player_id: String
 # Entry point: start the game loop once the scene is ready
 # --------------------------------------------------------
 func _ready():
+	_state_sync = TurnStateSyncService.new(self)
+	_persistence = TurnPersistenceService.new(self)
 	NetworkManager.hex = $GameBoardNode/HexTileMap
 	NetworkManager.turn_mgr = $"."
 	NetworkManager.connect("map_index_received", Callable(self, "_on_map_index_received"))
@@ -3533,155 +3547,22 @@ func _load_map_by_index(map_index: int, apply_generated_content: bool = true) ->
 			$GameBoardNode.set_structure_at(tile, mine)
 
 func _serialize_unit(unit) -> Dictionary:
-	return {
-		"net_id": unit.net_id,
-		"player_id": unit.player_id,
-		"unit_type": unit.unit_type,
-		"grid_pos": unit.grid_pos,
-		"curr_health": unit.curr_health,
-		"max_health": unit.max_health,
-		"is_defending": unit.is_defending,
-		"is_healing": unit.is_healing,
-		"auto_heal": unit.auto_heal,
-		"auto_defend": unit.auto_defend,
-		"auto_lookout": unit.auto_lookout,
-		"auto_build": unit.auto_build,
-		"auto_build_type": unit.auto_build_type,
-		"build_queue": unit.build_queue,
-		"build_queue_type": unit.build_queue_type,
-		"build_queue_last_type": unit.build_queue_last_type,
-		"build_queue_last_target": unit.build_queue_last_target,
-		"build_queue_last_build_left": unit.build_queue_last_build_left,
-		"move_queue": unit.move_queue,
-		"move_queue_last_target": unit.move_queue_last_target,
-		"is_moving": unit.is_moving,
-		"is_looking_out": unit.is_looking_out,
-		"moving_to": unit.moving_to,
-		"just_purchased": unit.just_purchased,
-		"first_turn_move": unit.first_turn_move,
-		"ordered": unit.ordered,
-		"last_damaged_by": unit.last_damaged_by,
-		"spell_buff_melee": unit.spell_buff_melee,
-		"spell_buff_ranged": unit.spell_buff_ranged,
-		"spell_buff_turns": unit.spell_buff_turns
-	}
+	return _state_sync.serialize_unit(unit)
 
 func _encode_key(key) -> String:
-	var t = typeof(key)
-	if t == TYPE_STRING:
-		return SAVE_KEY_PREFIX_STR + key
-	if t == TYPE_INT:
-		return SAVE_KEY_PREFIX_INT + str(key)
-	if t == TYPE_VECTOR2I:
-		return SAVE_KEY_PREFIX_VEC2I + str(key.x) + "," + str(key.y)
-	return SAVE_KEY_PREFIX_STR + str(key)
+	return _persistence.encode_key(key)
 
 func _decode_key(key: String):
-	if key.begins_with(SAVE_KEY_PREFIX_STR):
-		return key.substr(SAVE_KEY_PREFIX_STR.length())
-	if key.begins_with(SAVE_KEY_PREFIX_INT):
-		return int(key.substr(SAVE_KEY_PREFIX_INT.length()))
-	if key.begins_with(SAVE_KEY_PREFIX_VEC2I):
-		var coords = key.substr(SAVE_KEY_PREFIX_VEC2I.length()).split(",")
-		if coords.size() >= 2:
-			return Vector2i(int(coords[0]), int(coords[1]))
-		return Vector2i.ZERO
-	return key
+	return _persistence.decode_key(key)
 
 func _encode_value(value):
-	var t = typeof(value)
-	if t == TYPE_VECTOR2I:
-		return { SAVE_MARKER_VEC2I: [value.x, value.y] }
-	if t == TYPE_VECTOR2:
-		return { SAVE_MARKER_VEC2: [value.x, value.y] }
-	if t == TYPE_DICTIONARY:
-		var out := {}
-		for k in value.keys():
-			out[_encode_key(k)] = _encode_value(value[k])
-		return out
-	if t == TYPE_ARRAY:
-		var arr := []
-		for v in value:
-			arr.append(_encode_value(v))
-		return arr
-	return value
+	return _persistence.encode_value(value)
 
 func _decode_value(value):
-	var t = typeof(value)
-	if t == TYPE_DICTIONARY:
-		if value.size() == 1 and value.has(SAVE_MARKER_VEC2I):
-			var vec = value[SAVE_MARKER_VEC2I]
-			if vec is Array and vec.size() >= 2:
-				return Vector2i(int(vec[0]), int(vec[1]))
-		if value.size() == 1 and value.has(SAVE_MARKER_VEC2):
-			var v = value[SAVE_MARKER_VEC2]
-			if v is Array and v.size() >= 2:
-				return Vector2(float(v[0]), float(v[1]))
-		var out := {}
-		for k in value.keys():
-			var decoded_key = k
-			if k is String:
-				decoded_key = _decode_key(k)
-			out[decoded_key] = _decode_value(value[k])
-		return out
-	if t == TYPE_ARRAY:
-		var arr := []
-		for v in value:
-			arr.append(_decode_value(v))
-		return arr
-	return value
+	return _persistence.decode_value(value)
 
 func _collect_state() -> Dictionary:
-	var units := []
-	for unit in $GameBoardNode.get_all_units_flat():
-		if unit == null:
-			continue
-		units.append(_serialize_unit(unit))
-	return {
-		"state_seq": state_seq,
-		"map_index": current_map_index,
-		"match_seed": NetworkManager.match_seed,
-		"active_players": active_players,
-		"living_players": living_players,
-		"pending_eliminations": pending_eliminations,
-		"turn_number": turn_number,
-		"current_phase": int(current_phase),
-		"current_player": current_player,
-		"player_gold": player_gold,
-		"player_income": player_income,
-		"player_mana": player_mana,
-		"player_mana_income": player_mana_income,
-		"player_mana_cap": player_mana_cap,
-		"player_melee_bonus": player_melee_bonus,
-		"player_ranged_bonus": player_ranged_bonus,
-		"player_mana_bonus": player_mana_bonus,
-		"player_mana_cap_bonus": player_mana_cap_bonus,
-		"camp_respawns": camp_respawns,
-		"dragon_respawns": dragon_respawns,
-		"camp_respawn_counts": camp_respawn_counts,
-		"dragon_rewards": dragon_rewards,
-		"dragon_spawn_counts": dragon_spawn_counts,
-		"camps": camps,
-		"mines": mines,
-		"structure_positions": structure_positions,
-		"buildable_structures": buildable_structures,
-		"mana_pool_mines": mana_pool_mines,
-		"ward_vision_active": ward_vision_active,
-		"player_global_vision_until": player_global_vision_until,
-		"targeted_vision_active": targeted_vision_active,
-		"next_ward_id": _next_ward_id,
-		"structure_memory": structure_memory,
-		"neutral_tile_memory": neutral_tile_memory,
-		"spawn_tower_positions": spawn_tower_positions,
-		"income_tower_positions": income_tower_positions,
-		"base_positions": base_positions,
-		"tower_positions": tower_positions,
-		"neutral_step_index": neutral_step_index,
-		"committed_orders": committed_orders,
-		"units": units,
-		"damage_log": damage_log,
-		"damage_log_entries": damage_log_entries
-	}
+	return _state_sync.collect_state()
 
 func get_state_snapshot(bump_seq: bool = false) -> Dictionary:
 	if bump_seq:
@@ -3689,62 +3570,7 @@ func get_state_snapshot(bump_seq: bool = false) -> Dictionary:
 	return _collect_state()
 
 func _collect_state_for(viewer_id: String) -> Dictionary:
-	var state = _collect_state()
-	if viewer_id == "":
-		return state
-	var fog = $GameBoardNode.get_node_or_null("FogOfWar")
-	var viewer_vis: Dictionary = {}
-	if fog != null and fog.visiblity.has(viewer_id) and fog.visiblity[viewer_id] is Dictionary:
-		viewer_vis = fog.visiblity[viewer_id].duplicate(true)
-	var filtered := []
-	for data in state.get("units", []):
-		var owner = str(data.get("player_id", ""))
-		var just_purchased = bool(data.get("just_purchased", false))
-		var pos = _state_tile_from_value(data.get("grid_pos", Vector2i(-9999, -9999)))
-		var visible_to_viewer = owner == viewer_id or _viewer_can_see_snapshot_tile(viewer_id, viewer_vis, pos)
-		if just_purchased and owner != viewer_id:
-			continue
-		if not visible_to_viewer:
-			continue
-		filtered.append(data)
-	state["units"] = filtered
-	state["base_positions"] = _filter_player_pos_dict_for_viewer(state.get("base_positions", {}), viewer_id, viewer_vis)
-	state["tower_positions"] = _filter_player_tile_dict_for_viewer(state.get("tower_positions", {}), viewer_id, viewer_vis)
-	state["spawn_tower_positions"] = _filter_player_tile_dict_for_viewer(state.get("spawn_tower_positions", {}), viewer_id, viewer_vis)
-	state["income_tower_positions"] = _filter_player_tile_dict_for_viewer(state.get("income_tower_positions", {}), viewer_id, viewer_vis)
-	state["mines"] = _filter_mines_for_viewer(state.get("mines", {}), viewer_id, viewer_vis)
-	state["camps"] = _filter_camps_for_viewer(state.get("camps", {}), viewer_id, viewer_vis)
-	state["buildable_structures"] = _filter_buildable_structures_for_viewer(viewer_id, viewer_vis)
-	state["structure_positions"] = _filtered_structure_positions_for_viewer(state)
-	state["player_gold"] = _filter_player_scalar_dict_for_viewer(state.get("player_gold", {}), viewer_id, 0)
-	state["player_income"] = _filter_player_scalar_dict_for_viewer(state.get("player_income", {}), viewer_id, 0)
-	state["player_mana"] = _filter_player_scalar_dict_for_viewer(state.get("player_mana", {}), viewer_id, 0)
-	state["player_mana_income"] = _filter_player_scalar_dict_for_viewer(state.get("player_mana_income", {}), viewer_id, 0)
-	state["player_mana_cap"] = _filter_player_scalar_dict_for_viewer(state.get("player_mana_cap", {}), viewer_id, BASE_MANA_CAP)
-	state["player_melee_bonus"] = _filter_player_scalar_dict_for_viewer(state.get("player_melee_bonus", {}), viewer_id, 0)
-	state["player_ranged_bonus"] = _filter_player_scalar_dict_for_viewer(state.get("player_ranged_bonus", {}), viewer_id, 0)
-	state["player_mana_bonus"] = _filter_player_scalar_dict_for_viewer(state.get("player_mana_bonus", {}), viewer_id, 0)
-	state["player_mana_cap_bonus"] = _filter_player_scalar_dict_for_viewer(state.get("player_mana_cap_bonus", {}), viewer_id, 0)
-	state["player_global_vision_until"] = _filter_player_scalar_dict_for_viewer(state.get("player_global_vision_until", {}), viewer_id, 0)
-	state["ward_vision_active"] = _filter_player_dict_entry_for_viewer(state.get("ward_vision_active", {}), viewer_id, {})
-	state["targeted_vision_active"] = _filter_player_dict_entry_for_viewer(state.get("targeted_vision_active", {}), viewer_id, {})
-	state["structure_memory"] = _filter_player_dict_entry_for_viewer(state.get("structure_memory", {}), viewer_id, {})
-	state["neutral_tile_memory"] = _filter_player_dict_entry_for_viewer(state.get("neutral_tile_memory", {}), viewer_id, {})
-	state["mana_pool_mines"] = _filter_vec2i_key_dict_for_viewer(state.get("mana_pool_mines", {}), viewer_id, viewer_vis, false)
-	state["camp_respawns"] = _filter_vec2i_key_dict_for_viewer(state.get("camp_respawns", {}), viewer_id, viewer_vis, false)
-	state["dragon_respawns"] = _filter_vec2i_key_dict_for_viewer(state.get("dragon_respawns", {}), viewer_id, viewer_vis, false)
-	state["camp_respawn_counts"] = _filter_vec2i_key_dict_for_viewer(state.get("camp_respawn_counts", {}), viewer_id, viewer_vis, false)
-	state["dragon_rewards"] = _filter_vec2i_key_dict_for_viewer(state.get("dragon_rewards", {}), viewer_id, viewer_vis, false)
-	state["dragon_spawn_counts"] = _filter_vec2i_key_dict_for_viewer(state.get("dragon_spawn_counts", {}), viewer_id, viewer_vis, false)
-	var viewer_orders := {}
-	viewer_orders[viewer_id] = player_orders.get(viewer_id, {}).duplicate(true)
-	state["player_orders"] = viewer_orders
-	state["committed_orders"] = _filter_player_dict_entry_for_viewer(committed_orders, viewer_id, {})
-	if not viewer_vis.is_empty():
-		state["fog_visibility"] = { viewer_id: viewer_vis }
-	state["damage_log"] = { viewer_id: damage_log.get(viewer_id, []).duplicate(true) }
-	state["damage_log_entries"] = { viewer_id: damage_log_entries.get(viewer_id, []).duplicate(true) }
-	return state
+	return _state_sync.collect_state_for(viewer_id)
 
 func _state_tile_from_value(value) -> Vector2i:
 	if typeof(value) == TYPE_VECTOR2I:
@@ -3866,171 +3692,27 @@ func _tile_is_in_filtered_state(tile: Vector2i, state: Dictionary) -> bool:
 	return false
 
 func _collect_procedural_map_state() -> Dictionary:
-	if current_map_index < 0 or current_map_index >= map_data.size():
-		return {}
-	var md = map_data[current_map_index] as MapData
-	if md == null or not md.procedural:
-		return {}
-	var map_state := {}
-	var hex = $GameBoardNode/HexTileMap
-	if hex != null:
-		map_state["bounds"] = hex.get_used_cells()
-	if terrain_overlay != null:
-		var terrain := {
-			"forest": [],
-			"mountain": [],
-			"river": [],
-			"lake": []
-		}
-		var forest_src = 1
-		var mountain_src = 2
-		var river_src = 3
-		var lake_src = 4
-		for cell in terrain_overlay.get_used_cells():
-			var src_id = terrain_overlay.get_cell_source_id(cell)
-			match src_id:
-				forest_src:
-					terrain["forest"].append(cell)
-				mountain_src:
-					terrain["mountain"].append(cell)
-				river_src:
-					terrain["river"].append(cell)
-				lake_src:
-					terrain["lake"].append(cell)
-		map_state["terrain"] = terrain
-	return map_state
+	return _state_sync.collect_procedural_map_state()
 
 func _apply_procedural_map_state(map_state: Dictionary, reset_fog: bool = false) -> void:
-	if map_state.is_empty():
-		return
-	var hex = $GameBoardNode/HexTileMap
-	if hex != null and map_state.has("bounds"):
-		var bounds = map_state["bounds"]
-		if bounds is Array and hex.has_method("apply_bounds"):
-			hex.apply_bounds(bounds)
-			if reset_fog:
-				var fog = $GameBoardNode.get_node_or_null("FogOfWar")
-				if fog != null and fog.has_method("reset_fog"):
-					fog.reset_fog()
-	if terrain_overlay != null and map_state.has("terrain"):
-		var terrain = map_state["terrain"]
-		if terrain is Dictionary:
-			terrain_overlay.clear()
-			var forest_src = 1
-			var mountain_src = 2
-			var river_src = 3
-			var lake_src = 4
-			for cell in terrain.get("forest", []):
-				terrain_overlay.set_cell(cell, forest_src, Vector2i(0, 0))
-			for cell in terrain.get("mountain", []):
-				terrain_overlay.set_cell(cell, mountain_src, Vector2i(0, 0))
-			for cell in terrain.get("river", []):
-				terrain_overlay.set_cell(cell, river_src, Vector2i(0, 0))
-			for cell in terrain.get("lake", []):
-				terrain_overlay.set_cell(cell, lake_src, Vector2i(0, 0))
-			terrain_overlay.update_internals()
+	_state_sync.apply_procedural_map_state(map_state, reset_fog)
 
 func get_state_snapshot_for(viewer_id: String, bump_seq: bool = false) -> Dictionary:
 	if bump_seq:
 		state_seq += 1
-	return _collect_state_for(viewer_id)
+	return _state_sync.collect_state_for(viewer_id)
 
 func _save_path_for_slot(slot: int) -> String:
-	if slot < 0:
-		return SAVE_AUTOSAVE_PATH
-	if slot >= SAVE_SLOT_COUNT:
-		slot = SAVE_SLOT_COUNT - 1
-	return "user://save_slot_%d.json" % (slot + 1)
+	return _persistence.save_path_for_slot(slot)
 
 func save_game(path: String = SAVE_DEFAULT_PATH, allow_non_orders: bool = false) -> bool:
-	if not _is_host():
-		push_error("Save failed: host only.")
-		return false
-	if current_phase != Phase.ORDERS and not allow_non_orders:
-		push_error("Save failed: only supported during the orders phase.")
-		return false
-	var state = _collect_state()
-	var map_state = _collect_procedural_map_state()
-	if not map_state.is_empty():
-		state["procedural_map"] = map_state
-	var fog = $GameBoardNode.get_node_or_null("FogOfWar")
-	if fog != null:
-		state["fog_visibility"] = fog.visiblity.duplicate(true)
-	var payload = {
-		"save_version": SAVE_VERSION,
-		"state": _encode_value(state)
-	}
-	var file = FileAccess.open(path, FileAccess.WRITE)
-	if file == null:
-		push_error("Save failed: could not open file %s" % path)
-		return false
-	file.store_string(JSON.stringify(payload))
-	file.close()
-	return true
+	return _persistence.save_game(path, allow_non_orders)
 
 func save_game_slot(slot: int, allow_non_orders: bool = false) -> bool:
 	return save_game(_save_path_for_slot(slot), allow_non_orders)
 
 func load_game(path: String = SAVE_DEFAULT_PATH) -> bool:
-	if not _is_host():
-		push_error("Load failed: host only.")
-		return false
-	if not FileAccess.file_exists(path):
-		push_error("Load failed: file not found %s" % path)
-		return false
-	var file = FileAccess.open(path, FileAccess.READ)
-	if file == null:
-		push_error("Load failed: could not open file %s" % path)
-		return false
-	var content = file.get_as_text()
-	file.close()
-	var parsed = JSON.parse_string(content)
-	if typeof(parsed) != TYPE_DICTIONARY:
-		push_error("Load failed: invalid save format.")
-		return false
-	var payload = parsed as Dictionary
-	var version = int(payload.get("save_version", 0))
-	if version != SAVE_VERSION:
-		push_error("Load failed: unsupported save version.")
-		return false
-	var state = _decode_value(payload.get("state", {}))
-	if typeof(state) != TYPE_DICTIONARY or state.is_empty():
-		push_error("Load failed: missing state data.")
-		return false
-	state["force_apply"] = true
-	var map_state = {}
-	if state.has("procedural_map") and state["procedural_map"] is Dictionary:
-		map_state = state["procedural_map"]
-	var phase = int(state.get("current_phase", int(Phase.ORDERS)))
-	if phase != int(Phase.ORDERS):
-		push_error("Load failed: only orders-phase saves are supported.")
-		return false
-	var map_index = int(state.get("map_index", 0))
-	var match_seed = int(state.get("match_seed", -1))
-	NetworkManager.selected_map_index = map_index
-	if match_seed > 0:
-		NetworkManager.match_seed = match_seed
-	_ensure_dev_log_open()
-	_reset_map_state()
-	_load_map_by_index(map_index)
-	if not map_state.is_empty():
-		# Clear template fog tiles before applying procedural bounds; visibility is restored from the snapshot below.
-		_apply_procedural_map_state(map_state, true)
-	apply_state(state, true)
-	_rebuild_orders_after_load()
-	_devlog({
-		"type": "game_loaded",
-		"path": path,
-		"map_index": map_index
-	})
-	_devlog_snapshot("load")
-	call_deferred("_refresh_fog_after_load")
-	NetworkManager.reset_match_tracking(get_submission_players())
-	NetworkManager._step_ready_counts = {}
-	pending_broadcast_map_state = map_state
-	_broadcast_state(true)
-	call_deferred("_broadcast_state", true)
-	return true
+	return _persistence.load_game(path)
 
 func load_game_slot(slot: int) -> bool:
 	return load_game(_save_path_for_slot(slot))
@@ -4193,145 +3875,7 @@ func _on_execution_complete_received() -> void:
 	emit_signal("execution_complete")
 
 func apply_state(state: Dictionary, force_host: bool = false) -> void:
-	if _is_host() and not force_host:
-		return
-	if state.is_empty():
-		return
-	state = _normalize_state_snapshot(state)
-	var incoming_seq = int(state.get("state_seq", -1))
-	var force_apply = bool(state.get("force_apply", false))
-	if incoming_seq >= 0:
-		if not force_apply and incoming_seq <= last_state_seq_applied:
-			return
-		last_state_seq_applied = incoming_seq
-		state_seq = max(state_seq, incoming_seq)
-	var map_index = int(state.get("map_index", current_map_index))
-	var match_seed = int(state.get("match_seed", NetworkManager.match_seed))
-	if match_seed > 0:
-		NetworkManager.match_seed = match_seed
-	configure_match_players(state.get("active_players", active_players), false)
-	var map_state = {}
-	if state.has("procedural_map") and state["procedural_map"] is Dictionary:
-		map_state = state["procedural_map"]
-	if map_index != current_map_index:
-		_reset_map_state()
-		var should_apply_generated = not (not _is_host() and not map_state.is_empty())
-		_load_map_by_index(map_index, should_apply_generated)
-	if not map_state.is_empty():
-		# Clients can load the rectangular procedural template first; always clear fog before applying hex bounds.
-		_apply_procedural_map_state(map_state, true)
-	if state.has("base_positions"):
-		base_positions = state["base_positions"]
-	if state.has("tower_positions"):
-		tower_positions = state["tower_positions"]
-	if state.has("living_players") and state["living_players"] is Array:
-		var restored_living = _normalize_player_ids(state["living_players"])
-		living_players = []
-		for player_id in restored_living:
-			if player_id in active_players and not living_players.has(player_id):
-				living_players.append(player_id)
-		if living_players.is_empty():
-			living_players = active_players.duplicate()
-	pending_eliminations = _normalize_player_ids(state.get("pending_eliminations", []))
-	if state.has("structure_positions"):
-		structure_positions = state["structure_positions"]
-	if state.has("buildable_structures"):
-		buildable_structures = state["buildable_structures"]
-	if state.has("mana_pool_mines"):
-		mana_pool_mines = state["mana_pool_mines"]
-	else:
-		_rebuild_mana_pool_assignments()
-	if state.has("ward_vision_active"):
-		ward_vision_active = state["ward_vision_active"]
-	else:
-		ward_vision_active = _build_player_dict(active_players, {})
-	if state.has("player_global_vision_until"):
-		player_global_vision_until = state["player_global_vision_until"]
-	else:
-		player_global_vision_until = _build_player_dict(active_players, 0)
-	if state.has("targeted_vision_active"):
-		targeted_vision_active = state["targeted_vision_active"]
-	else:
-		targeted_vision_active = _build_player_dict(active_players, {})
-	_next_ward_id = int(state.get("next_ward_id", _next_ward_id))
-	_rebuild_ward_ids()
-	if state.has("structure_memory"):
-		structure_memory = state["structure_memory"]
-	if state.has("neutral_tile_memory"):
-		neutral_tile_memory = state["neutral_tile_memory"]
-	if state.has("spawn_tower_positions"):
-		spawn_tower_positions = state["spawn_tower_positions"]
-	if state.has("income_tower_positions"):
-		income_tower_positions = state["income_tower_positions"]
-	if state.has("camps"):
-		camps = state["camps"]
-	if state.has("mines"):
-		mines = state["mines"]
-	turn_number = int(state.get("turn_number", turn_number))
-	current_phase = int(state.get("current_phase", int(current_phase)))
-	current_player = state.get("current_player", current_player)
-	player_gold = state.get("player_gold", player_gold)
-	player_income = state.get("player_income", player_income)
-	player_mana = state.get("player_mana", player_mana)
-	player_mana_income = state.get("player_mana_income", player_mana_income)
-	player_mana_cap = state.get("player_mana_cap", player_mana_cap)
-	player_mana_bonus = state.get("player_mana_bonus", player_mana_bonus)
-	player_mana_cap_bonus = state.get("player_mana_cap_bonus", player_mana_cap_bonus)
-	player_melee_bonus = state.get("player_melee_bonus", player_melee_bonus)
-	player_ranged_bonus = state.get("player_ranged_bonus", player_ranged_bonus)
-	camp_respawns = state.get("camp_respawns", camp_respawns)
-	dragon_respawns = state.get("dragon_respawns", dragon_respawns)
-	camp_respawn_counts = state.get("camp_respawn_counts", camp_respawn_counts)
-	dragon_rewards = state.get("dragon_rewards", dragon_rewards)
-	dragon_spawn_counts = state.get("dragon_spawn_counts", dragon_spawn_counts)
-	damage_log = state.get("damage_log", _build_player_dict(active_players, []))
-	damage_log_entries = state.get("damage_log_entries", _build_player_dict(active_players, []))
-	neutral_step_index = int(state.get("neutral_step_index", neutral_step_index))
-	_apply_units(state.get("units", []))
-	player_orders = _build_player_dict(active_players, {})
-	if state.has("player_orders"):
-		var incoming_orders = state["player_orders"]
-		if incoming_orders is Dictionary:
-			for pid in incoming_orders.keys():
-				player_orders[pid] = incoming_orders[pid]
-	NetworkManager.player_orders = player_orders
-	committed_orders = state.get("committed_orders", _build_player_dict(active_players, {}))
-	_recalculate_mana_caps()
-	_prune_dead_units_after_apply()
-	if state.has("fog_visibility"):
-		var fog = $GameBoardNode.get_node_or_null("FogOfWar")
-		var fog_data = state["fog_visibility"]
-		if fog != null and fog_data is Dictionary:
-			if fog.visiblity == null or fog.visiblity.is_empty():
-				fog.reset_fog()
-			for pid in fog_data.keys():
-				if fog_data[pid] is Dictionary:
-					var decoded := {}
-					for cell_key in fog_data[pid].keys():
-						var cell = _decode_log_vec2i(cell_key)
-						if cell == Vector2i(-9999, -9999):
-							continue
-						decoded[cell] = fog_data[pid][cell_key]
-					fog.visiblity[pid] = decoded
-	$GameBoardNode/FogOfWar._update_fog()
-	update_neutral_markers()
-	refresh_structure_markers()
-	refresh_mine_tiles()
-	_render_damage_log_for_local()
-	emit_signal("state_applied")
-	if not replay_mode and not _is_host() and current_phase == Phase.UPKEEP and turn_number != last_state_hash_turn:
-		_ensure_dev_log_open()
-		_devlog({
-			"type": "state_hash",
-			"phase_name": "UPKEEP",
-			"value": _state_hash()
-		})
-		last_state_hash_turn = turn_number
-	if not replay_mode and not _is_host() and current_phase == Phase.UPKEEP and turn_number != last_snapshot_turn:
-		_ensure_dev_log_open()
-		_devlog_snapshot("upkeep_start_sync")
-	if not replay_mode and not _is_host() and current_phase == Phase.UPKEEP and turn_number != last_stats_turn:
-		_record_turn_stats()
+	_state_sync.apply_state(state, force_host)
 
 func _reset_map_state() -> void:
 	_prewarmed_map_key = ""
@@ -4484,8 +4028,7 @@ func _tick_neutral_respawns() -> void:
 func start_game() -> void:
 	host_replay_log_path = ""
 	_maybe_log_match_init()
-	if $UI != null and $UI.has_method("_on_game_started"):
-		$UI._on_game_started()
+	_request_ui_action("game_started")
 	if _is_host():
 		call_deferred("_game_loop")
 
@@ -4609,7 +4152,7 @@ func _show_game_over(player_id: String) -> void:
 	else:
 		$GameOver/GameOverLabel.text = "%s lost!" % player_id
 	$GameOver.visible = true
-	$UI.visible = false
+	_request_ui_action("set_ui_visible", {"visible": false})
 
 func _set_game_over_controls_visible(visible: bool) -> void:
 	var nodes = [
@@ -4632,10 +4175,8 @@ func _start_replay_from_game_over(fog_mode: String) -> void:
 	if not start_replay(replay_path, fog_mode):
 		return
 	_set_game_over_controls_visible(false)
-	if $UI != null:
-		$UI.visible = true
-		if $UI.has_method("_enter_replay_mode"):
-			$UI._enter_replay_mode()
+	_request_ui_action("set_ui_visible", {"visible": true})
+	_request_ui_action("enter_replay_mode")
 
 func _on_replay_view_pressed() -> void:
 	var default_fog = local_player_id if local_player_id in active_players else (active_players[0] if not active_players.is_empty() else "player1")
@@ -4645,17 +4186,11 @@ func _on_replay_stats_pressed() -> void:
 	var replay_path = _get_replay_source_path()
 	if replay_data.is_empty() and replay_path != "":
 		replay_data = _load_replay_log(replay_path)
-	if $UI != null:
-		$UI.visible = true
-		if $UI.has_method("_show_replay_stats"):
-			$UI._show_replay_stats()
+	_request_ui_action("set_ui_visible", {"visible": true})
+	_request_ui_action("show_replay_stats")
 
 func _on_game_over_quit_pressed() -> void:
-	if has_node("UI") and $UI.has_method("_on_cancel_game_pressed"):
-		$UI.visible = true
-		$UI._on_cancel_game_pressed()
-	else:
-		reset_to_lobby()
+	_request_ui_action("cancel_game")
 
 func end_game(player_id: String) -> void:
 	_show_game_over(player_id)
@@ -4735,7 +4270,7 @@ func reset_to_lobby() -> void:
 		NetworkManager.player_orders = player_orders
 		NetworkManager.reset_match_tracking(active_players)
 		NetworkManager._step_ready_counts = {}
-	$UI/DamagePanel.visible = false
+	_request_ui_action("set_damage_panel_visible", {"visible": false})
 	$GameOver.visible = false
 	keep_dev_logs = false
 	pending_replay_meta = {}
@@ -4802,7 +4337,7 @@ func _ensure_map_loaded() -> void:
 # Phase 1: Upkeep — award gold
 # --------------------------------------------------------
 func _do_upkeep() -> void:
-	$UI/CancelGameButton.visible = false
+	_request_ui_action("set_cancel_game_visible", {"visible": false})
 	current_phase = Phase.UPKEEP
 	NetworkManager._step_ready_counts = {}
 	print("--- Upkeep Phase ---")
@@ -4842,7 +4377,7 @@ func _do_upkeep() -> void:
 		print("%s income: %d  → total gold: %d" % [player.capitalize(), income, player_gold[player]])
 	
 	# reset orders and unit states
-	$UI._clear_all_drawings()
+	_request_ui_refresh("clear_all")
 	$GameBoardNode/FogOfWar._update_fog()
 	var all_units = $GameBoardNode.get_all_units()
 	for p in living_players:
@@ -4880,7 +4415,7 @@ func _do_upkeep() -> void:
 		_ensure_dev_log_open()
 		_devlog_snapshot("upkeep_start")
 	$GameBoardNode/FogOfWar._update_fog()
-	$UI/DamagePanel.visible = true
+	_request_ui_action("set_damage_panel_visible", {"visible": true})
 	$GameBoardNode/OrderReminderMap.highlight_unordered_units(local_player_id)
 	_broadcast_state()
 	if not replay_mode:
@@ -5685,10 +5220,8 @@ func _do_orders() -> void:
 	})
 	emit_signal("orders_phase_begin", me)
 	_broadcast_state()
-	if has_node("UI"):
-		$UI._draw_all()
-		if $UI.has_method("_update_done_button_state"):
-			$UI._update_done_button_state()
+	_request_ui_refresh("all")
+	_request_ui_action("update_done_button_state")
 
 	# wait until all living players have submitted
 	await NetworkManager.orders_ready
@@ -5751,8 +5284,7 @@ func force_skip_movement_phase() -> void:
 			unit.is_moving = false
 			unit.moving_to = unit.grid_pos
 	_broadcast_state()
-	if has_node("UI"):
-		$UI._draw_paths()
+	_request_ui_refresh("paths")
 
 func _remove_player_order(player_id: String, unit_net_id: int) -> void:
 	player_orders[player_id].erase(unit_net_id)
@@ -6911,10 +6443,7 @@ func _append_death_log(unit) -> void:
 			damage_log_entries[viewer_id].append(entry)
 
 func _render_damage_log_for_local() -> void:
-	var ui = get_node_or_null("UI")
-	if ui != null and ui.has_method("render_damage_report"):
-		ui.render_damage_report()
-		return
+	_request_damage_log_refresh()
 	for child in dmg_report.get_children():
 		child.queue_free()
 	var lines = damage_log.get(local_player_id, [])
@@ -7071,7 +6600,7 @@ func _process_spawns():
 				continue
 			if unit.just_purchased and not unit.is_base and not unit.is_tower:
 				unit.just_purchased = false
-	$UI._draw_all()
+	_request_ui_refresh("all")
 	$GameBoardNode/FogOfWar._update_fog()
 
 func _process_spells() -> void:
@@ -7412,9 +6941,9 @@ func _process_attacks():
 			_cleanup_dead_unit(target)
 		else:
 			target.set_health_bar()
-	$UI._draw_attacks()
-	$UI._draw_paths()
-	$UI._draw_supports()
+	_request_ui_refresh("attacks")
+	_request_ui_refresh("paths")
+	_request_ui_refresh("supports")
 	$GameBoardNode/FogOfWar._update_fog()
 
 func _apply_sabotage_at(tile: Vector2i) -> bool:
@@ -7738,9 +7267,9 @@ func _process_neutral_attacks() -> void:
 		else:
 			target.set_health_bar()
 
-	$UI._draw_attacks()
-	$UI._draw_paths()
-	$UI._draw_supports()
+	_request_ui_refresh("attacks")
+	_request_ui_refresh("paths")
+	_request_ui_refresh("supports")
 	$GameBoardNode/FogOfWar._update_fog()
 
 # Resolve a single enemy swap as a symmetric melee clash.
@@ -8381,9 +7910,9 @@ func _process_move():
 		update_neutral_markers()
 
 	# 8. Refresh the UI and fog each tick
-	$UI._draw_attacks()
-	$UI._draw_paths()
-	$UI._draw_supports()
+	_request_ui_refresh("attacks")
+	_request_ui_refresh("paths")
+	_request_ui_refresh("supports")
 	$GameBoardNode/FogOfWar._update_fog()
 	
 	# 10) schedule the next tick if any moves remain
@@ -8392,7 +7921,7 @@ func _process_move():
 			var ord = NetworkManager.player_orders[player][unit_id]
 			if ord.has("type") and ord["type"] == "move":
 				exec_steps.append(func(): _process_move())
-				$UI._draw_paths()
+				_request_ui_refresh("paths")
 				$GameBoardNode/FogOfWar._update_fog()
 				return  # pause execution here
 	if neutral_step_index == -1:
@@ -8424,7 +7953,7 @@ func _do_execution() -> void:
 			var unit = unit_manager.get_unit_by_net_id(int(order.get("unit_net_id", -1)))
 			if unit != null and unit.player_id == player:
 				unit.is_looking_out = true
-	$UI/CancelDoneButton.visible = false
+	_request_ui_action("set_cancel_done_visible", {"visible": false})
 	$GameBoardNode/OrderReminderMap.clear()
 	for child in dmg_report.get_children():
 		child.queue_free()
@@ -8475,8 +8004,8 @@ func start_phase_locally(phase_name: String) -> void:
 		match phase_name:
 			"UPKEEP":
 				current_phase = Phase.UPKEEP
-				$UI/CancelGameButton.visible = false
-				$UI/DamagePanel.visible = true
+				_request_ui_action("set_cancel_game_visible", {"visible": false})
+				_request_ui_action("set_damage_panel_visible", {"visible": true})
 			"ORDERS":
 				current_phase = Phase.ORDERS
 				current_player = local_player_id

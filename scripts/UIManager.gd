@@ -43,6 +43,15 @@ var _preview_marker_root: Control = null
 var _queue_hover_cell: Vector2i = Vector2i(-99999, -99999)
 var _queue_hover_path: Array = []
 var _queue_hover_eta: int = -1
+var _queue_eta_cache: Dictionary = {}
+var _overlay_cache_revision: String = ""
+var _overlay_cache_data: Dictionary = {}
+var _active_overlay_data: Dictionary = {}
+var _overlay_layer_signatures: Dictionary = {}
+var _preview_draw_signature: String = ""
+var _preview_turn_marker_signature: String = ""
+var _process_pointer_signature: String = ""
+var _process_context_signature: String = ""
 
 var _current_exec_step_idx: int = 0
 var menu_popup: PopupMenu = null
@@ -409,6 +418,12 @@ func _ready():
 					Callable(self, "_on_execution_complete"))
 	turn_mgr.connect("replay_state_changed",
 					Callable(self, "_on_replay_state_changed"))
+	if turn_mgr.has_signal("ui_refresh_requested"):
+		turn_mgr.connect("ui_refresh_requested", Callable(self, "_on_turn_ui_refresh_requested"))
+	if turn_mgr.has_signal("damage_log_refresh_requested"):
+		turn_mgr.connect("damage_log_refresh_requested", Callable(self, "_on_turn_damage_log_refresh_requested"))
+	if turn_mgr.has_signal("ui_action_requested"):
+		turn_mgr.connect("ui_action_requested", Callable(self, "_on_turn_ui_action_requested"))
 	next_button.connect("pressed",
 					Callable(self, "_on_next_pressed"))
 	if auto_pass_check != null:
@@ -678,6 +693,115 @@ func _ready():
 	_init_queue_hover()
 	_init_preview_markers()
 	_init_menu()
+
+func _overlay_revision_token() -> String:
+	var queue_state: Array = []
+	for unit in game_board.get_all_units_flat():
+		if unit == null:
+			continue
+		queue_state.append({
+			"id": int(unit.net_id),
+			"player": unit.player_id,
+			"tile": unit.grid_pos,
+			"moving_to": unit.moving_to,
+			"move": unit.move_queue,
+			"build": unit.build_queue,
+			"def": unit.is_defending,
+			"heal": unit.is_healing,
+			"lookout": unit.is_looking_out
+		})
+	return "%s|%s|%s|%s|%s|%s" % [
+		str(turn_mgr.current_phase),
+		var_to_str(turn_mgr.player_orders),
+		var_to_str(turn_mgr.committed_orders),
+		current_player,
+		var_to_str(queue_state),
+		var_to_str(turn_mgr.buildable_structures)
+	]
+
+func _get_overlay_data() -> Dictionary:
+	var revision = _overlay_revision_token()
+	if revision == _overlay_cache_revision and not _overlay_cache_data.is_empty():
+		return _overlay_cache_data
+	var players = _overlay_player_ids()
+	var orders_by_player := {}
+	for player in players:
+		orders_by_player[player] = turn_mgr.get_all_orders_for_phase(player)
+	_overlay_cache_revision = revision
+	_overlay_cache_data = {
+		"revision": revision,
+		"players": players,
+		"orders_by_player": orders_by_player
+	}
+	return _overlay_cache_data
+
+func _with_overlay_signature(layer_name: String) -> bool:
+	var overlay_data = _get_overlay_data()
+	var signature = "%s|%s" % [layer_name, str(overlay_data.get("revision", ""))]
+	if _overlay_layer_signatures.get(layer_name, "") == signature:
+		return false
+	_overlay_layer_signatures[layer_name] = signature
+	_active_overlay_data = overlay_data
+	return true
+
+func _invalidate_overlay_cache(layer_name: String = "") -> void:
+	_overlay_cache_revision = ""
+	_overlay_cache_data = {}
+	if layer_name == "" or layer_name == "all":
+		_overlay_layer_signatures.clear()
+		return
+	_overlay_layer_signatures.erase(layer_name)
+
+func _on_turn_ui_refresh_requested(kind: String) -> void:
+	match kind:
+		"clear_all":
+			_invalidate_overlay_cache("all")
+			_clear_all_drawings()
+		"all":
+			_invalidate_overlay_cache("all")
+			_draw_all()
+		"paths":
+			_invalidate_overlay_cache("paths")
+			_draw_paths()
+		"attacks":
+			_invalidate_overlay_cache("attacks")
+			_draw_attacks()
+		"supports":
+			_invalidate_overlay_cache("supports")
+			_draw_supports()
+		_:
+			_invalidate_overlay_cache("all")
+			_draw_all()
+
+func _on_turn_damage_log_refresh_requested() -> void:
+	render_damage_report()
+
+func _on_turn_ui_action_requested(action: String, payload: Dictionary) -> void:
+	match action:
+		"game_started":
+			_on_game_started()
+		"cancel_game":
+			_on_cancel_game_pressed()
+		"exit_replay_mode":
+			_exit_replay_mode()
+		"enter_replay_mode":
+			_enter_replay_mode()
+		"show_replay_stats":
+			_show_replay_stats()
+		"set_ui_visible":
+			visible = bool(payload.get("visible", true))
+		"set_damage_panel_visible":
+			if damage_panel != null:
+				damage_panel.visible = bool(payload.get("visible", true))
+		"set_cancel_game_visible":
+			var cancel_game_button = get_node_or_null("CancelGameButton")
+			if cancel_game_button != null:
+				cancel_game_button.visible = bool(payload.get("visible", true))
+		"set_cancel_done_visible":
+			if cancel_done_button != null:
+				cancel_done_button.visible = bool(payload.get("visible", true))
+		"update_done_button_state":
+			_update_done_button_state()
 
 func _init_menu() -> void:
 	if menu_button == null:
@@ -1352,9 +1476,32 @@ func _init_preview_markers() -> void:
 	add_child(_preview_marker_root)
 
 func _process(_delta: float) -> void:
-	_update_build_hover()
-	_update_queue_hover()
-	_update_queue_preview()
+	var cam = get_viewport().get_camera_2d()
+	var pointer_cell = Vector2i(-99999, -99999)
+	if cam != null:
+		pointer_cell = hex.world_to_map(cam.get_global_mouse_position())
+	var pointer_signature = "%s|%s|%s" % [
+		str(pointer_cell),
+		str(get_viewport().get_mouse_position()),
+		str(finish_move_button != null and finish_move_button.visible)
+	]
+	var context_signature = "%s|%s|%s|%s|%s|%s|%s" % [
+		action_mode,
+		placing_unit,
+		current_player,
+		var_to_str(current_path),
+		str(currently_selected_unit.net_id) if currently_selected_unit != null else "",
+		str(_queue_preview_unit_id),
+		str(turn_mgr.state_seq)
+	]
+	if pointer_signature != _process_pointer_signature or context_signature != _process_context_signature:
+		_process_pointer_signature = pointer_signature
+		_process_context_signature = context_signature
+		_update_build_hover()
+		_update_queue_hover()
+		_update_queue_preview()
+	elif finish_move_button != null and finish_move_button.visible and _is_long_queue_mode():
+		_set_queue_finish_button_position()
 
 func _update_build_hover() -> void:
 	if _build_hover_label == null:
@@ -1485,9 +1632,7 @@ func _update_queue_path_preview_for_cell(cell: Vector2i, mouse_pos: Vector2, for
 	var preview_path = current_path.duplicate()
 	for i in range(1, segment.size()):
 		preview_path.append(segment[i])
-	var eta = -1
-	if turn_mgr != null and turn_mgr.has_method("estimate_queue_turns"):
-		eta = int(turn_mgr.estimate_queue_turns(currently_selected_unit, preview_path, action_mode, current_player))
+	var eta = _estimate_queue_eta(preview_path)
 	if eta < 0:
 		_draw_preview_path(current_path)
 		_hide_queue_hover()
@@ -1503,6 +1648,21 @@ func _update_queue_path_preview_for_cell(cell: Vector2i, mouse_pos: Vector2, for
 		finish_move_button.visible = current_path.size() > 1
 		if finish_move_button.visible:
 			_set_queue_finish_button_position()
+
+func _estimate_queue_eta(preview_path: Array) -> int:
+	if turn_mgr == null or not turn_mgr.has_method("estimate_queue_turns") or currently_selected_unit == null:
+		return -1
+	var key = "%s|%s|%s|%s" % [
+		str(currently_selected_unit.net_id),
+		action_mode,
+		current_player,
+		var_to_str(preview_path)
+	]
+	if _queue_eta_cache.has(key):
+		return int(_queue_eta_cache[key])
+	var eta = int(turn_mgr.estimate_queue_turns(currently_selected_unit, preview_path, action_mode, current_player))
+	_queue_eta_cache[key] = eta
+	return eta
 
 func _update_queue_hover() -> void:
 	if not _is_long_queue_mode():
@@ -1558,6 +1718,8 @@ func _queue_path_index(path: Array, tile: Vector2i) -> int:
 
 func _clear_queue_preview() -> void:
 	if _queue_preview_unit_id == -1:
+		_preview_draw_signature = ""
+		_preview_turn_marker_signature = ""
 		if _preview_marker_root != null:
 			for child in _preview_marker_root.get_children():
 				child.queue_free()
@@ -1570,6 +1732,8 @@ func _clear_queue_preview() -> void:
 		for child in _preview_marker_root.get_children():
 			child.queue_free()
 	_queue_preview_unit_id = -1
+	_preview_draw_signature = ""
+	_preview_turn_marker_signature = ""
 
 func _draw_move_queue_turn_markers(path: Array, preview_unit, preview_player: String) -> void:
 	if _preview_marker_root == null or turn_mgr == null or preview_unit == null:
@@ -1579,6 +1743,10 @@ func _draw_move_queue_turn_markers(path: Array, preview_unit, preview_player: St
 	var endpoints = turn_mgr.get_move_queue_turn_endpoints(preview_unit, path, preview_player)
 	if not (endpoints is Array) or endpoints.is_empty():
 		return
+	var marker_signature = "%s|%s|%s" % [str(preview_unit.net_id), preview_player, var_to_str(endpoints)]
+	if _preview_turn_marker_signature == marker_signature:
+		return
+	_preview_turn_marker_signature = marker_signature
 	for child in _preview_marker_root.get_children():
 		child.queue_free()
 	var badge_size = Vector2(28, 28)
@@ -1619,6 +1787,19 @@ func _draw_preview_path(path: Array, preview_unit = null, preview_player: String
 	var preview_node = hex.get_node_or_null("PreviewPathArrows")
 	if preview_node == null:
 		return
+	var preview_signature = "%s|%s|%s|%s|%s" % [
+		var_to_str(path),
+		str(preview_unit.net_id) if preview_unit != null else "",
+		preview_player,
+		str(show_turn_markers),
+		action_mode
+	]
+	if _preview_draw_signature == preview_signature:
+		if show_turn_markers:
+			_draw_move_queue_turn_markers(path, preview_unit, preview_player)
+		return
+	_preview_draw_signature = preview_signature
+	_preview_turn_marker_signature = ""
 	for child in preview_node.get_children():
 		child.queue_free()
 	if _preview_marker_root != null:
@@ -4060,6 +4241,9 @@ func _on_action_selected(id: int) -> void:
 	action_menu.hide()
 
 func _clear_all_drawings():
+	_invalidate_overlay_cache("all")
+	_preview_draw_signature = ""
+	_preview_turn_marker_signature = ""
 	var preview_node = hex.get_node_or_null("PreviewPathArrows")
 	if preview_node != null:
 		for child in preview_node.get_children():
@@ -4206,12 +4390,16 @@ func _on_execution_complete():
 
 # Backtrack and draw arrow sprites along the path to `dest`
 func _draw_paths() -> void:
+	if not _with_overlay_signature("paths"):
+		return
+	var overlay_data = _active_overlay_data
+	var players = overlay_data.get("players", _overlay_player_ids())
+	var orders_by_player = overlay_data.get("orders_by_player", {})
 	var path_arrows_node = hex.get_node("PathArrows")
 	for child in path_arrows_node.get_children():
 		child.queue_free()
-	var players = _overlay_player_ids()
 	for player in players:
-		var all_orders = turn_mgr.get_all_orders_for_phase(player)
+		var all_orders = orders_by_player.get(player, [])
 		for order in all_orders:
 			if order["type"] == "move":
 				var mover = unit_mgr.get_unit_by_net_id(order["unit_net_id"])
@@ -4340,14 +4528,18 @@ func _draw_partial_path() -> void:
 			root.add_child(arrow)
 
 func _draw_attacks():
+	if not _with_overlay_signature("attacks"):
+		return
+	var overlay_data = _active_overlay_data
+	var players = overlay_data.get("players", _overlay_player_ids())
+	var orders_by_player = overlay_data.get("orders_by_player", {})
 	var attack_arrows_node = hex.get_node("AttackArrows")
 	for child in attack_arrows_node.get_children():
 		child.queue_free()
-	var players = _overlay_player_ids()
 	var attack_counts := {}
 	var buff_by_target := {}
 	for player in players:
-		var all_orders = turn_mgr.get_all_orders_for_phase(player)
+		var all_orders = orders_by_player.get(player, [])
 		for order in all_orders:
 			var order_type = str(order.get("type", ""))
 			if order_type == "ranged" or order_type == "melee":
@@ -4366,7 +4558,7 @@ func _draw_attacks():
 				var buff_amount = snappedf(float(mana_spent) * 0.1, 0.1)
 				buff_by_target[buff_target] = buff_amount
 	for player in players:
-		var all_orders = turn_mgr.get_all_orders_for_phase(player)
+		var all_orders = orders_by_player.get(player, [])
 		for order in all_orders:
 			var is_attack = order["type"] == "ranged" or order["type"] == "melee"
 			var is_fireball = order["type"] == "spell" and str(order.get("spell_type", "")) == turn_mgr.SPELL_FIREBALL
@@ -4456,12 +4648,16 @@ func _draw_attacks():
 					root.add_child(lightning_icon)
 
 func _draw_supports():
+	if not _with_overlay_signature("supports"):
+		return
+	var overlay_data = _active_overlay_data
+	var players = overlay_data.get("players", _overlay_player_ids())
+	var orders_by_player = overlay_data.get("orders_by_player", {})
 	var support_arrows_node = hex.get_node("SupportArrows")
 	for child in support_arrows_node.get_children():
 		child.queue_free()
-	var players = _overlay_player_ids()
 	for player in players:
-		var all_orders = turn_mgr.get_all_orders_for_phase(player)
+		var all_orders = orders_by_player.get(player, [])
 		for order in all_orders:
 			if order["type"] == "support":
 				var root = Node2D.new()
@@ -4576,12 +4772,16 @@ func _draw_supports():
 				root.add_child(icon)
 
 func _draw_heals():
+	if not _with_overlay_signature("heals"):
+		return
+	var overlay_data = _active_overlay_data
+	var players = overlay_data.get("players", _overlay_player_ids())
+	var orders_by_player = overlay_data.get("orders_by_player", {})
 	var heal_node = hex.get_node("HealingSprites")
 	for child in heal_node.get_children():
 		child.queue_free()
-	var players = _overlay_player_ids()
 	for player in players:
-		var all_orders = turn_mgr.get_all_orders_for_phase(player)
+		var all_orders = orders_by_player.get(player, [])
 		for order in all_orders:
 			if order["type"] == "heal":
 				var root = Node2D.new()
@@ -4595,12 +4795,16 @@ func _draw_heals():
 				root.add_child(heart)
 
 func _draw_defends():
+	if not _with_overlay_signature("defends"):
+		return
+	var overlay_data = _active_overlay_data
+	var players = overlay_data.get("players", _overlay_player_ids())
+	var orders_by_player = overlay_data.get("orders_by_player", {})
 	var defend_node = hex.get_node("DefendingSprites")
 	for child in defend_node.get_children():
 		child.queue_free()
-	var players = _overlay_player_ids()
 	for player in players:
-		var all_orders = turn_mgr.get_all_orders_for_phase(player)
+		var all_orders = orders_by_player.get(player, [])
 		for order in all_orders:
 			if order["type"] == "defend":
 				var root = Node2D.new()
@@ -4622,12 +4826,16 @@ func _get_lookout_sprites_root() -> Node2D:
 	return root
 
 func _draw_lookouts():
+	if not _with_overlay_signature("lookouts"):
+		return
+	var overlay_data = _active_overlay_data
+	var players = overlay_data.get("players", _overlay_player_ids())
+	var orders_by_player = overlay_data.get("orders_by_player", {})
 	var lookout_node = _get_lookout_sprites_root()
 	for child in lookout_node.get_children():
 		child.queue_free()
-	var players = _overlay_player_ids()
 	for player in players:
-		var all_orders = turn_mgr.get_all_orders_for_phase(player)
+		var all_orders = orders_by_player.get(player, [])
 		for order in all_orders:
 			if order.get("type", "") == "lookout":
 				var unit = unit_mgr.get_unit_by_net_id(order["unit_net_id"])
@@ -4678,12 +4886,16 @@ func _get_ward_sprites_root() -> Node2D:
 	return root
 
 func _draw_builds():
+	if not _with_overlay_signature("builds"):
+		return
+	var overlay_data = _active_overlay_data
+	var players = overlay_data.get("players", _overlay_player_ids())
+	var orders_by_player = overlay_data.get("orders_by_player", {})
 	var build_node = _get_building_sprites_root()
 	for child in build_node.get_children():
 		child.queue_free()
-	var players = _overlay_player_ids()
 	for player in players:
-		var all_orders = turn_mgr.get_all_orders_for_phase(player)
+		var all_orders = orders_by_player.get(player, [])
 		for order in all_orders:
 			if order.get("type", "") == "build":
 				var unit = unit_mgr.get_unit_by_net_id(order["unit_net_id"])
@@ -4728,12 +4940,16 @@ func _draw_builds():
 			root.add_child(build_icon)
 
 func _draw_repairs():
+	if not _with_overlay_signature("repairs"):
+		return
+	var overlay_data = _active_overlay_data
+	var players = overlay_data.get("players", _overlay_player_ids())
+	var orders_by_player = overlay_data.get("orders_by_player", {})
 	var repair_node = _get_repair_sprites_root()
 	for child in repair_node.get_children():
 		child.queue_free()
-	var players = _overlay_player_ids()
 	for player in players:
-		var all_orders = turn_mgr.get_all_orders_for_phase(player)
+		var all_orders = orders_by_player.get(player, [])
 		for order in all_orders:
 			if order.get("type", "") == "repair":
 				var unit = unit_mgr.get_unit_by_net_id(order["unit_net_id"])
@@ -4752,12 +4968,16 @@ func _draw_repairs():
 				root.add_child(repair_icon)
 
 func _draw_sabotages():
+	if not _with_overlay_signature("sabotages"):
+		return
+	var overlay_data = _active_overlay_data
+	var players = overlay_data.get("players", _overlay_player_ids())
+	var orders_by_player = overlay_data.get("orders_by_player", {})
 	var sabotage_node = _get_sabotage_sprites_root()
 	for child in sabotage_node.get_children():
 		child.queue_free()
-	var players = _overlay_player_ids()
 	for player in players:
-		var all_orders = turn_mgr.get_all_orders_for_phase(player)
+		var all_orders = orders_by_player.get(player, [])
 		for order in all_orders:
 			if order.get("type", "") == "sabotage":
 				var unit = unit_mgr.get_unit_by_net_id(order["unit_net_id"])
@@ -4776,12 +4996,16 @@ func _draw_sabotages():
 				root.add_child(sabotage_icon)
 
 func _draw_ward_orders():
+	if not _with_overlay_signature("wards"):
+		return
+	var overlay_data = _active_overlay_data
+	var players = overlay_data.get("players", _overlay_player_ids())
+	var orders_by_player = overlay_data.get("orders_by_player", {})
 	var ward_node = _get_ward_sprites_root()
 	for child in ward_node.get_children():
 		child.queue_free()
-	var players = _overlay_player_ids()
 	for player in players:
-		var all_orders = turn_mgr.get_all_orders_for_phase(player)
+		var all_orders = orders_by_player.get(player, [])
 		for order in all_orders:
 			if order.get("type", "") == "ward_vision":
 				var ward_tile = order.get("ward_tile", Vector2i(-9999, -9999))
@@ -4808,6 +5032,7 @@ func _draw_ward_orders():
 				root.add_child(dot)
 
 func _draw_all():
+	_active_overlay_data = _get_overlay_data()
 	_draw_attacks()
 	_draw_heals()
 	_draw_paths()
@@ -5152,6 +5377,9 @@ func finish_current_path():
 	_update_done_button_state()
 	
 func _on_state_applied() -> void:
+	_queue_eta_cache.clear()
+	_process_pointer_signature = ""
+	_process_context_signature = ""
 	_reset_ui_for_snapshot()
 	_update_turn_label()
 	if turn_mgr.current_phase == turn_mgr.Phase.ORDERS:
@@ -5160,7 +5388,6 @@ func _on_state_applied() -> void:
 		$"../GameBoardNode/OrderReminderMap".highlight_unordered_units(current_player)
 		_update_done_button_state()
 	_draw_all()
-	render_damage_report()
 	_update_auto_pass_for_damage()
 	_refresh_dev_state_inputs()
 	_refresh_dev_board_highlights()
