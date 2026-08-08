@@ -18,6 +18,7 @@ const GODOT_BIN = process.env.GODOT_BIN ?? "godot";
 const PROJECT_ROOT = process.env.GAME_PROJECT_ROOT ?? repoRoot;
 const WORKER_NAME = process.env.WORKER_NAME ?? `${os.hostname()}:${process.pid}`;
 const POLL_INTERVAL_MS = Number.parseInt(process.env.POLL_INTERVAL_MS ?? "5000", 10);
+const GODOT_TIMEOUT_MS = Number.parseInt(process.env.GODOT_TIMEOUT_MS ?? "120000", 10);
 const MODE = process.argv.includes("--once") ? "once" : (process.env.WORKER_MODE ?? "loop");
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
@@ -273,7 +274,14 @@ async function runGodotWorker(payload) {
   ];
 
   try {
-    const { stdout, stderr } = await spawnAndWait(GODOT_BIN, args);
+    console.log(`[worker] launching godot for ${payload.job_type} with timeout ${GODOT_TIMEOUT_MS}ms`);
+    const { stdout, stderr } = await spawnAndWait(GODOT_BIN, args, GODOT_TIMEOUT_MS);
+    if (stdout.trim() !== "") {
+      console.log(`[worker] godot stdout\n${stdout.trimEnd()}`);
+    }
+    if (stderr.trim() !== "") {
+      console.log(`[worker] godot stderr\n${stderr.trimEnd()}`);
+    }
     const raw = await fs.readFile(outputPath, "utf8");
     return JSON.parse(raw);
   } catch (error) {
@@ -283,7 +291,7 @@ async function runGodotWorker(payload) {
   }
 }
 
-function spawnAndWait(command, args) {
+function spawnAndWait(command, args, timeoutMs = 120000) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd: PROJECT_ROOT,
@@ -292,6 +300,17 @@ function spawnAndWait(command, args) {
 
     let stdout = "";
     let stderr = "";
+    let finished = false;
+    const timer = Number.isFinite(timeoutMs) && timeoutMs > 0
+      ? setTimeout(() => {
+          if (finished) {
+            return;
+          }
+          child.kill("SIGKILL");
+          const details = buildProcessErrorDetails(stdout, stderr);
+          reject(new Error(`timed out after ${timeoutMs}ms${details}`));
+        }, timeoutMs)
+      : null;
     child.stdout.on("data", (chunk) => {
       stdout += chunk.toString();
     });
@@ -299,17 +318,38 @@ function spawnAndWait(command, args) {
       stderr += chunk.toString();
     });
     child.on("error", (error) => {
+      finished = true;
+      if (timer) {
+        clearTimeout(timer);
+      }
       reject(error);
     });
     child.on("close", (code) => {
+      finished = true;
+      if (timer) {
+        clearTimeout(timer);
+      }
       if (code === 0) {
         resolve({ stdout, stderr });
         return;
       }
-      const message = stderr.trim() || stdout.trim() || `exit code ${code}`;
+      const message = `exit code ${code}${buildProcessErrorDetails(stdout, stderr)}`;
       reject(new Error(message));
     });
   });
+}
+
+function buildProcessErrorDetails(stdout, stderr) {
+  const stdoutText = stdout.trim();
+  const stderrText = stderr.trim();
+  let details = "";
+  if (stderrText !== "") {
+    details += `\nstderr:\n${stderrText}`;
+  }
+  if (stdoutText !== "") {
+    details += `\nstdout:\n${stdoutText}`;
+  }
+  return details;
 }
 
 function logSnapshotSummary(label, snapshotPayload) {
