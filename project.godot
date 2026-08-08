@@ -21,7 +21,6 @@ config/icon="res://icon.svg"
 
 [autoload]
 
-RuakeLayer="*res://addons/ruake/ruake/ruake_layer.tscn"
 NetworkManager="*res://scripts/NetworkManager.gd"
 
 [display]
