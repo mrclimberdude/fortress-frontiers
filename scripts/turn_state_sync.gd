@@ -528,6 +528,7 @@ func _rebuild_unit_indexes(board, unit_mgr) -> void:
 			max_player = max(max_player, int(unit.net_id))
 	board.occupied_tiles.clear()
 	board.structure_units.clear()
+	board.structure_tiles.clear()
 	for unit in unit_mgr.get_children():
 		if unit == null or not is_instance_valid(unit):
 			continue

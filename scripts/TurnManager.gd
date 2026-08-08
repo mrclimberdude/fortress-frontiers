@@ -35,11 +35,13 @@ const MineScene = preload("res://scenes/GemMine.tscn")
 const MapGenerator = preload("res://scripts/MapGenerator.gd")
 const TurnStateSyncService = preload("res://scripts/turn_state_sync.gd")
 const TurnPersistenceService = preload("res://scripts/turn_persistence.gd")
+const AsyncTurnContractService = preload("res://scripts/async_turn_contract.gd")
 
 @export var map_data: Array[Resource] = []
 var terrain_overlay: TileMapLayer
 var _state_sync
 var _persistence
+var _async_contract
 var rng := RandomNumberGenerator.new()
 var current_map_index: int = -1
 var _procedural_generation_cache: Dictionary = {}
@@ -68,6 +70,7 @@ var replay_target_phase: int = 2
 var replay_phase_mode: bool = false
 var replay_fog_mode: String = ""
 var pending_broadcast_map_state: Dictionary = {}
+var async_turn_events: Dictionary = {}
 const DEV_LOG_VERSION: int = 1
 const REPLAY_MANIFEST_PATH: String = "user://replay_index.json"
 const REPLAY_MANIFEST_VERSION: int = 1
@@ -1554,6 +1557,7 @@ func configure_match_players(player_ids: Array, preserve_existing: bool = true) 
 	income_tower_positions = _build_player_dict(active_players, [], income_tower_positions if preserve_existing else {})
 	structure_memory = _build_player_dict(active_players, {}, structure_memory if preserve_existing else {})
 	neutral_tile_memory = _build_player_dict(active_players, {}, neutral_tile_memory if preserve_existing else {})
+	async_turn_events = _build_player_dict(active_players, {"buys": [], "undo_buys": []}, async_turn_events if preserve_existing else {})
 	var old_mines = mines if preserve_existing else {}
 	mines = {"unclaimed": old_mines.get("unclaimed", []).duplicate(true) if old_mines.has("unclaimed") else []}
 	for player_id in active_players:
@@ -3393,6 +3397,7 @@ func _apply_dragon_reward_color(unit, reward: String) -> void:
 # --- Orders Data ---
 var player_orders     := { "player1": {}, "player2": {} }
 var committed_orders := { "player1": {}, "player2": {} }
+var async_match_id: String = ""
 
 var local_player_id: String
 
@@ -3402,6 +3407,7 @@ var local_player_id: String
 func _ready():
 	_state_sync = TurnStateSyncService.new(self)
 	_persistence = TurnPersistenceService.new(self)
+	_async_contract = AsyncTurnContractService.new(self)
 	NetworkManager.hex = $GameBoardNode/HexTileMap
 	NetworkManager.turn_mgr = $"."
 	NetworkManager.connect("map_index_received", Callable(self, "_on_map_index_received"))
@@ -3562,6 +3568,7 @@ func _decode_value(value):
 	return _persistence.decode_value(value)
 
 func _collect_state() -> Dictionary:
+	_refresh_unit_indexes_for_snapshot()
 	return _state_sync.collect_state()
 
 func get_state_snapshot(bump_seq: bool = false) -> Dictionary:
@@ -3570,7 +3577,16 @@ func get_state_snapshot(bump_seq: bool = false) -> Dictionary:
 	return _collect_state()
 
 func _collect_state_for(viewer_id: String) -> Dictionary:
+	_refresh_unit_indexes_for_snapshot()
 	return _state_sync.collect_state_for(viewer_id)
+
+func _refresh_unit_indexes_for_snapshot() -> void:
+	if _state_sync == null or unit_manager == null:
+		return
+	var board = get_node_or_null("GameBoardNode")
+	if board == null:
+		return
+	_state_sync._rebuild_unit_indexes(board, unit_manager)
 
 func _state_tile_from_value(value) -> Vector2i:
 	if typeof(value) == TYPE_VECTOR2I:
@@ -3701,6 +3717,305 @@ func get_state_snapshot_for(viewer_id: String, bump_seq: bool = false) -> Dictio
 	if bump_seq:
 		state_seq += 1
 	return _state_sync.collect_state_for(viewer_id)
+
+func get_rules_version() -> String:
+	return AsyncTurnContractService.RULES_VERSION
+
+func set_async_match_id(match_id: String) -> void:
+	async_match_id = match_id.strip_edges()
+
+func clear_async_turn_events(player_id: String = "") -> void:
+	if player_id != "":
+		if async_turn_events.has(player_id):
+			async_turn_events[player_id] = {"buys": [], "undo_buys": []}
+		return
+	async_turn_events = _build_player_dict(active_players, {"buys": [], "undo_buys": []})
+
+func build_async_match_state(match_id: String, waiting_on_players: Array = []) -> Dictionary:
+	return _async_contract.build_match_state(match_id, waiting_on_players)
+
+func seed_async_turn_contract(match_id: String, seed_config: Dictionary = {}) -> Dictionary:
+	set_async_match_id(match_id)
+	var player_slots = seed_config.get("player_slots", _default_player_ids())
+	configure_match_players(player_slots, false)
+	var local_player = str(seed_config.get("local_player_id", active_players[0] if not active_players.is_empty() else "player1")).strip_edges()
+	if local_player == "" or local_player not in active_players:
+		local_player = active_players[0] if not active_players.is_empty() else "player1"
+	set_local_player_id(local_player)
+	var map_selection = seed_config.get("map_selection", {})
+	if map_selection is Dictionary:
+		NetworkManager.map_selection_mode = str(map_selection.get("map_selection_mode", NetworkManager.map_selection_mode)).strip_edges()
+		NetworkManager.selected_map_index = int(map_selection.get("selected_map_index", -1))
+		NetworkManager.custom_proc_params = map_selection.get("custom_proc_params", {}).duplicate(true) if map_selection.get("custom_proc_params", {}) is Dictionary else {}
+	var configured_match_seed = int(seed_config.get("match_seed", map_selection.get("match_seed", -1) if map_selection is Dictionary else -1))
+	if configured_match_seed > 0:
+		NetworkManager.match_seed = configured_match_seed
+		rng.seed = configured_match_seed
+	else:
+		rng.randomize()
+	_reset_map_state()
+	current_map_index = -1
+	turn_number = 1
+	current_phase = Phase.UPKEEP
+	current_player = local_player
+	state_seq = 0
+	last_state_seq_applied = -1
+	last_snapshot_turn = -1
+	last_state_hash_turn = -1
+	last_stats_turn = -1
+	player_orders = _build_player_dict(active_players, {})
+	committed_orders = _build_player_dict(active_players, {})
+	NetworkManager.player_orders = player_orders
+	NetworkManager.reset_match_tracking(get_submission_players())
+	_ensure_map_loaded()
+	rng.seed = turn_number
+	player_orders = NetworkManager.player_orders
+	committed_orders = player_orders.duplicate(true)
+	clear_async_turn_events()
+	_do_upkeep()
+	current_phase = Phase.ORDERS
+	current_player = local_player
+	var waiting_on_players: Array = []
+	if active_players.size() < 2:
+		waiting_on_players = ["player2"]
+	var result := {
+		"ok": true,
+		"job_type": "seed_match",
+		"match_id": async_match_id,
+		"turn_number": int(turn_number),
+		"rules_version": get_rules_version(),
+		"selected_map_index": int(NetworkManager.selected_map_index),
+		"map_seed": int(NetworkManager.match_seed),
+		"waiting_on_players": waiting_on_players
+	}
+	result["snapshot"] = build_async_turn_snapshot_envelope(async_match_id, "", true)
+	var player_views := {}
+	for player_id in active_players:
+		player_views[player_id] = build_async_turn_snapshot_envelope(async_match_id, player_id, false)
+	result["player_views"] = player_views
+	return result
+
+func build_async_turn_snapshot_envelope(match_id: String, viewer_id: String = "", bump_seq: bool = false) -> Dictionary:
+	set_async_match_id(match_id)
+	return _async_contract.build_turn_snapshot(async_match_id, viewer_id, bump_seq)
+
+func build_async_submit_orders_request(match_id: String, player_id: String, snapshot_version: int = -1) -> Dictionary:
+	set_async_match_id(match_id)
+	var bucket = _async_event_bucket(player_id)
+	var resolved_snapshot_version = snapshot_version if snapshot_version >= 0 else state_seq
+	return _async_contract.build_order_submission(
+		async_match_id,
+		int(turn_number),
+		int(resolved_snapshot_version),
+		player_id,
+		_orders_array_for_player(player_id),
+		bucket.get("buys", []),
+		bucket.get("undo_buys", [])
+	)
+
+func apply_async_turn_snapshot_envelope(snapshot_envelope: Dictionary) -> void:
+	if not (snapshot_envelope is Dictionary) or snapshot_envelope.is_empty():
+		return
+	set_async_match_id(str(snapshot_envelope.get("match_id", async_match_id)))
+	var state = _async_contract.extract_state(snapshot_envelope)
+	if state.is_empty():
+		return
+	state["force_apply"] = true
+	apply_state(state, true)
+	clear_async_turn_events()
+
+func resolve_async_turn_contract(snapshot_envelope: Dictionary, raw_submissions: Array) -> Dictionary:
+	var state = _async_contract.extract_state(snapshot_envelope)
+	if state.is_empty():
+		return {
+			"ok": false,
+			"reason": "missing_state"
+		}
+	set_async_match_id(str(snapshot_envelope.get("match_id", async_match_id)))
+	state["force_apply"] = true
+	apply_state(state, true)
+	current_phase = Phase.ORDERS
+	player_orders = _build_player_dict(active_players, {})
+	NetworkManager.player_orders = _build_player_dict(active_players, {})
+	committed_orders = _build_player_dict(active_players, {})
+	clear_async_turn_events()
+	var submissions = _async_contract.normalize_order_submissions(raw_submissions)
+	submissions.sort_custom(Callable(self, "_sort_async_submissions"))
+	for submission in submissions:
+		var player_id = str(submission.get("player_id", "")).strip_edges()
+		if player_id == "" or player_id not in active_players:
+			return {
+				"ok": false,
+				"reason": "invalid_player",
+				"player_id": player_id
+			}
+		var buy_result = _apply_async_submission_buys(player_id, submission.get("buy_events", []))
+		if not buy_result.get("ok", false):
+			return buy_result
+		var async_unit_id_map = buy_result.get("unit_id_map", {})
+		var undo_result = _apply_async_submission_undo_buys(player_id, submission.get("undo_events", []), async_unit_id_map)
+		if not undo_result.get("ok", false):
+			return undo_result
+		var order_result = _apply_async_submission_orders(player_id, submission.get("orders", []), async_unit_id_map)
+		if not order_result.get("ok", false):
+			return order_result
+	committed_orders = player_orders.duplicate(true)
+	for player_id in active_players:
+		for order in player_orders.get(player_id, {}).values():
+			if order is Dictionary:
+				var unit = unit_manager.get_unit_by_net_id(int(order.get("unit_net_id", -1)))
+				_apply_order_flags(unit, order)
+				_apply_replay_order_side_effects(unit, order, player_id)
+	_do_execution()
+	while step_index < exec_steps.size():
+		resume_execution()
+	_rebuild_structure_ownership_from_live_units()
+	var debug_before_upkeep := {
+		"turn_number": int(turn_number),
+		"active_players": active_players.duplicate(),
+		"living_players": living_players.duplicate(),
+		"pending_eliminations": pending_eliminations.duplicate(),
+		"player_gold": player_gold.duplicate(true),
+		"player_income": player_income.duplicate(true)
+	}
+	turn_number += 1
+	rng.seed = turn_number
+	NetworkManager.reset_match_tracking(get_submission_players())
+	player_orders = NetworkManager.player_orders
+	committed_orders = player_orders.duplicate(true)
+	_do_upkeep()
+	var debug_after_upkeep := {
+		"turn_number": int(turn_number),
+		"active_players": active_players.duplicate(),
+		"living_players": living_players.duplicate(),
+		"pending_eliminations": pending_eliminations.duplicate(),
+		"player_gold": player_gold.duplicate(true),
+		"player_income": player_income.duplicate(true)
+	}
+	current_phase = Phase.ORDERS
+	var waiting_on_players = get_submission_players()
+	var result := {
+		"ok": true,
+		"job_type": "resolve_turn",
+		"match_id": async_match_id,
+		"turn_number": int(turn_number),
+		"rules_version": get_rules_version(),
+		"waiting_on_players": waiting_on_players,
+		"game_over": bool(game_over),
+		"winner_id": get_winner_id()
+	}
+	result["snapshot"] = build_async_turn_snapshot_envelope(async_match_id, "", true)
+	var player_views := {}
+	for player_id in active_players:
+		player_views[player_id] = build_async_turn_snapshot_envelope(async_match_id, player_id, false)
+	result["player_views"] = player_views
+	result["debug_before_upkeep"] = debug_before_upkeep
+	result["debug_after_upkeep"] = debug_after_upkeep
+	return result
+
+func _async_event_bucket(player_id: String) -> Dictionary:
+	if not async_turn_events.has(player_id):
+		async_turn_events[player_id] = {"buys": [], "undo_buys": []}
+	return async_turn_events[player_id]
+
+func _sort_async_submissions(a: Dictionary, b: Dictionary) -> bool:
+	return int(a.get("submitted_at", 0)) < int(b.get("submitted_at", 0))
+
+func _orders_array_for_player(player_id: String) -> Array:
+	var orders: Array = []
+	for order in player_orders.get(player_id, {}).values():
+		if order is Dictionary:
+			orders.append(order.duplicate(true))
+	return orders
+
+func _record_async_buy_event(player_id: String, unit_type: String, grid_pos: Vector2i, unit_net_id: int) -> void:
+	var bucket = _async_event_bucket(player_id)
+	var buys: Array = bucket.get("buys", [])
+	buys.append({
+		"unit_type": unit_type,
+		"grid_pos": grid_pos,
+		"unit_net_id": unit_net_id
+	})
+	bucket["buys"] = buys
+	var undo_buys: Array = bucket.get("undo_buys", [])
+	for idx in range(undo_buys.size() - 1, -1, -1):
+		if int(undo_buys[idx].get("unit_net_id", -1)) == unit_net_id:
+			undo_buys.remove_at(idx)
+	bucket["undo_buys"] = undo_buys
+
+func _record_async_undo_event(player_id: String, unit_net_id: int) -> void:
+	var bucket = _async_event_bucket(player_id)
+	var buys: Array = bucket.get("buys", [])
+	for idx in range(buys.size() - 1, -1, -1):
+		if int(buys[idx].get("unit_net_id", -1)) == unit_net_id:
+			buys.remove_at(idx)
+			bucket["buys"] = buys
+			return
+	var undo_buys: Array = bucket.get("undo_buys", [])
+	undo_buys.append({"unit_net_id": unit_net_id})
+	bucket["undo_buys"] = undo_buys
+
+func _apply_async_submission_buys(player_id: String, events: Array) -> Dictionary:
+	var unit_id_map := {}
+	for event in events:
+		if not (event is Dictionary):
+			continue
+		var requested_unit_id = int(event.get("unit_net_id", -1))
+		var forced_unit_id = requested_unit_id if requested_unit_id > 0 else -1
+		var result = buy_unit(
+			player_id,
+			str(event.get("unit_type", "")),
+			_decode_log_vec2i(event.get("grid_pos", Vector2i.ZERO)),
+			forced_unit_id
+		)
+		if not result.get("ok", false):
+			return {
+				"ok": false,
+				"reason": result.get("reason", "buy_failed"),
+				"player_id": player_id,
+				"event": event
+			}
+		var resolved_unit_id = int(result.get("unit_net_id", requested_unit_id))
+		if requested_unit_id != resolved_unit_id:
+			unit_id_map[requested_unit_id] = resolved_unit_id
+	return {
+		"ok": true,
+		"unit_id_map": unit_id_map
+	}
+
+func _apply_async_submission_undo_buys(player_id: String, events: Array, unit_id_map: Dictionary = {}) -> Dictionary:
+	for event in events:
+		if not (event is Dictionary):
+			continue
+		var submitted_unit_id = int(event.get("unit_net_id", -1))
+		var resolved_unit_id = int(unit_id_map.get(submitted_unit_id, submitted_unit_id))
+		var result = undo_buy_unit(player_id, resolved_unit_id)
+		if not result.get("ok", false):
+			return {
+				"ok": false,
+				"reason": result.get("reason", "undo_failed"),
+				"player_id": player_id,
+				"event": event
+			}
+	return {"ok": true}
+
+func _apply_async_submission_orders(player_id: String, orders: Array, unit_id_map: Dictionary = {}) -> Dictionary:
+	for order in orders:
+		if not (order is Dictionary):
+			continue
+		var resolved_order = order.duplicate(true)
+		var submitted_unit_id = int(resolved_order.get("unit_net_id", -1))
+		if unit_id_map.has(submitted_unit_id):
+			resolved_order["unit_net_id"] = int(unit_id_map[submitted_unit_id])
+		var result = validate_and_add_order(player_id, resolved_order)
+		if not result.get("ok", false):
+			return {
+				"ok": false,
+				"reason": result.get("reason", "order_failed"),
+				"player_id": player_id,
+				"order": resolved_order
+			}
+	return {"ok": true}
 
 func _save_path_for_slot(slot: int) -> String:
 	return _persistence.save_path_for_slot(slot)
@@ -4083,6 +4398,64 @@ func _neutralize_player_mines(player_id: String) -> void:
 			mines["unclaimed"].append(tile)
 	mines[player_id] = []
 
+func _player_has_live_base_unit(player_id: String) -> bool:
+	if player_id == "":
+		return false
+	for unit in unit_manager.get_children():
+		if unit == null or not is_instance_valid(unit):
+			continue
+		if unit.player_id != player_id or not unit.is_base:
+			continue
+		if unit.curr_health > 0:
+			return true
+	return false
+
+func _rebuild_structure_ownership_from_live_units() -> void:
+	var rebuilt_bases := {}
+	var rebuilt_towers = _build_player_dict(active_players, [])
+	var rebuilt_spawn_towers = _build_player_dict(active_players, [])
+	var rebuilt_income_towers = _build_player_dict(active_players, [])
+	for unit in unit_manager.get_children():
+		if unit == null or not is_instance_valid(unit):
+			continue
+		var player_id = str(unit.player_id)
+		if player_id not in active_players or unit.curr_health <= 0:
+			continue
+		if unit.is_base:
+			rebuilt_bases[player_id] = unit.grid_pos
+			if unit.grid_pos not in structure_positions:
+				structure_positions.append(unit.grid_pos)
+			continue
+		if not unit.is_tower:
+			continue
+		if not rebuilt_towers[player_id].has(unit.grid_pos):
+			rebuilt_towers[player_id].append(unit.grid_pos)
+		if unit.is_spawn_tower:
+			if not rebuilt_spawn_towers[player_id].has(unit.grid_pos):
+				rebuilt_spawn_towers[player_id].append(unit.grid_pos)
+		else:
+			if not rebuilt_income_towers[player_id].has(unit.grid_pos):
+				rebuilt_income_towers[player_id].append(unit.grid_pos)
+		if unit.grid_pos not in structure_positions:
+			structure_positions.append(unit.grid_pos)
+	if not rebuilt_bases.is_empty():
+		base_positions = rebuilt_bases
+	var has_any_tower = false
+	for player_id in active_players:
+		if not rebuilt_towers[player_id].is_empty():
+			has_any_tower = true
+			break
+	if has_any_tower:
+		tower_positions = rebuilt_towers
+		spawn_tower_positions = rebuilt_spawn_towers
+		income_tower_positions = rebuilt_income_towers
+	var rebuilt_living: Array = []
+	for player_id in active_players:
+		if rebuilt_bases.has(player_id):
+			rebuilt_living.append(player_id)
+	if not rebuilt_living.is_empty():
+		living_players = rebuilt_living
+
 func _eliminate_player_now(player_id: String) -> void:
 	if player_id == "" or player_id not in living_players:
 		return
@@ -4124,6 +4497,8 @@ func _eliminate_player_now(player_id: String) -> void:
 func queue_player_elimination(player_id: String) -> void:
 	player_id = str(player_id).strip_edges()
 	if player_id == "" or player_id not in living_players:
+		return
+	if _player_has_live_base_unit(player_id):
 		return
 	if pending_eliminations.has(player_id):
 		return
@@ -4263,6 +4638,8 @@ func reset_to_lobby() -> void:
 	replay_target_turn = 0
 	replay_target_phase = 2
 	replay_fog_mode = ""
+	async_match_id = ""
+	clear_async_turn_events()
 	if NetworkManager != null:
 		NetworkManager.selected_map_index = -1
 		NetworkManager.match_seed = -1
@@ -4346,6 +4723,10 @@ func _do_upkeep() -> void:
 		"phase_name": "UPKEEP"
 	})
 	_recalculate_mana_caps()
+	_rebuild_structure_ownership_from_live_units()
+	if living_players.is_empty() and not active_players.is_empty() and not game_over:
+		push_warning("Upkeep recovered empty living_players from active_players.")
+		living_players = active_players.duplicate()
 	for player in living_players:
 		var income = 0
 		var mana_income = 0
@@ -8027,7 +8408,7 @@ func start_phase_locally(phase_name: String) -> void:
 # --------------------------------------------------------
 # API: attempt to buy and spawn a unit
 # --------------------------------------------------------
-func buy_unit(player: String, unit_type: String, grid_pos: Vector2i) -> Dictionary:
+func buy_unit(player: String, unit_type: String, grid_pos: Vector2i, forced_unit_net_id: int = -1) -> Dictionary:
 	var result := {
 		"ok": false,
 		"reason": "",
@@ -8086,11 +8467,17 @@ func buy_unit(player: String, unit_type: String, grid_pos: Vector2i) -> Dictiona
 
 	# deduct gold & spawn
 	player_gold[player] -= cost
-	var unit = unit_manager.spawn_unit(unit_type, grid_pos, player, false)
+	var unit = unit_manager.spawn_unit(unit_type, grid_pos, player, false, forced_unit_net_id)
+	if unit == null:
+		player_gold[player] += cost
+		result["reason"] = "spawn_failed"
+		return _log_buy_result(player, unit_type, grid_pos, result)
 	$GameBoardNode/FogOfWar._update_fog()
 	print("%s bought a %s at %s for %d gold" % [player, unit_type, grid_pos, cost])
 	result["ok"] = true
 	result["unit_net_id"] = unit.net_id
+	if NetworkManager != null and NetworkManager.has_method("is_async_mode") and NetworkManager.is_async_mode():
+		_record_async_buy_event(player, unit_type, grid_pos, unit.net_id)
 	return _log_buy_result(player, unit_type, grid_pos, result)
 
 func undo_buy_unit(player_id: String, unit_net_id: int) -> Dictionary:
@@ -8128,6 +8515,8 @@ func undo_buy_unit(player_id: String, unit_net_id: int) -> Dictionary:
 	unit_manager.unit_by_net_id.erase(unit.net_id)
 	unit.queue_free()
 	result["ok"] = true
+	if NetworkManager != null and NetworkManager.has_method("is_async_mode") and NetworkManager.is_async_mode():
+		_record_async_undo_event(player_id, unit_net_id)
 	return _log_undo_buy_result(player_id, unit_net_id, result)
 
 # --------------------------------------------------------

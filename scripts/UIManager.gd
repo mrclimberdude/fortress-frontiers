@@ -225,6 +225,16 @@ const DAMAGE_PANEL_MIN_SIZE: Vector2 = Vector2(220, 120)
 const USERNAME_SAVE_PATH: String = "user://user_settings.cfg"
 
 var lobby_slots_payload: Array = []
+var async_match_entries: Array = []
+var async_menu_button: Button = null
+var async_panel: Panel = null
+var async_status_label: Label = null
+var async_url_edit: LineEdit = null
+var async_anon_key_edit: LineEdit = null
+var async_email_edit: LineEdit = null
+var async_password_edit: LineEdit = null
+var async_match_id_edit: LineEdit = null
+var async_matches_list: ItemList = null
 
 const MENU_ID_SAVE: int = 1
 const MENU_ID_LOAD: int = 2
@@ -329,9 +339,24 @@ func _ready():
 					Callable(self, "_on_player_id_assigned"))
 	NetworkManager.connect("map_selection_changed",
 					Callable(self, "_on_map_selection_changed"))
+	if NetworkManager.has_signal("async_mode_changed"):
+		NetworkManager.connect("async_mode_changed", Callable(self, "_on_async_mode_changed"))
+	if NetworkManager.has_signal("async_auth_changed"):
+		NetworkManager.connect("async_auth_changed", Callable(self, "_on_async_auth_changed"))
+	if NetworkManager.has_signal("async_error"):
+		NetworkManager.connect("async_error", Callable(self, "_on_async_error_received"))
+	if NetworkManager.has_signal("async_match_state_updated"):
+		NetworkManager.connect("async_match_state_updated", Callable(self, "_on_async_match_state_updated"))
+	if NetworkManager.has_signal("async_turn_snapshot_updated"):
+		NetworkManager.connect("async_turn_snapshot_updated", Callable(self, "_on_async_turn_snapshot_updated"))
+	if NetworkManager.has_signal("async_submit_result"):
+		NetworkManager.connect("async_submit_result", Callable(self, "_on_async_submit_result"))
+	if NetworkManager.has_signal("async_matches_listed"):
+		NetworkManager.connect("async_matches_listed", Callable(self, "_on_async_matches_listed"))
 	_init_map_select()
 	_init_proc_custom_panel()
 	_init_host_player_count_dialog()
+	_init_async_ui()
 	_show_main_menu()
 	if keep_logs_game_over_check != null and not keep_logs_game_over_check.is_connected("toggled", Callable(self, "_on_keep_logs_toggled")):
 		keep_logs_game_over_check.connect("toggled", Callable(self, "_on_keep_logs_toggled"))
@@ -1476,6 +1501,7 @@ func _init_preview_markers() -> void:
 	add_child(_preview_marker_root)
 
 func _process(_delta: float) -> void:
+	var selected_unit = _selected_unit_or_null()
 	var cam = get_viewport().get_camera_2d()
 	var pointer_cell = Vector2i(-99999, -99999)
 	if cam != null:
@@ -1490,7 +1516,7 @@ func _process(_delta: float) -> void:
 		placing_unit,
 		current_player,
 		var_to_str(current_path),
-		str(currently_selected_unit.net_id) if currently_selected_unit != null else "",
+		str(selected_unit.net_id) if selected_unit != null else "",
 		str(_queue_preview_unit_id),
 		str(turn_mgr.state_seq)
 	]
@@ -1534,13 +1560,22 @@ func _hide_build_hover() -> void:
 func _is_long_queue_mode() -> bool:
 	return action_mode in ["move_to", "build_road_to", "build_rail_to"]
 
+func _selected_unit_or_null() -> Node:
+	if currently_selected_unit == null:
+		return null
+	if not is_instance_valid(currently_selected_unit):
+		currently_selected_unit = null
+		return null
+	return currently_selected_unit
+
 func _current_queue_endpoint() -> Vector2i:
 	if current_path.size() > 0:
 		var tail = current_path[current_path.size() - 1]
 		if typeof(tail) == TYPE_VECTOR2I:
 			return tail
-	if currently_selected_unit != null:
-		return currently_selected_unit.grid_pos
+	var selected_unit = _selected_unit_or_null()
+	if selected_unit != null:
+		return selected_unit.grid_pos
 	return Vector2i(-99999, -99999)
 
 func _hide_queue_hover() -> void:
@@ -1598,7 +1633,8 @@ func _reconstruct_queue_segment(start: Vector2i, target: Vector2i, prev: Diction
 	return path
 
 func _update_queue_path_preview_for_cell(cell: Vector2i, mouse_pos: Vector2, force: bool = false) -> void:
-	if not _is_long_queue_mode() or currently_selected_unit == null:
+	var selected_unit = _selected_unit_or_null()
+	if not _is_long_queue_mode() or selected_unit == null:
 		_draw_preview_path(current_path)
 		_hide_queue_hover()
 		return
@@ -1650,17 +1686,18 @@ func _update_queue_path_preview_for_cell(cell: Vector2i, mouse_pos: Vector2, for
 			_set_queue_finish_button_position()
 
 func _estimate_queue_eta(preview_path: Array) -> int:
-	if turn_mgr == null or not turn_mgr.has_method("estimate_queue_turns") or currently_selected_unit == null:
+	var selected_unit = _selected_unit_or_null()
+	if turn_mgr == null or not turn_mgr.has_method("estimate_queue_turns") or selected_unit == null:
 		return -1
 	var key = "%s|%s|%s|%s" % [
-		str(currently_selected_unit.net_id),
+		str(selected_unit.net_id),
 		action_mode,
 		current_player,
 		var_to_str(preview_path)
 	]
 	if _queue_eta_cache.has(key):
 		return int(_queue_eta_cache[key])
-	var eta = int(turn_mgr.estimate_queue_turns(currently_selected_unit, preview_path, action_mode, current_player))
+	var eta = int(turn_mgr.estimate_queue_turns(selected_unit, preview_path, action_mode, current_player))
 	_queue_eta_cache[key] = eta
 	return eta
 
@@ -1683,12 +1720,13 @@ func _update_queue_hover() -> void:
 	_update_queue_path_preview_for_cell(cell, mouse_pos)
 
 func _refresh_queue_reachable() -> void:
-	if currently_selected_unit == null or not _is_long_queue_mode():
+	var selected_unit = _selected_unit_or_null()
+	if selected_unit == null or not _is_long_queue_mode():
 		current_reachable = {}
 		_hide_queue_hover()
 		return
 	var endpoint = _current_queue_endpoint()
-	var result = game_board.get_queue_reachable(endpoint, action_mode, currently_selected_unit, current_player)
+	var result = game_board.get_queue_reachable(endpoint, action_mode, selected_unit, current_player)
 	current_reachable = result
 	var tiles = result.get("tiles", []).duplicate()
 	if tiles.has(endpoint):
@@ -3037,6 +3075,9 @@ func _update_done_button_state() -> void:
 	if not $Panel.visible or turn_mgr.current_phase != turn_mgr.Phase.ORDERS:
 		done_button.self_modulate = done_button_default_modulate
 		return
+	if NetworkManager.is_async_mode() and NetworkManager.has_method("is_async_submission_locked") and NetworkManager.is_async_submission_locked():
+		done_button.self_modulate = Color(0.6, 0.6, 0.6)
+		return
 	if _has_unordered_units(current_player):
 		done_button.self_modulate = Color(1.0, 0.6, 0.6)
 	else:
@@ -3315,6 +3356,319 @@ func _save_connection_settings(ip: String, port: String) -> void:
 	cfg.set_value("network", "port", port.strip_edges())
 	cfg.save(USERNAME_SAVE_PATH)
 
+func _init_async_ui() -> void:
+	if async_menu_button != null:
+		return
+	async_menu_button = Button.new()
+	async_menu_button.text = "Async Play"
+	async_menu_button.offset_left = 518.0
+	async_menu_button.offset_top = 456.0
+	async_menu_button.offset_right = 725.0
+	async_menu_button.offset_bottom = 494.0
+	add_child(async_menu_button)
+	async_menu_button.connect("pressed", Callable(self, "_on_async_menu_pressed"))
+
+	async_panel = Panel.new()
+	async_panel.visible = false
+	async_panel.offset_left = 470.0
+	async_panel.offset_top = 120.0
+	async_panel.offset_right = 860.0
+	async_panel.offset_bottom = 670.0
+	add_child(async_panel)
+
+	var panel_vbox = VBoxContainer.new()
+	panel_vbox.offset_left = 10.0
+	panel_vbox.offset_top = 10.0
+	panel_vbox.offset_right = 370.0
+	panel_vbox.offset_bottom = 530.0
+	async_panel.add_child(panel_vbox)
+
+	var title = Label.new()
+	title.text = "Async Match"
+	panel_vbox.add_child(title)
+
+	async_url_edit = LineEdit.new()
+	async_url_edit.placeholder_text = "Supabase URL"
+	panel_vbox.add_child(async_url_edit)
+
+	async_anon_key_edit = LineEdit.new()
+	async_anon_key_edit.placeholder_text = "Supabase anon key"
+	panel_vbox.add_child(async_anon_key_edit)
+
+	async_email_edit = LineEdit.new()
+	async_email_edit.placeholder_text = "Email"
+	panel_vbox.add_child(async_email_edit)
+
+	async_password_edit = LineEdit.new()
+	async_password_edit.placeholder_text = "Password"
+	async_password_edit.secret = true
+	panel_vbox.add_child(async_password_edit)
+
+	var auth_row = HBoxContainer.new()
+	panel_vbox.add_child(auth_row)
+
+	var sign_in_button = Button.new()
+	sign_in_button.text = "Sign In"
+	sign_in_button.connect("pressed", Callable(self, "_on_async_sign_in_pressed"))
+	auth_row.add_child(sign_in_button)
+
+	var sign_up_button = Button.new()
+	sign_up_button.text = "Sign Up"
+	sign_up_button.connect("pressed", Callable(self, "_on_async_sign_up_pressed"))
+	auth_row.add_child(sign_up_button)
+
+	var list_button = Button.new()
+	list_button.text = "List Matches"
+	list_button.connect("pressed", Callable(self, "_on_async_list_matches_pressed"))
+	auth_row.add_child(list_button)
+
+	async_match_id_edit = LineEdit.new()
+	async_match_id_edit.placeholder_text = "Match ID or invite code"
+	panel_vbox.add_child(async_match_id_edit)
+
+	var match_row = HBoxContainer.new()
+	panel_vbox.add_child(match_row)
+
+	var create_button = Button.new()
+	create_button.text = "Create Match"
+	create_button.connect("pressed", Callable(self, "_on_async_create_match_pressed"))
+	match_row.add_child(create_button)
+
+	var join_button = Button.new()
+	join_button.text = "Join Match"
+	join_button.connect("pressed", Callable(self, "_on_async_join_match_pressed"))
+	match_row.add_child(join_button)
+
+	var open_button = Button.new()
+	open_button.text = "Open Match"
+	open_button.connect("pressed", Callable(self, "_on_async_open_match_pressed"))
+	match_row.add_child(open_button)
+
+	var refresh_button = Button.new()
+	refresh_button.text = "Refresh"
+	refresh_button.connect("pressed", Callable(self, "_on_async_refresh_match_pressed"))
+	match_row.add_child(refresh_button)
+
+	async_matches_list = ItemList.new()
+	async_matches_list.custom_minimum_size = Vector2(320, 180)
+	async_matches_list.connect("item_selected", Callable(self, "_on_async_match_selected"))
+	panel_vbox.add_child(async_matches_list)
+
+	var footer_row = HBoxContainer.new()
+	panel_vbox.add_child(footer_row)
+
+	var back_button = Button.new()
+	back_button.text = "Back"
+	back_button.connect("pressed", Callable(self, "_on_async_back_pressed"))
+	footer_row.add_child(back_button)
+
+	async_status_label = Label.new()
+	async_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	async_status_label.text = "Configure Supabase, sign in, then open a match."
+	panel_vbox.add_child(async_status_label)
+	_apply_async_backend_defaults()
+
+func _async_backend_config() -> Dictionary:
+	return {
+		"supabase_url": async_url_edit.text.strip_edges() if async_url_edit != null else "",
+		"anon_key": async_anon_key_edit.text.strip_edges() if async_anon_key_edit != null else ""
+	}
+
+func _apply_async_backend_defaults() -> void:
+	if not NetworkManager.has_method("get_async_default_backend_config"):
+		return
+	var defaults = NetworkManager.get_async_default_backend_config()
+	if not (defaults is Dictionary):
+		return
+	if async_url_edit != null and async_url_edit.text.strip_edges() == "":
+		async_url_edit.text = str(defaults.get("supabase_url", "")).strip_edges()
+	if async_anon_key_edit != null and async_anon_key_edit.text.strip_edges() == "":
+		async_anon_key_edit.text = str(defaults.get("anon_key", "")).strip_edges()
+
+func _set_async_status(message: String) -> void:
+	if async_status_label != null:
+		async_status_label.text = message
+
+func _on_async_menu_pressed() -> void:
+	if NetworkManager.has_method("enable_async_mode"):
+		NetworkManager.enable_async_mode(_async_backend_config())
+	_show_async_panel()
+
+func _on_async_back_pressed() -> void:
+	_show_main_menu()
+
+func _on_async_sign_in_pressed() -> void:
+	if NetworkManager.has_method("configure_async_backend"):
+		NetworkManager.configure_async_backend(async_url_edit.text, async_anon_key_edit.text)
+	if NetworkManager.has_method("async_sign_in"):
+		NetworkManager.async_sign_in(async_email_edit.text, async_password_edit.text)
+
+func _on_async_sign_up_pressed() -> void:
+	if NetworkManager.has_method("configure_async_backend"):
+		NetworkManager.configure_async_backend(async_url_edit.text, async_anon_key_edit.text)
+	if NetworkManager.has_method("async_sign_up"):
+		NetworkManager.async_sign_up(async_email_edit.text, async_password_edit.text)
+
+func _on_async_list_matches_pressed() -> void:
+	if NetworkManager.has_method("configure_async_backend"):
+		NetworkManager.configure_async_backend(async_url_edit.text, async_anon_key_edit.text)
+	if NetworkManager.has_method("async_list_matches"):
+		NetworkManager.async_list_matches()
+
+func _on_async_create_match_pressed() -> void:
+	if NetworkManager.has_method("configure_async_backend"):
+		NetworkManager.configure_async_backend(async_url_edit.text, async_anon_key_edit.text)
+	var username = _async_display_name()
+	if NetworkManager.has_method("async_create_match"):
+		NetworkManager.async_create_match({
+			"display_name": username,
+			"map_selection_mode": "random_normal",
+			"selected_map_index": -1,
+			"custom_proc_params": {}
+		})
+
+func _on_async_join_match_pressed() -> void:
+	if NetworkManager.has_method("configure_async_backend"):
+		NetworkManager.configure_async_backend(async_url_edit.text, async_anon_key_edit.text)
+	var payload = _build_async_join_payload()
+	if payload.is_empty():
+		_set_async_status("Enter a match ID or invite code before joining.")
+		return
+	payload["display_name"] = _async_display_name()
+	if NetworkManager.has_method("async_join_match"):
+		NetworkManager.async_join_match(payload)
+
+func _on_async_open_match_pressed() -> void:
+	if NetworkManager.has_method("async_open_match"):
+		NetworkManager.async_open_match(async_match_id_edit.text.strip_edges())
+
+func _on_async_refresh_match_pressed() -> void:
+	if NetworkManager.has_method("async_refresh_current_match"):
+		NetworkManager.async_refresh_current_match()
+
+func _on_async_match_selected(index: int) -> void:
+	if index < 0 or index >= async_match_entries.size():
+		return
+	var entry = async_match_entries[index]
+	if not (entry is Dictionary):
+		return
+	var match_id = str(entry.get("match_id", "")).strip_edges()
+	if async_match_id_edit != null:
+		async_match_id_edit.text = match_id
+
+func _async_display_name() -> String:
+	var username = async_email_edit.text.strip_edges()
+	if username == "" and username_edit != null:
+		username = username_edit.text.strip_edges()
+	return username
+
+func _build_async_join_payload() -> Dictionary:
+	var raw_value = async_match_id_edit.text.strip_edges() if async_match_id_edit != null else ""
+	if raw_value == "":
+		return {}
+	if _looks_like_uuid(raw_value):
+		return {"match_id": raw_value}
+	return {"join_code": raw_value.to_upper()}
+
+func _looks_like_uuid(value: String) -> bool:
+	var parts = value.split("-")
+	if parts.size() != 5:
+		return false
+	var expected_lengths = [8, 4, 4, 4, 12]
+	for idx in range(expected_lengths.size()):
+		var part = str(parts[idx])
+		if part.length() != int(expected_lengths[idx]) or not part.is_valid_hex_number(false):
+			return false
+	return true
+
+func _show_async_panel() -> void:
+	_hide_main_menu_controls()
+	if async_panel != null:
+		async_panel.visible = true
+	if async_menu_button != null:
+		async_menu_button.visible = false
+
+func _hide_async_panel() -> void:
+	if async_panel != null:
+		async_panel.visible = false
+
+func _on_async_mode_changed(enabled: bool) -> void:
+	if enabled:
+		_set_async_status("Async mode enabled.")
+
+func _on_async_auth_changed(session: Dictionary) -> void:
+	var user_id = str(session.get("user_id", "")).strip_edges()
+	if user_id == "":
+		_set_async_status("Signed out.")
+		return
+	_set_async_status("Signed in as %s" % user_id)
+
+func _on_async_error_received(message: String) -> void:
+	_set_async_status(message)
+
+func _on_async_matches_listed(matches: Array) -> void:
+	async_match_entries = matches.duplicate(true)
+	if async_matches_list != null:
+		async_matches_list.clear()
+		for entry in async_match_entries:
+			if not (entry is Dictionary):
+				continue
+			var match_id = str(entry.get("match_id", "")).strip_edges()
+			var status = str(entry.get("status", "")).strip_edges()
+			var turn_no = int(entry.get("current_turn", 0))
+			async_matches_list.add_item("%s | %s | turn %d" % [match_id, status, turn_no])
+	_set_async_status("Loaded %d matches." % async_match_entries.size())
+
+func _on_async_match_state_updated(match_state: Dictionary) -> void:
+	var match_id = str(match_state.get("match_id", "")).strip_edges()
+	if async_match_id_edit != null and match_id != "":
+		async_match_id_edit.text = match_id
+	var status = str(match_state.get("status", "")).strip_edges()
+	var turn_no = int(match_state.get("current_turn", 0))
+	_set_async_status("Match %s | %s | turn %d" % [match_id, status, turn_no])
+
+func _on_async_turn_snapshot_updated(snapshot: Dictionary) -> void:
+	var turn_no = int(snapshot.get("turn_number", 0))
+	if bool(snapshot.get("pending", false)):
+		allow_clicks = not NetworkManager.is_async_submission_locked()
+		_set_async_status("Async turn %d is pending." % turn_no)
+		return
+	if bool(snapshot.get("deferred_local", false)):
+		allow_clicks = not NetworkManager.is_async_submission_locked()
+		if NetworkManager.is_async_submission_locked():
+			_set_async_status("Orders submitted. Waiting for async turn %d to resolve." % turn_no)
+		else:
+			_set_async_status("Keeping local async edits for turn %d." % turn_no)
+		return
+	_on_game_started()
+	if async_panel != null:
+		async_panel.visible = false
+	if $Panel != null:
+		$Panel.visible = true
+	if resource_panel != null:
+		resource_panel.visible = true
+	if cancel_done_button != null:
+		cancel_done_button.visible = false
+	allow_clicks = not NetworkManager.is_async_submission_locked()
+	currently_selected_unit = null
+	action_mode = ""
+	current_path = []
+	remaining_moves = 0
+	_queue_eta_cache.clear()
+	_set_async_status("Loaded async turn %d." % turn_no)
+
+func _on_async_submit_result(ok: bool, response: Dictionary) -> void:
+	if ok:
+		var waiting = response.get("waiting_on_players", [])
+		var wait_text = ""
+		if waiting is Array and not waiting.is_empty():
+			wait_text = " Waiting on: %s" % ", ".join(waiting)
+		status_lbl.text = "Orders submitted.%s" % wait_text
+		allow_clicks = false
+		cancel_done_button.visible = false
+		return
+	status_lbl.text = str(response.get("message", "Failed to submit async orders."))
+
 func _show_main_menu() -> void:
 	if username_label != null:
 		username_label.visible = true
@@ -3324,6 +3678,9 @@ func _show_main_menu() -> void:
 	$JoinButton.visible = true
 	$IPLineEdit.visible = true
 	$PortLineEdit.visible = true
+	if async_menu_button != null:
+		async_menu_button.visible = true
+	_hide_async_panel()
 	if replays_button != null:
 		replays_button.visible = true
 	$Panel.visible = false
@@ -3353,6 +3710,9 @@ func _show_lobby(is_host: bool) -> void:
 		username_edit.visible = false
 	$HostButton.visible = false
 	$JoinButton.visible = false
+	if async_menu_button != null:
+		async_menu_button.visible = false
+	_hide_async_panel()
 	$IPLineEdit.visible = false
 	$PortLineEdit.visible = false
 	if replays_button != null:
@@ -3622,6 +3982,8 @@ func _hide_main_menu_controls() -> void:
 		$HostButton.visible = false
 	if $JoinButton != null:
 		$JoinButton.visible = false
+	if async_menu_button != null:
+		async_menu_button.visible = false
 	if $IPLineEdit != null:
 		$IPLineEdit.visible = false
 	if $PortLineEdit != null:
@@ -3634,6 +3996,7 @@ func _hide_main_menu_controls() -> void:
 		replays_button.visible = false
 	if replay_browser_panel != null:
 		replay_browser_panel.visible = false
+	_hide_async_panel()
 
 func _on_replays_button_pressed() -> void:
 	_show_replay_browser()
@@ -4320,12 +4683,14 @@ func _reset_ui_for_snapshot() -> void:
 
 func _submit_orders() -> void:
 	game_board.clear_highlights()
-	$Panel.visible = false
-	cancel_done_button.visible = true
+	$Panel.visible = NetworkManager.is_async_mode()
+	cancel_done_button.visible = not NetworkManager.is_async_mode()
 	NetworkManager.submit_orders(current_player, [])
 	# prevent further clicks
 	placing_unit = ""
 	allow_clicks = false
+	if NetworkManager.is_async_mode():
+		status_lbl.text = "Submitting async orders..."
 
 func _on_done_pressed():
 	if _has_unordered_units(current_player):

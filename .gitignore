@@ -24,4 +24,17 @@ export_presets.cfg
 *.exe
 *.pck
 
+# Local CLI/tool installs at repo root
+/node_modules/
+/package.json
+/package-lock.json
+
+# Supabase local/dev artifacts
+supabase/.temp/
+supabase/worker/node_modules/
+
+# Local environment files
+.env
+supabase/worker/.env
+
 addons/

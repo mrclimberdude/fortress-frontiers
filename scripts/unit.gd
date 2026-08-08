@@ -56,7 +56,8 @@ extends Node2D
 @export var spell_buff_turns: int = 0
 
 # -- grid positioning and reference to the TileMapLayer
-var grid_pos: Vector2i
+const INVALID_GRID_POS: Vector2i = Vector2i(-9999, -9999)
+var grid_pos: Vector2i = INVALID_GRID_POS
 var map_layer: Node
 
 @onready var unit_mgr = get_parent() as Node2D
@@ -67,8 +68,8 @@ var owner_overlay: Sprite2D = null
 
 func _ready():
 	structure_tiles = turn_mgr.structure_positions
-	# if map_layer and grid_pos were set prior to ready, snap into place
-	if map_layer and grid_pos:
+	# If spawn/setup assigned a valid tile before _ready, ensure the node is registered once.
+	if map_layer and grid_pos != INVALID_GRID_POS:
 		set_grid_position(grid_pos)
 	set_health_bar()
 	self.z_index = 7
@@ -123,7 +124,7 @@ func set_grid_position(pos: Vector2i) -> void:
 	var board   = map_layer.get_parent()
 	var old_pos = grid_pos
 	# 1) Clear previous tile
-	if board and board.has_method("vacate") and old_pos:
+	if board and board.has_method("vacate") and old_pos != INVALID_GRID_POS and old_pos != pos:
 		board.vacate(old_pos, self)
 		if old_pos in turn_mgr.camps["basic"]:
 			map_layer.set_player_tile(old_pos, "camp")

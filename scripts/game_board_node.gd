@@ -56,13 +56,31 @@ func vacate(tile: Vector2i, unit: Node = null) -> void:
 	occupied_tiles.erase(tile)
 
 func is_occupied(tile: Vector2i) -> bool:
-	return occupied_tiles.has(tile)
+	var unit = occupied_tiles.get(tile, null)
+	if unit == null:
+		return false
+	if not is_instance_valid(unit):
+		occupied_tiles.erase(tile)
+		return false
+	return true
 
 func get_unit_at(tile: Vector2i) -> Node:
-	return occupied_tiles.get(tile, null)
+	var unit = occupied_tiles.get(tile, null)
+	if unit == null:
+		return null
+	if not is_instance_valid(unit):
+		occupied_tiles.erase(tile)
+		return null
+	return unit
 
 func get_structure_unit_at(tile: Vector2i) -> Node:
-	return structure_units.get(tile, null)
+	var unit = structure_units.get(tile, null)
+	if unit == null:
+		return null
+	if not is_instance_valid(unit):
+		structure_units.erase(tile)
+		return null
+	return unit
 
 func get_any_unit_at(tile: Vector2i) -> Node:
 	var unit = get_unit_at(tile)
@@ -106,12 +124,20 @@ func get_all_units():
 	var units: Dictionary = {"neutral": []}
 	for player_id in _get_player_ids():
 		units[player_id] = []
-	for unit in occupied_tiles.values():
+	for tile in occupied_tiles.keys():
+		var unit = occupied_tiles.get(tile, null)
+		if unit == null or not is_instance_valid(unit):
+			occupied_tiles.erase(tile)
+			continue
 		var owner = str(unit.player_id)
 		if not units.has(owner):
 			units[owner] = []
 		units[owner].append(unit)
-	for unit in structure_units.values():
+	for tile in structure_units.keys():
+		var unit = structure_units.get(tile, null)
+		if unit == null or not is_instance_valid(unit):
+			structure_units.erase(tile)
+			continue
 		var owner = str(unit.player_id)
 		if not units.has(owner):
 			units[owner] = []
@@ -120,10 +146,18 @@ func get_all_units():
 
 func get_all_units_flat(include_structures: bool = true) -> Array:
 	var units := []
-	for unit in occupied_tiles.values():
+	for tile in occupied_tiles.keys():
+		var unit = occupied_tiles.get(tile, null)
+		if unit == null or not is_instance_valid(unit):
+			occupied_tiles.erase(tile)
+			continue
 		units.append(unit)
 	if include_structures:
-		for unit in structure_units.values():
+		for tile in structure_units.keys():
+			var unit = structure_units.get(tile, null)
+			if unit == null or not is_instance_valid(unit):
+				structure_units.erase(tile)
+				continue
 			units.append(unit)
 	return units
 

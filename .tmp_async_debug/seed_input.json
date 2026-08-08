@@ -1,0 +1,20 @@
+﻿{
+    "local_player_id":  "player1",
+    "turn_number":  1,
+    "match_seed":  12345,
+    "player_slots":  [
+                         "player1",
+                         "player2"
+                     ],
+    "job_type":  "seed_match",
+    "map_selection":  {
+                          "match_seed":  12345,
+                          "custom_proc_params":  {
+
+                                                 },
+                          "selected_map_index":  0,
+                          "map_selection_mode":  "random_normal"
+                      },
+    "match_id":  "debug-match",
+    "rules_version":  "async_v1"
+}

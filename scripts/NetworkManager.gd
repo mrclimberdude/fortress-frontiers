@@ -8,6 +8,7 @@ var _orders_submitted := {}
 var player_orders := {}  # map player_id → orders list
 
 const MAX_PLAYERS: int = 6
+const AsyncMatchServiceScript = preload("res://scripts/async_match_service.gd")
 
 var server_peer_id: int
 var client_peer_ids: Array = []
@@ -28,6 +29,15 @@ var _awaiting_initial_state_ready: bool = false
 var _pending_initial_state_ack: bool = false
 var _start_game_waiting_for_prewarm: bool = false
 var _start_game_handshake_active: bool = false
+var async_service = null
+var transport_mode: String = "live"
+var async_match_state: Dictionary = {}
+var async_turn_snapshot: Dictionary = {}
+var async_submission_locked: bool = false
+var async_auth_user_id: String = ""
+var async_local_state_dirty: bool = false
+var async_applied_turn_number: int = -1
+var async_applied_snapshot_version: int = -1
 
 
 var _step_ready_counts := {}
@@ -38,6 +48,14 @@ func _default_player_ids() -> Array:
 	return ["player1", "player2"]
 
 func get_match_player_ids() -> Array:
+	if is_async_mode():
+		var async_players = async_match_state.get("player_slots", [])
+		if async_players is Array and not async_players.is_empty():
+			return async_players.duplicate()
+		if turn_mgr != null and turn_mgr.has_method("get_match_players"):
+			var live_players = turn_mgr.get_match_players()
+			if live_players is Array and not live_players.is_empty():
+				return live_players
 	var players: Array = []
 	for slot in lobby_slots:
 		var occupied = false
@@ -103,14 +121,36 @@ signal undo_result(player_id: String, unit_net_id: int, ok: bool, reason: String
 signal order_result(player_id: String, unit_net_id: int, order: Dictionary, ok: bool, reason: String)
 signal lobby_updated(slots: Array, slot_count: int)
 signal player_id_assigned(player_id: String)
+signal async_mode_changed(enabled: bool)
+signal async_auth_changed(session: Dictionary)
+signal async_error(message: String)
+signal async_match_state_updated(match_state: Dictionary)
+signal async_turn_snapshot_updated(snapshot: Dictionary)
+signal async_submit_result(ok: bool, response: Dictionary)
+signal async_matches_listed(matches: Array)
 
 func _ready() -> void:
 	print("NetworkManager _ready() fired")
 	mp = get_tree().get_multiplayer()
 	mp.connect("peer_connected", Callable(self, "_on_peer_connected"))
 	mp.connect("peer_disconnected", Callable(self, "_on_peer_disconnected"))
+	_ensure_async_service()
 	if mp.is_server():
 		server_peer_id = mp.get_unique_id()
+
+func _ensure_async_service() -> void:
+	if async_service != null:
+		return
+	async_service = AsyncMatchServiceScript.new()
+	async_service.name = "AsyncMatchService"
+	add_child(async_service)
+	async_service.connect("mode_changed", Callable(self, "_on_async_mode_changed"))
+	async_service.connect("auth_state_changed", Callable(self, "_on_async_auth_changed"))
+	async_service.connect("match_list_received", Callable(self, "_on_async_match_list_received"))
+	async_service.connect("match_state_received", Callable(self, "_on_async_match_state_received"))
+	async_service.connect("turn_snapshot_received", Callable(self, "_on_async_turn_snapshot_received"))
+	async_service.connect("submit_orders_completed", Callable(self, "_on_async_submit_orders_completed"))
+	async_service.connect("error_raised", Callable(self, "_on_async_error"))
 
 func _ignore_rpc_in_replay() -> bool:
 	return turn_mgr != null and bool(turn_mgr.get("replay_mode"))
@@ -118,6 +158,210 @@ func _ignore_rpc_in_replay() -> bool:
 func is_host() -> bool:
 	var mp = get_tree().get_multiplayer()
 	return mp != null and (mp.multiplayer_peer == null or mp.is_server())
+
+func is_async_mode() -> bool:
+	return transport_mode == "async"
+
+func is_async_submission_locked() -> bool:
+	return async_submission_locked
+
+func enable_async_mode(config: Dictionary = {}) -> void:
+	var was_async = is_async_mode()
+	transport_mode = "async"
+	if not was_async:
+		async_submission_locked = false
+		_reset_lobby_state()
+	_ensure_async_service()
+	async_service.set_enabled(true)
+	if config.has("supabase_url") or config.has("anon_key"):
+		async_service.configure_backend(str(config.get("supabase_url", "")), str(config.get("anon_key", "")))
+	emit_signal("async_mode_changed", true)
+
+func disable_async_mode() -> void:
+	transport_mode = "live"
+	async_submission_locked = false
+	async_local_state_dirty = false
+	async_applied_turn_number = -1
+	async_applied_snapshot_version = -1
+	async_match_state = {}
+	async_turn_snapshot = {}
+	if async_service != null:
+		async_service.set_enabled(false)
+		async_service.stop_polling()
+	emit_signal("async_mode_changed", false)
+
+func configure_async_backend(url: String, anon_key: String) -> void:
+	enable_async_mode({
+		"supabase_url": url,
+		"anon_key": anon_key
+	})
+
+func get_async_default_backend_config() -> Dictionary:
+	_ensure_async_service()
+	if async_service != null and async_service.has_method("get_default_backend_config"):
+		return async_service.get_default_backend_config()
+	return {
+		"supabase_url": "",
+		"anon_key": ""
+	}
+
+func async_sign_in(email: String, password: String) -> void:
+	enable_async_mode()
+	if async_service != null:
+		async_service.sign_in(email, password)
+
+func async_sign_up(email: String, password: String) -> void:
+	enable_async_mode()
+	if async_service != null:
+		async_service.sign_up(email, password)
+
+func async_sign_out() -> void:
+	if async_service != null:
+		async_service.sign_out()
+	async_auth_user_id = ""
+	async_match_state = {}
+	async_turn_snapshot = {}
+	async_submission_locked = false
+	async_local_state_dirty = false
+	async_applied_turn_number = -1
+	async_applied_snapshot_version = -1
+
+func async_list_matches() -> void:
+	enable_async_mode()
+	if async_service != null:
+		async_service.list_matches()
+
+func async_create_match(payload: Dictionary) -> void:
+	enable_async_mode()
+	if async_service != null:
+		async_service.create_match(payload)
+
+func async_join_match(payload: Dictionary) -> void:
+	enable_async_mode()
+	if async_service != null:
+		async_service.join_match(payload)
+
+func async_open_match(match_id: String) -> void:
+	enable_async_mode()
+	if async_service == null:
+		return
+	async_local_state_dirty = false
+	async_submission_locked = false
+	async_applied_turn_number = -1
+	async_applied_snapshot_version = -1
+	async_service.set_current_match(match_id)
+	async_service.fetch_match_state(match_id)
+	async_service.fetch_turn_snapshot(match_id)
+	async_service.start_polling()
+
+func async_refresh_current_match() -> void:
+	if async_service == null:
+		return
+	var match_id = get_async_current_match_id()
+	if match_id == "":
+		return
+	if not async_submission_locked:
+		async_local_state_dirty = false
+	async_service.fetch_match_state(match_id)
+	async_service.fetch_turn_snapshot(match_id)
+
+func _mark_async_local_state_dirty() -> void:
+	async_local_state_dirty = true
+	if async_service != null:
+		async_service.stop_polling()
+
+func _should_defer_async_snapshot_apply(snapshot: Dictionary) -> bool:
+	if not async_local_state_dirty and not async_submission_locked:
+		return false
+	var incoming_turn = int(snapshot.get("turn_number", -1))
+	var incoming_version = int(snapshot.get("snapshot_version", -1))
+	if incoming_turn < 0 or incoming_version < 0:
+		return false
+	var applied_turn = async_applied_turn_number
+	var applied_version = async_applied_snapshot_version
+	if applied_turn < 0 and turn_mgr != null:
+		applied_turn = int(turn_mgr.turn_number)
+		applied_version = int(turn_mgr.state_seq)
+	if incoming_turn > applied_turn:
+		return false
+	if incoming_turn == applied_turn and incoming_version > applied_version:
+		return false
+	return true
+
+func async_submit_current_orders(player_id: String) -> void:
+	if async_service == null or turn_mgr == null:
+		return
+	var match_id = get_async_current_match_id()
+	if match_id == "":
+		emit_signal("async_error", "No async match selected.")
+		return
+	if async_turn_snapshot.is_empty() or bool(async_turn_snapshot.get("pending", false)):
+		emit_signal("async_error", "Turn snapshot is not ready yet.")
+		return
+	var snapshot_version = int(async_turn_snapshot.get("snapshot_version", -1))
+	var payload = turn_mgr.build_async_submit_orders_request(match_id, player_id, snapshot_version)
+	async_service.submit_orders(payload)
+
+func get_async_current_match_id() -> String:
+	var match_id = str(async_match_state.get("match_id", "")).strip_edges()
+	if match_id != "":
+		return match_id
+	return str(async_turn_snapshot.get("match_id", "")).strip_edges()
+
+func _on_async_mode_changed(enabled: bool) -> void:
+	emit_signal("async_mode_changed", enabled)
+
+func _on_async_auth_changed(session: Dictionary) -> void:
+	async_auth_user_id = str(session.get("user_id", "")).strip_edges()
+	emit_signal("async_auth_changed", session)
+
+func _on_async_match_list_received(matches: Array) -> void:
+	emit_signal("async_matches_listed", matches)
+
+func _on_async_match_state_received(match_state: Dictionary) -> void:
+	async_match_state = match_state.duplicate(true)
+	var slot_player_id = str(async_match_state.get("local_player_id", async_match_state.get("player_slot", ""))).strip_edges()
+	if slot_player_id != "":
+		local_player_id = slot_player_id
+		if turn_mgr != null and turn_mgr.has_method("set_local_player_id"):
+			turn_mgr.set_local_player_id(local_player_id)
+	if turn_mgr != null and turn_mgr.has_method("set_async_match_id"):
+		turn_mgr.set_async_match_id(get_async_current_match_id())
+	emit_signal("async_match_state_updated", async_match_state)
+
+func _on_async_turn_snapshot_received(snapshot: Dictionary) -> void:
+	async_turn_snapshot = snapshot.duplicate(true)
+	var viewer_id = str(async_turn_snapshot.get("viewer_id", "")).strip_edges()
+	if viewer_id != "":
+		local_player_id = viewer_id
+		if turn_mgr != null and turn_mgr.has_method("set_local_player_id"):
+			turn_mgr.set_local_player_id(local_player_id)
+	if turn_mgr != null and turn_mgr.has_method("set_async_match_id"):
+		turn_mgr.set_async_match_id(get_async_current_match_id())
+	if bool(async_turn_snapshot.get("pending", false)):
+		emit_signal("async_turn_snapshot_updated", async_turn_snapshot)
+		return
+	if _should_defer_async_snapshot_apply(async_turn_snapshot):
+		async_turn_snapshot["deferred_local"] = true
+		emit_signal("async_turn_snapshot_updated", async_turn_snapshot)
+		return
+	async_turn_snapshot.erase("deferred_local")
+	async_submission_locked = false
+	async_local_state_dirty = false
+	if turn_mgr != null and turn_mgr.has_method("apply_async_turn_snapshot_envelope"):
+		turn_mgr.apply_async_turn_snapshot_envelope(async_turn_snapshot)
+	async_applied_turn_number = int(async_turn_snapshot.get("turn_number", -1))
+	async_applied_snapshot_version = int(async_turn_snapshot.get("snapshot_version", -1))
+	emit_signal("async_turn_snapshot_updated", async_turn_snapshot)
+
+func _on_async_submit_orders_completed(ok: bool, response: Dictionary) -> void:
+	async_submission_locked = ok
+	emit_signal("async_submit_result", ok, response)
+	if ok and async_service != null:
+		async_service.start_polling()
+
+func _on_async_error(message: String) -> void:
+	emit_signal("async_error", message)
 
 func set_local_username(name: String) -> void:
 	local_username = name.strip_edges()
@@ -269,6 +513,9 @@ func join_game(ip: String, port: int) -> void:
 	print("Joining game at %s:%d" % [ip, port])
 
 func close_connection():
+	if is_async_mode():
+		disable_async_mode()
+		return
 	get_tree().get_multiplayer().multiplayer_peer.close()
 	_reset_lobby_state()
 
@@ -599,6 +846,9 @@ func broadcast_state(state: Dictionary) -> void:
 		rpc_id(peer_id, "rpc_state_snapshot", snapshot)
 
 func request_state() -> void:
+	if is_async_mode():
+		async_refresh_current_match()
+		return
 	var mp = get_tree().get_multiplayer()
 	if mp == null or mp.multiplayer_peer == null:
 		return
@@ -611,6 +861,8 @@ func request_state() -> void:
 		rpc_id(server_peer_id, "rpc_request_state")
 
 func notify_local_game_started() -> void:
+	if is_async_mode():
+		return
 	var mp = get_tree().get_multiplayer()
 	if mp == null or mp.multiplayer_peer == null or mp.is_server():
 		return
@@ -618,6 +870,8 @@ func notify_local_game_started() -> void:
 		rpc_id(server_peer_id, "rpc_client_scene_ready")
 
 func notify_local_state_applied() -> void:
+	if is_async_mode():
+		return
 	var mp = get_tree().get_multiplayer()
 	if mp == null or mp.multiplayer_peer == null or mp.is_server():
 		return
@@ -629,6 +883,15 @@ func notify_local_state_applied() -> void:
 		rpc_id(server_peer_id, "rpc_client_start_ready")
 
 func request_buy_unit(player_id: String, unit_type: String, grid_pos: Vector2i) -> bool:
+	if is_async_mode():
+		if async_submission_locked:
+			emit_signal("buy_result", player_id, unit_type, grid_pos, false, "submitted_locked", 0, -1)
+			return false
+		var async_result = turn_mgr.buy_unit(player_id, unit_type, grid_pos)
+		if bool(async_result["ok"]):
+			_mark_async_local_state_dirty()
+		emit_signal("buy_result", player_id, unit_type, grid_pos, async_result["ok"], async_result["reason"], async_result["cost"], async_result["unit_net_id"])
+		return bool(async_result["ok"])
 	var mp = get_tree().get_multiplayer()
 	var is_host = mp == null or mp.multiplayer_peer == null or mp.is_server()
 	if is_host:
@@ -639,6 +902,15 @@ func request_buy_unit(player_id: String, unit_type: String, grid_pos: Vector2i) 
 	return false
 
 func request_undo_buy(player_id: String, unit_net_id: int) -> bool:
+	if is_async_mode():
+		if async_submission_locked:
+			emit_signal("undo_result", player_id, unit_net_id, false, "submitted_locked", 0)
+			return false
+		var async_result = turn_mgr.undo_buy_unit(player_id, unit_net_id)
+		if bool(async_result["ok"]):
+			_mark_async_local_state_dirty()
+		emit_signal("undo_result", player_id, unit_net_id, async_result["ok"], async_result["reason"], async_result["refund"])
+		return bool(async_result["ok"])
 	var mp = get_tree().get_multiplayer()
 	var is_host = mp == null or mp.multiplayer_peer == null or mp.is_server()
 	if is_host:
@@ -649,6 +921,15 @@ func request_undo_buy(player_id: String, unit_net_id: int) -> bool:
 	return false
 
 func request_order(player_id: String, order: Dictionary) -> bool:
+	if is_async_mode():
+		if async_submission_locked:
+			emit_signal("order_result", player_id, int(order.get("unit_net_id", -1)), order, false, "submitted_locked")
+			return false
+		var async_result = turn_mgr.validate_and_add_order(player_id, order)
+		if bool(async_result["ok"]):
+			_mark_async_local_state_dirty()
+		emit_signal("order_result", player_id, async_result["unit_net_id"], async_result["order"], async_result["ok"], async_result["reason"])
+		return bool(async_result["ok"])
 	var mp = get_tree().get_multiplayer()
 	var is_host = mp == null or mp.multiplayer_peer == null or mp.is_server()
 	if is_host:
@@ -1047,6 +1328,9 @@ func rpc_submit_orders(player_id: String, orders: Array) -> void:
 	_buffer_orders(player_id, [])
 
 func submit_orders(player_id: String, orders: Array) -> void:
+	if is_async_mode():
+		async_submit_current_orders(player_id)
+		return
 	var mp = get_tree().get_multiplayer()
 	if mp.is_server():
 		_buffer_orders(player_id, [])
@@ -1092,6 +1376,8 @@ func rpc_orders_ready(all_orders: Dictionary) -> void:
 	emit_signal("orders_ready", all_orders)
 
 func cancel_orders(player_id: String):
+	if is_async_mode():
+		return
 	if not mp.is_server():
 		rpc_id(server_peer_id, "rpc_request_cancel_orders", player_id)
 	else:

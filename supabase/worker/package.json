@@ -1,0 +1,12 @@
+{
+  "name": "fortress-frontiers-async-worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.mjs",
+    "start:once": "node src/index.mjs --once"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.49.8"
+  }
+}

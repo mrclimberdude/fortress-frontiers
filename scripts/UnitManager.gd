@@ -41,6 +41,9 @@ func spawn_unit(unit_type: String, cell: Vector2i, owner: String, undo: bool, fo
 		else:
 			_next_net_id_player += 1
 		return
+	if forced_net_id > 0 and unit_by_net_id.has(forced_net_id):
+		push_error("Duplicate forced net_id %d for %s at %s" % [forced_net_id, unit_type, cell])
+		return null
 	var scene: PackedScene
 	match unit_type.to_lower():
 		"base":
@@ -142,4 +145,10 @@ func find_end(unit, path, enemy, enemy_flag):
 	return [path, enemy_flag]
 
 func get_unit_by_net_id(id: int) -> Node:
-	return unit_by_net_id.get(id, null)
+	var unit = unit_by_net_id.get(id, null)
+	if unit == null:
+		return null
+	if not is_instance_valid(unit):
+		unit_by_net_id.erase(id)
+		return null
+	return unit
