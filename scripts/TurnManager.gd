@@ -34,6 +34,9 @@ const MapGenerator = preload("res://scripts/MapGenerator.gd")
 var terrain_overlay: TileMapLayer
 var rng := RandomNumberGenerator.new()
 var current_map_index: int = -1
+var _procedural_generation_cache: Dictionary = {}
+var _procedural_prewarm_pending: bool = false
+var _prewarmed_map_key: String = ""
 var dev_log_path: String = ""
 var dev_log_file: FileAccess = null
 var host_replay_log_path: String = ""
@@ -121,10 +124,8 @@ func _devlog_player_id() -> String:
 func get_replay_viewer_id() -> String:
 	if not replay_mode:
 		return local_player_id
-	if replay_fog_mode == "player1":
-		return "player1"
-	if replay_fog_mode == "player2":
-		return "player2"
+	if replay_fog_mode in active_players:
+		return replay_fog_mode
 	return local_player_id
 
 func is_replay_fog_disabled() -> bool:
@@ -238,7 +239,21 @@ func _collect_replay_usernames() -> Array:
 			if name != "":
 				names.append(name)
 	if names.is_empty():
-		names = ["Player 1", "Player 2"]
+		var fallback_ids: Array = []
+		if not active_players.is_empty():
+			fallback_ids = active_players
+		elif not living_players.is_empty():
+			fallback_ids = living_players
+		else:
+			fallback_ids = ["player1", "player2"]
+		for pid in fallback_ids:
+			var player_id = str(pid).strip_edges()
+			if player_id == "":
+				continue
+			if player_id.begins_with("player") and player_id.substr(6).is_valid_int():
+				names.append("Player %d" % int(player_id.substr(6)))
+			else:
+				names.append(player_id.capitalize())
 	return names
 
 func _collect_replay_player_ids() -> Array:
@@ -256,10 +271,10 @@ func _collect_replay_player_ids() -> Array:
 			if pid != "":
 				ids.append(pid)
 	if ids.is_empty():
-		ids = ["player1", "player2"]
+		ids = active_players.duplicate() if not active_players.is_empty() else ["player1", "player2"]
 	return ids
 
-func _prepare_replay_metadata(loser_id: String) -> void:
+func _prepare_replay_metadata(result_player_id: String) -> void:
 	var md: MapData = null
 	if current_map_index >= 0 and current_map_index < map_data.size():
 		md = map_data[current_map_index]
@@ -272,14 +287,19 @@ func _prepare_replay_metadata(loser_id: String) -> void:
 		map_name = str(md.map_name).strip_edges()
 	if map_name == "" and current_map_index >= 0:
 		map_name = "Map %d" % current_map_index
-	var winner_id = ""
-	if loser_id == "player1":
-		winner_id = "player2"
-	elif loser_id == "player2":
-		winner_id = "player1"
+	var winner_id = get_winner_id()
+	if winner_id == "" and result_player_id in active_players:
+		winner_id = result_player_id
+	var eliminated_ids: Array = []
+	for player_id in active_players:
+		if player_id not in living_players:
+			eliminated_ids.append(player_id)
+	var loser_id = eliminated_ids[eliminated_ids.size() - 1] if not eliminated_ids.is_empty() else ""
 	pending_replay_meta = {
 		"loser_id": loser_id,
 		"winner_id": winner_id,
+		"result_player_id": result_player_id,
+		"eliminated_player_ids": eliminated_ids,
 		"end_turn": int(turn_number),
 		"timestamp": timestamp_label,
 		"timestamp_unix": int(Time.get_unix_time_from_system()),
@@ -419,11 +439,11 @@ func _normalize_state_snapshot(state: Dictionary) -> Dictionary:
 		normalized["camps"] = camps_out
 	if normalized.has("mines") and normalized["mines"] is Dictionary:
 		var mines_in: Dictionary = normalized["mines"]
-		var mines_out := {
-			"unclaimed": _decode_log_vec2i_array(mines_in.get("unclaimed", [])),
-			"player1": _decode_log_vec2i_array(mines_in.get("player1", [])),
-			"player2": _decode_log_vec2i_array(mines_in.get("player2", []))
-		}
+		var mines_out := {}
+		for pid in mines_in.keys():
+			mines_out[pid] = _decode_log_vec2i_array(mines_in.get(pid, []))
+		if not mines_out.has("unclaimed"):
+			mines_out["unclaimed"] = []
 		normalized["mines"] = mines_out
 	if normalized.has("camp_respawns"):
 		normalized["camp_respawns"] = _decode_log_vec2i_dict(normalized["camp_respawns"])
@@ -930,33 +950,34 @@ func _reset_replay_state_defaults() -> void:
 	last_state_seq_applied = -1
 	turn_number = 0
 	current_phase = Phase.UPKEEP
-	current_player = "player1"
+	current_player = active_players[0] if not active_players.is_empty() else "player1"
 	exec_steps = []
 	step_index = 0
 	neutral_step_index = -1
 	last_snapshot_turn = -1
 	last_state_hash_turn = -1
 	last_stats_turn = -1
-	player_gold = { "player1": 25, "player2": 25 }
-	player_income = { "player1": 0, "player2": 0 }
-	player_mana = { "player1": 0, "player2": 0 }
-	player_mana_income = { "player1": 0, "player2": 0 }
-	player_mana_cap = { "player1": BASE_MANA_CAP, "player2": BASE_MANA_CAP }
-	player_melee_bonus = { "player1": 0, "player2": 0 }
-	player_ranged_bonus = { "player1": 0, "player2": 0 }
-	player_mana_bonus = { "player1": 0, "player2": 0 }
-	player_mana_cap_bonus = { "player1": 0, "player2": 0 }
-	player_global_vision_until = { "player1": 0, "player2": 0 }
-	targeted_vision_active = { "player1": {}, "player2": {} }
-	ward_vision_active = { "player1": {}, "player2": {} }
+	player_gold = _build_player_dict(active_players, STARTING_GOLD)
+	player_income = _build_player_dict(active_players, 0)
+	player_mana = _build_player_dict(active_players, 0)
+	player_mana_income = _build_player_dict(active_players, 0)
+	player_mana_cap = _build_player_dict(active_players, BASE_MANA_CAP)
+	player_melee_bonus = _build_player_dict(active_players, 0)
+	player_ranged_bonus = _build_player_dict(active_players, 0)
+	player_mana_bonus = _build_player_dict(active_players, 0)
+	player_mana_cap_bonus = _build_player_dict(active_players, 0)
+	player_global_vision_until = _build_player_dict(active_players, 0)
+	targeted_vision_active = _build_player_dict(active_players, {})
+	ward_vision_active = _build_player_dict(active_players, {})
 	mana_pool_mines = {}
-	damage_log = { "player1": [], "player2": [] }
-	damage_log_entries = { "player1": [], "player2": [] }
-	player_orders = { "player1": {}, "player2": {} }
-	committed_orders = { "player1": {}, "player2": {} }
+	damage_log = _build_player_dict(active_players, [])
+	damage_log_entries = _build_player_dict(active_players, [])
+	player_orders = _build_player_dict(active_players, {})
+	committed_orders = _build_player_dict(active_players, {})
+	configure_match_players(active_players, true)
 	if NetworkManager != null:
 		NetworkManager.player_orders = player_orders
-		NetworkManager._orders_submitted = { "player1": false, "player2": false }
+		NetworkManager.reset_match_tracking(active_players)
 		NetworkManager._step_ready_counts = {}
 
 func _replay_apply_orders(turn: int) -> void:
@@ -970,7 +991,7 @@ func _replay_apply_orders(turn: int) -> void:
 		elif event_type == "undo_buy":
 			_replay_apply_undo_buy_event(event)
 	var orders_for_turn = replay_data.get("orders", {}).get(turn, {})
-	for player in ["player1", "player2"]:
+	for player in active_players:
 		var orders = player_orders.get(player, {})
 		if orders_for_turn.has(player):
 			for unit_id in orders_for_turn[player].keys():
@@ -982,7 +1003,7 @@ func _replay_apply_orders(turn: int) -> void:
 		player_orders[player] = orders
 	NetworkManager.player_orders = player_orders
 	committed_orders = player_orders.duplicate(true)
-	for player in ["player1", "player2"]:
+	for player in active_players:
 		for unit_id in player_orders.get(player, {}).keys():
 			var unit = unit_manager.get_unit_by_net_id(int(unit_id))
 			var order = player_orders[player][unit_id]
@@ -1077,14 +1098,34 @@ func get_replay_metric_list() -> Array:
 		metrics.append({"id": "unit_count:%s" % unit_type, "label": "Units: %s" % unit_type})
 	return metrics
 
-func get_replay_series(metric_id: String, include_p1: bool, include_p2: bool) -> Dictionary:
+func get_replay_available_player_ids() -> Array:
+	if replay_data.has("player_ids") and replay_data["player_ids"] is Array:
+		return _normalize_player_ids(replay_data["player_ids"])
+	return _collect_replay_player_ids()
+
+func get_replay_display_names() -> Dictionary:
+	var ids = get_replay_available_player_ids()
+	var names_arr = replay_data.get("players", [])
+	var names := {}
+	for i in range(ids.size()):
+		var pid = str(ids[i])
+		var fallback = pid.capitalize()
+		if pid.begins_with("player") and pid.substr(6).is_valid_int():
+			fallback = "Player %d" % int(pid.substr(6))
+		if i < names_arr.size():
+			var label = str(names_arr[i]).strip_edges()
+			names[pid] = label if label != "" else fallback
+		else:
+			names[pid] = fallback
+	return names
+
+func get_replay_series_for_players(metric_id: String, player_ids: Array) -> Dictionary:
+	var included = _normalize_player_ids(player_ids)
 	var series := {}
 	var stats = replay_data.get("stats", {})
 	var turns = stats.keys()
 	turns.sort()
-	for pid in ["player1", "player2"]:
-		if (pid == "player1" and not include_p1) or (pid == "player2" and not include_p2):
-			continue
+	for pid in included:
 		var points: Array = []
 		for t in turns:
 			var entry = stats.get(t, {})
@@ -1100,6 +1141,14 @@ func get_replay_series(metric_id: String, include_p1: bool, include_p2: bool) ->
 			points.append(Vector2(float(t), value))
 		series[pid] = points
 	return series
+
+func get_replay_series(metric_id: String, include_p1: bool, include_p2: bool) -> Dictionary:
+	var included := []
+	if include_p1:
+		included.append("player1")
+	if include_p2:
+		included.append("player2")
+	return get_replay_series_for_players(metric_id, included)
 
 func _log_order_result(player_id: String, order: Dictionary, result: Dictionary) -> Dictionary:
 	_devlog({
@@ -1180,10 +1229,13 @@ func _state_hash() -> int:
 	return int(json.hash())
 
 func _collect_turn_stats() -> Dictionary:
-	var unit_values := { "player1": 0, "player2": 0 }
-	var unit_counts := { "player1": {}, "player2": {} }
+	var unit_values := {}
+	var unit_counts := {}
 	var all_units = $GameBoardNode.get_all_units()
-	for player in ["player1", "player2"]:
+	var players := active_players
+	for player in players:
+		unit_values[player] = 0
+		unit_counts[player] = {}
 		for unit in all_units.get(player, []):
 			if unit == null or unit.is_base or unit.is_tower:
 				continue
@@ -1193,26 +1245,19 @@ func _collect_turn_stats() -> Dictionary:
 			var counts = unit_counts[player]
 			counts[unit_type] = int(counts.get(unit_type, 0)) + 1
 			unit_counts[player] = counts
+	var players_stats := {}
+	for player in players:
+		players_stats[player] = {
+			"gold_income": int(player_income.get(player, 0)),
+			"mana_income": int(player_mana_income.get(player, 0)),
+			"gold": int(player_gold.get(player, 0)),
+			"mana": int(player_mana.get(player, 0)),
+			"unit_value": int(unit_values.get(player, 0)),
+			"unit_counts": unit_counts.get(player, {})
+		}
 	return {
 		"turn": turn_number,
-		"players": {
-			"player1": {
-				"gold_income": int(player_income.get("player1", 0)),
-				"mana_income": int(player_mana_income.get("player1", 0)),
-				"gold": int(player_gold.get("player1", 0)),
-				"mana": int(player_mana.get("player1", 0)),
-				"unit_value": int(unit_values["player1"]),
-				"unit_counts": unit_counts["player1"]
-			},
-			"player2": {
-				"gold_income": int(player_income.get("player2", 0)),
-				"mana_income": int(player_mana_income.get("player2", 0)),
-				"gold": int(player_gold.get("player2", 0)),
-				"mana": int(player_mana.get("player2", 0)),
-				"unit_value": int(unit_values["player2"]),
-				"unit_counts": unit_counts["player2"]
-			}
-		}
+		"players": players_stats
 	}
 
 func _record_turn_stats() -> void:
@@ -1248,7 +1293,7 @@ func set_local_player_id(player_id: String) -> void:
 		"player_id": _devlog_player_id()
 	})
 
-func _pick_random_map_index(mode: String) -> int:
+func _pick_random_map_index(mode: String, player_count_override: int = -1) -> int:
 	if map_data.size() == 0:
 		return -1
 	var normalized = str(mode).strip_edges().to_lower()
@@ -1257,9 +1302,12 @@ func _pick_random_map_index(mode: String) -> int:
 	if normalized == "procedural_custom":
 		normalized = "procedural"
 	var candidates := []
+	var player_count = max(2, player_count_override if player_count_override > 0 else active_players.size())
 	for i in range(map_data.size()):
 		var md = map_data[i] as MapData
 		if md == null:
+			continue
+		if not _map_supports_player_count(md, player_count):
 			continue
 		if md.procedural and normalized != "procedural":
 			continue
@@ -1275,12 +1323,41 @@ func _pick_random_map_index(mode: String) -> int:
 			continue
 		candidates.append(i)
 	if candidates.size() == 0:
-		var fallback = _rng_randi_range(0, map_data.size() - 1, "map_pick_fallback")
-		_devlog({"type": "map_pick", "mode": normalized, "candidates": map_data.size(), "choice": fallback})
-		return fallback
+		_devlog({"type": "map_pick", "mode": normalized, "candidates": 0, "choice": -1})
+		return -1
 	var choice = candidates[_rng_randi_range(0, candidates.size() - 1, "map_pick_choice")]
 	_devlog({"type": "map_pick", "mode": normalized, "candidates": candidates.size(), "choice": choice})
 	return choice
+
+func _map_player_range(md: MapData) -> Vector2i:
+	if md == null:
+		return Vector2i(2, 2)
+	var min_players = max(2, int(md.min_players))
+	var max_players = max(min_players, int(md.max_players))
+	if md.procedural and max_players <= 2:
+		max_players = 3
+	return Vector2i(min_players, max_players)
+
+func _map_supports_player_count(md: MapData, player_count: int) -> bool:
+	var range = _map_player_range(md)
+	return player_count >= range.x and player_count <= range.y
+
+func ensure_selected_map_supports_player_count(player_count: int) -> bool:
+	player_count = max(2, player_count)
+	if map_data.size() == 0:
+		return false
+	if NetworkManager.selected_map_index >= 0 and NetworkManager.selected_map_index < map_data.size():
+		var selected_md = map_data[NetworkManager.selected_map_index] as MapData
+		if selected_md != null and _map_supports_player_count(selected_md, player_count):
+			return true
+	var fallback_mode = "procedural" if player_count > 2 else NetworkManager.map_selection_mode
+	var fallback_idx = _pick_random_map_index(fallback_mode, player_count)
+	if fallback_idx < 0:
+		return false
+	NetworkManager.selected_map_index = fallback_idx
+	if fallback_mode == "procedural":
+		NetworkManager.map_selection_mode = "procedural"
+	return true
 
 const SAVE_VERSION: int = 1
 const SAVE_DEFAULT_PATH: String = "user://save_game.json"
@@ -1299,6 +1376,181 @@ func _is_host() -> bool:
 func is_host() -> bool:
 	return _is_host()
 
+func _default_player_ids() -> Array:
+	return ["player1", "player2"]
+
+func _sorted_dict_string(value: Dictionary) -> String:
+	var keys = value.keys()
+	keys.sort()
+	var parts: Array[String] = []
+	for key in keys:
+		var entry = value[key]
+		if entry is Dictionary:
+			parts.append("%s={%s}" % [str(key), _sorted_dict_string(entry)])
+		else:
+			parts.append("%s=%s" % [str(key), str(entry)])
+	return ";".join(parts)
+
+func _procedural_cache_key(map_index: int, player_ids: Array, seed_value: int, params: Dictionary) -> String:
+	var player_copy = player_ids.duplicate()
+	player_copy.sort()
+	return "%d|%d|%s|%s" % [map_index, seed_value, ",".join(player_copy), _sorted_dict_string(params)]
+
+func _prewarm_player_ids() -> Array:
+	if NetworkManager != null:
+		var target_count = max(2, int(NetworkManager.lobby_slot_count))
+		var ids: Array = []
+		for i in range(target_count):
+			ids.append("player%d" % (i + 1))
+		return _normalize_player_ids(ids)
+	return active_players
+
+func _generate_procedural_map_data(map_index: int, md: MapData, player_ids: Array, seed_value: int) -> Dictionary:
+	var gen_rng = RandomNumberGenerator.new()
+	gen_rng.seed = seed_value + map_index * 7919
+	return MapGenerator.generate(md, gen_rng, player_ids)
+
+func _get_or_build_procedural_map_data(map_index: int, md: MapData, player_ids: Array) -> Dictionary:
+	var seed_value = NetworkManager.match_seed
+	if seed_value <= 0:
+		seed_value = _rng_randi_range(1, 2147483646, "procedural_seed")
+		NetworkManager.match_seed = seed_value
+	var params = NetworkManager.custom_proc_params.duplicate(true)
+	var key = _procedural_cache_key(map_index, player_ids, seed_value, params)
+	if _procedural_generation_cache.has(key):
+		return (_procedural_generation_cache[key] as Dictionary).duplicate(true)
+	var generated = _generate_procedural_map_data(map_index, md, player_ids, seed_value)
+	_procedural_generation_cache.clear()
+	_procedural_generation_cache[key] = generated.duplicate(true)
+	return generated
+
+func request_procedural_prewarm() -> void:
+	if not _is_host():
+		return
+	if _procedural_prewarm_pending:
+		return
+	_procedural_prewarm_pending = true
+	call_deferred("_run_procedural_prewarm")
+
+func is_selected_procedural_prewarm_ready() -> bool:
+	if not _is_host():
+		return false
+	if map_data.is_empty():
+		return false
+	var map_index = NetworkManager.selected_map_index if NetworkManager != null else -1
+	if map_index < 0 or map_index >= map_data.size():
+		return false
+	var md = map_data[map_index] as MapData
+	if md == null:
+		return false
+	if not md.procedural:
+		return true
+	var players = _prewarm_player_ids()
+	if players.is_empty():
+		return false
+	if NetworkManager.match_seed <= 0:
+		return false
+	var desired_key = _procedural_cache_key(map_index, players, NetworkManager.match_seed, NetworkManager.custom_proc_params)
+	return _procedural_generation_cache.has(desired_key)
+
+func _run_procedural_prewarm() -> void:
+	_procedural_prewarm_pending = false
+	if not _is_host():
+		return
+	if map_data.is_empty():
+		return
+	if NetworkManager.selected_map_index < 0:
+		if NetworkManager.map_selection_mode != "procedural" and NetworkManager.map_selection_mode != "procedural_custom":
+			return
+		NetworkManager.selected_map_index = _pick_random_map_index("procedural", max(2, active_players.size()))
+	if NetworkManager.selected_map_index < 0 or NetworkManager.selected_map_index >= map_data.size():
+		return
+	var md = map_data[NetworkManager.selected_map_index] as MapData
+	if md == null or not md.procedural:
+		return
+	md = md.duplicate(true)
+	if NetworkManager.custom_proc_params.size() > 0:
+		_apply_custom_proc_params(md, NetworkManager.custom_proc_params)
+	var players = _prewarm_player_ids()
+	_get_or_build_procedural_map_data(NetworkManager.selected_map_index, md, players)
+
+func _normalize_player_ids(player_ids: Array) -> Array:
+	var result: Array = []
+	for raw_id in player_ids:
+		var player_id = str(raw_id).strip_edges()
+		if player_id == "" or player_id == NEUTRAL_PLAYER_ID or result.has(player_id):
+			continue
+		result.append(player_id)
+	if result.is_empty():
+		return _default_player_ids()
+	return result
+
+func _clone_default_value(value):
+	if value is Array or value is Dictionary:
+		return value.duplicate(true)
+	return value
+
+func _build_player_dict(player_ids: Array, default_value, source: Dictionary = {}) -> Dictionary:
+	var result := {}
+	for player_id in player_ids:
+		if source.has(player_id):
+			result[player_id] = source[player_id]
+		else:
+			result[player_id] = _clone_default_value(default_value)
+	return result
+
+func get_match_players() -> Array:
+	return active_players.duplicate()
+
+func get_living_players() -> Array:
+	return living_players.duplicate()
+
+func is_living_player(player_id: String) -> bool:
+	return str(player_id).strip_edges() in living_players
+
+func get_submission_players() -> Array:
+	return living_players.duplicate()
+
+func get_winner_id() -> String:
+	return living_players[0] if living_players.size() == 1 else ""
+
+func configure_match_players(player_ids: Array, preserve_existing: bool = true) -> void:
+	active_players = _normalize_player_ids(player_ids)
+	var previous_living: Array = []
+	if preserve_existing:
+		for player_id in living_players:
+			if player_id in active_players and not previous_living.has(player_id):
+				previous_living.append(player_id)
+	living_players = previous_living if preserve_existing and not previous_living.is_empty() else active_players.duplicate()
+	player_gold = _build_player_dict(active_players, STARTING_GOLD if not preserve_existing else 0, player_gold if preserve_existing else {})
+	player_income = _build_player_dict(active_players, 0, player_income if preserve_existing else {})
+	player_mana = _build_player_dict(active_players, 0, player_mana if preserve_existing else {})
+	player_mana_income = _build_player_dict(active_players, 0, player_mana_income if preserve_existing else {})
+	player_mana_cap = _build_player_dict(active_players, BASE_MANA_CAP, player_mana_cap if preserve_existing else {})
+	player_melee_bonus = _build_player_dict(active_players, 0, player_melee_bonus if preserve_existing else {})
+	player_ranged_bonus = _build_player_dict(active_players, 0, player_ranged_bonus if preserve_existing else {})
+	player_mana_bonus = _build_player_dict(active_players, 0, player_mana_bonus if preserve_existing else {})
+	player_mana_cap_bonus = _build_player_dict(active_players, 0, player_mana_cap_bonus if preserve_existing else {})
+	damage_log = _build_player_dict(active_players, [], damage_log if preserve_existing else {})
+	damage_log_entries = _build_player_dict(active_players, [], damage_log_entries if preserve_existing else {})
+	player_orders = _build_player_dict(active_players, {}, player_orders if preserve_existing else {})
+	committed_orders = _build_player_dict(active_players, {}, committed_orders if preserve_existing else {})
+	ward_vision_active = _build_player_dict(active_players, {}, ward_vision_active if preserve_existing else {})
+	player_global_vision_until = _build_player_dict(active_players, 0, player_global_vision_until if preserve_existing else {})
+	targeted_vision_active = _build_player_dict(active_players, {}, targeted_vision_active if preserve_existing else {})
+	spawn_tower_positions = _build_player_dict(active_players, [], spawn_tower_positions if preserve_existing else {})
+	income_tower_positions = _build_player_dict(active_players, [], income_tower_positions if preserve_existing else {})
+	structure_memory = _build_player_dict(active_players, {}, structure_memory if preserve_existing else {})
+	neutral_tile_memory = _build_player_dict(active_players, {}, neutral_tile_memory if preserve_existing else {})
+	var old_mines = mines if preserve_existing else {}
+	mines = {"unclaimed": old_mines.get("unclaimed", []).duplicate(true) if old_mines.has("unclaimed") else []}
+	for player_id in active_players:
+		mines[player_id] = old_mines.get(player_id, []).duplicate(true) if old_mines.has(player_id) else []
+	if current_player == "" or current_player not in active_players:
+		current_player = active_players[0]
+	if NetworkManager != null and NetworkManager.has_method("reset_match_tracking"):
+		NetworkManager.reset_match_tracking(active_players)
+
 func _dev_result(ok: bool, reason: String = "", extra: Dictionary = {}) -> Dictionary:
 	var result := {
 		"ok": ok,
@@ -1311,7 +1563,7 @@ func _dev_result(ok: bool, reason: String = "", extra: Dictionary = {}) -> Dicti
 func _clear_orders_for_unit_id(unit_id: int) -> void:
 	if unit_id < 0:
 		return
-	for player_id in ["player1", "player2"]:
+	for player_id in active_players:
 		player_orders.get(player_id, {}).erase(unit_id)
 		committed_orders.get(player_id, {}).erase(unit_id)
 		NetworkManager.player_orders.get(player_id, {}).erase(unit_id)
@@ -1339,15 +1591,15 @@ func apply_dev_state_patch(patch: Dictionary) -> Dictionary:
 	if patch.has("turn_number"):
 		turn_number = max(0, int(patch.get("turn_number", turn_number)))
 	if patch.has("player_gold") and patch["player_gold"] is Dictionary:
-		for player_id in ["player1", "player2"]:
+		for player_id in active_players:
 			if patch["player_gold"].has(player_id):
 				player_gold[player_id] = max(0, int(patch["player_gold"][player_id]))
 	if patch.has("player_mana") and patch["player_mana"] is Dictionary:
-		for player_id in ["player1", "player2"]:
+		for player_id in active_players:
 			if patch["player_mana"].has(player_id):
 				player_mana[player_id] = max(0, int(patch["player_mana"][player_id]))
 	if patch.has("player_income") and patch["player_income"] is Dictionary:
-		for player_id in ["player1", "player2"]:
+		for player_id in active_players:
 			if patch["player_income"].has(player_id):
 				player_income[player_id] = max(0, int(patch["player_income"][player_id]))
 	_finalize_dev_mutation()
@@ -1381,7 +1633,7 @@ func dev_spawn_unit(unit_type: String, owner: String, tile: Vector2i) -> Diction
 	var gate = _can_dev_edit_mobile_units()
 	if not bool(gate.get("ok", false)):
 		return gate
-	if owner not in ["player1", "player2", NEUTRAL_PLAYER_ID]:
+	if owner != NEUTRAL_PLAYER_ID and owner not in active_players:
 		return _dev_result(false, "invalid_owner")
 	if not _is_dev_mobile_unit_type(unit_type):
 		return _dev_result(false, "invalid_unit_type")
@@ -1485,6 +1737,9 @@ func dev_set_unit_health(unit_net_id: int, new_health: int) -> Dictionary:
 # --- Turn & Phase State ---
 var turn_number:   int    = 0
 var current_phase: Phase  = Phase.UPKEEP
+var active_players: Array = ["player1", "player2"]
+var living_players: Array = ["player1", "player2"]
+var pending_eliminations: Array = []
 var current_player:String = "player1"
 var exec_steps: Array     = []
 var step_index: int       = 0
@@ -1493,7 +1748,8 @@ var movement_phase_count: int = 0
 const MAX_MOVEMENT_PHASES: int = 20
 
 # --- Economy State ---
-var player_gold       := { "player1": 25, "player2": 25 }
+const STARTING_GOLD : int = 25
+var player_gold       := { "player1": STARTING_GOLD, "player2": STARTING_GOLD }
 var player_income    := { "player1": 0, "player2": 0 }
 var player_mana       := { "player1": 0, "player2": 0 }
 var player_mana_income := { "player1": 0, "player2": 0 }
@@ -1757,7 +2013,7 @@ func _trim_move_order_to_budget(unit, order: Dictionary, player_id: String) -> A
 	return trimmed
 
 func _prune_invalid_move_orders_for_execution() -> void:
-	for player_id in ["player1", "player2"]:
+	for player_id in living_players:
 		var orders = NetworkManager.player_orders.get(player_id, {})
 		var committed = committed_orders.get(player_id, {})
 		var to_remove := []
@@ -1851,7 +2107,7 @@ func _viewer_has_wizard_sight(viewer_id: String, cell: Vector2i) -> bool:
 	return false
 
 func _prune_ward_visions() -> void:
-	for player in ["player1", "player2"]:
+	for player in active_players:
 		if not ward_vision_active.has(player):
 			continue
 		var active = ward_vision_active[player]
@@ -1860,7 +2116,7 @@ func _prune_ward_visions() -> void:
 				active.erase(cell)
 
 func _prune_global_visions() -> void:
-	for player in ["player1", "player2"]:
+	for player in active_players:
 		if int(player_global_vision_until.get(player, 0)) <= turn_number:
 			player_global_vision_until[player] = 0
 
@@ -1870,7 +2126,7 @@ func has_global_vision(player_id: String) -> bool:
 	return int(player_global_vision_until.get(player_id, 0)) >= turn_number
 
 func _prune_targeted_visions() -> void:
-	for player in ["player1", "player2"]:
+	for player in active_players:
 		if not targeted_vision_active.has(player):
 			continue
 		var active = targeted_vision_active[player]
@@ -1913,7 +2169,7 @@ func _viewer_has_targeted_vision(viewer_id: String, cell: Vector2i) -> bool:
 	return false
 
 func _clear_ward_vision(tile: Vector2i) -> void:
-	for player in ["player1", "player2"]:
+	for player in active_players:
 		if not ward_vision_active.has(player):
 			continue
 		var active = ward_vision_active[player]
@@ -1946,7 +2202,7 @@ func get_ward_vision_tiles(player_id: String) -> Array:
 
 func _adjacent_mana_sources(cell: Vector2i, owner: String = "") -> Array:
 	var all_mines: Array = []
-	for mine_owner in ["unclaimed", "player1", "player2"]:
+	for mine_owner in mines.keys():
 		all_mines.append_array(mines.get(mine_owner, []))
 	var adj := []
 	var neighbors = $GameBoardNode.get_offset_neighbors(cell)
@@ -1992,7 +2248,7 @@ func _pick_mana_pump_pair(cell: Vector2i, owner: String) -> Dictionary:
 
 func _reserved_mana_pool_mines(exclude_unit_id: int) -> Dictionary:
 	var reserved := {}
-	for player in ["player1", "player2"]:
+	for player in living_players:
 		var orders = player_orders.get(player, {})
 		for unit_id in orders.keys():
 			if int(unit_id) == exclude_unit_id:
@@ -2063,7 +2319,7 @@ func _rebuild_ward_ids() -> void:
 	_next_ward_id = next_id
 
 func _recalculate_mana_caps() -> void:
-	for player in ["player1", "player2"]:
+	for player in active_players:
 		var pools = 0
 		for state in buildable_structures.values():
 			if str(state.get("type", "")) != STRUCT_MANA_POOL:
@@ -2145,7 +2401,7 @@ func _tile_is_road_or_rail(tile: Vector2i, player_id: String = "") -> bool:
 	return tile in tower_positions.get(player_id, [])
 
 func _tile_is_mine(tile: Vector2i) -> bool:
-	for owner in ["unclaimed", "player1", "player2"]:
+	for owner in mines.keys():
 		if tile in mines.get(owner, []):
 			return true
 	return false
@@ -2158,7 +2414,7 @@ func _tile_is_owned_mine(tile: Vector2i, player_id: String) -> bool:
 func _tile_counts_as_road(tile: Vector2i, player_id: String) -> bool:
 	if _structure_counts_as_road(_structure_state(tile)):
 		return true
-	for owner in ["unclaimed", "player1", "player2"]:
+	for owner in mines.keys():
 		if tile in mines.get(owner, []):
 			return true
 	if player_id == "":
@@ -2172,7 +2428,7 @@ func _tile_counts_as_road(tile: Vector2i, player_id: String) -> bool:
 func _tile_counts_as_rail(tile: Vector2i, player_id: String) -> bool:
 	if _structure_counts_as_rail(_structure_state(tile)):
 		return true
-	for owner in ["unclaimed", "player1", "player2"]:
+	for owner in mines.keys():
 		if tile in mines.get(owner, []):
 			return true
 	if player_id == "":
@@ -2538,7 +2794,7 @@ func _get_neutral_tile_memory(player_id: String) -> Dictionary:
 	return neutral_tile_memory[player_id]
 
 func _spawn_tower_owner_at(cell: Vector2i) -> String:
-	for player_id in ["player1", "player2"]:
+	for player_id in active_players:
 		if spawn_tower_positions.has(player_id) and cell in spawn_tower_positions[player_id]:
 			return player_id
 	return ""
@@ -2666,10 +2922,21 @@ func refresh_mine_tiles() -> void:
 	var hex = $GameBoardNode/HexTileMap
 	if hex == null:
 		return
-	for owner in ["unclaimed", "player1", "player2"]:
+	for owner in mines.keys():
 		var tiles = mines.get(owner, [])
 		for pos in tiles:
 			hex.set_player_tile(pos, owner)
+			if $GameBoardNode.get_structure_at(pos) == null:
+				if terrain_overlay != null:
+					terrain_overlay.set_cell(pos)
+				var mine = MineScene.instantiate() as Sprite2D
+				mine.position = hex.map_to_world(pos) + hex.tile_size * 0.5
+				mine.z_index = 6
+				mine.grid_pos = pos
+				var structure_root = hex.get_node_or_null("Structures")
+				if structure_root != null:
+					structure_root.add_child(mine)
+				$GameBoardNode.set_structure_at(pos, mine)
 
 func _connected_road_tiles(player_id: String) -> Dictionary:
 	var connected := {}
@@ -2719,9 +2986,42 @@ func _mine_connected_to_roads(pos: Vector2i, connected: Dictionary) -> bool:
 			return true
 	return false
 
+func _income_tower_tiles_for(player_id: String) -> Array:
+	var tiles_with_dist := []
+	var seen := {}
+	var spawn_tiles := {}
+	for pos in spawn_tower_positions.get(player_id, []):
+		spawn_tiles[pos] = true
+	var base_pos = base_positions.get(player_id, Vector2i(-9999, -9999))
+	for pos in tower_positions.get(player_id, []):
+		if spawn_tiles.has(pos):
+			continue
+		if seen.has(pos):
+			continue
+		seen[pos] = true
+		tiles_with_dist.append({
+			"pos": pos,
+			"dist": _hex_distance(pos, base_pos) if base_pos != Vector2i(-9999, -9999) else 0
+		})
+	tiles_with_dist.sort_custom(func(a, b):
+		if int(a["dist"]) == int(b["dist"]):
+			var ap: Vector2i = a["pos"]
+			var bp: Vector2i = b["pos"]
+			if ap.y == bp.y:
+				return ap.x < bp.x
+			return ap.y < bp.y
+		return int(a["dist"]) < int(b["dist"])
+	)
+	var tiles := []
+	for entry in tiles_with_dist:
+		tiles.append(entry["pos"])
+		if tiles.size() >= 3:
+			break
+	return tiles
+
 func get_spawn_points(player_id: String) -> Array:
 	var points := []
-	for pos in income_tower_positions.get(player_id, []):
+	for pos in _income_tower_tiles_for(player_id):
 		points.append(pos)
 	var connected = _connected_road_tiles(player_id)
 	for pos in spawn_tower_positions.get(player_id, []):
@@ -2746,7 +3046,7 @@ func _refresh_tile_after_unit_change(tile: Vector2i) -> void:
 	if special_pid != "":
 		hex.set_player_tile(tile, special_pid)
 		return
-	for owner in ["player1", "player2", "unclaimed"]:
+	for owner in mines.keys():
 		var tiles = mines.get(owner, [])
 		if tile in tiles:
 			hex.set_player_tile(tile, owner)
@@ -2809,7 +3109,10 @@ func _pick_weighted_index(weights: Array) -> int:
 
 func _get_player_units() -> Array:
 	var all_units = $GameBoardNode.get_all_units()
-	return all_units.get("player1", []) + all_units.get("player2", [])
+	var units: Array = []
+	for player_id in living_players:
+		units.append_array(all_units.get(player_id, []))
+	return units
 
 func _units_in_range(origin: Vector2i, range: int) -> Array:
 	var out := []
@@ -3103,29 +3406,8 @@ func _ready():
 		replay_stats.connect("pressed", Callable(self, "_on_replay_stats_pressed"))
 	
 	rng.randomize()
-	var mp = get_tree().get_multiplayer()
-	var has_peer = mp != null and mp.multiplayer_peer != null
-	var is_server = (not has_peer) or mp.is_server()
-	var map_index = -1
-	if is_server:
-		if NetworkManager.selected_map_index < 0:
-			NetworkManager.selected_map_index = _pick_random_map_index(NetworkManager.map_selection_mode)
-		if NetworkManager.match_seed < 0:
-			NetworkManager.match_seed = _rng_randi_range(1, 2147483646, "match_seed_init")
-		map_index = NetworkManager.selected_map_index
-		_maybe_log_match_init()
-	else:
-		if NetworkManager.selected_map_index < 0:
-			await NetworkManager.map_index_received
-		if NetworkManager.match_seed < 0:
-			await NetworkManager.match_seed_received
-		map_index = NetworkManager.selected_map_index
-		_maybe_log_match_init()
-	_load_map_by_index(map_index)
-	_spawn_neutral_units()
-	$GameBoardNode/FogOfWar._update_fog()
 
-func _load_map_by_index(map_index: int) -> void:
+func _load_map_by_index(map_index: int, apply_generated_content: bool = true) -> void:
 	if map_data.size() == 0:
 		push_error("TurnManager: map_data is empty.")
 		return
@@ -3165,18 +3447,17 @@ func _load_map_by_index(map_index: int) -> void:
 	if bounds_cells.is_empty() and tmap != null:
 		bounds_cells = tmap.get_used_cells()
 	var generated := {}
-	if md.procedural:
-		var gen_rng = RandomNumberGenerator.new()
+	if md.procedural and apply_generated_content:
 		var seed_val = NetworkManager.match_seed
 		if seed_val <= 0:
 			seed_val = _rng_randi_range(1, 2147483646, "procedural_seed")
-		gen_rng.seed = seed_val + idx * 7919
+			NetworkManager.match_seed = seed_val
 		_devlog({
 			"type": "map_generate",
 			"seed": seed_val,
-			"derived_seed": gen_rng.seed
+			"derived_seed": seed_val + idx * 7919
 		})
-		generated = MapGenerator.generate(md, gen_rng)
+		generated = _get_or_build_procedural_map_data(idx, md, active_players)
 		if generated.has("bounds"):
 			bounds_cells = generated["bounds"]
 	if bounds_cells.size() > 0:
@@ -3186,7 +3467,7 @@ func _load_map_by_index(map_index: int) -> void:
 			var fog = $GameBoardNode.get_node_or_null("FogOfWar")
 			if fog != null and fog.has_method("reset_fog"):
 				fog.reset_fog()
-	if md.procedural:
+	if md.procedural and apply_generated_content:
 		if tmap != null:
 			tmap.clear()
 			var forest_src = 1
@@ -3207,48 +3488,49 @@ func _load_map_by_index(map_index: int) -> void:
 		tower_positions = generated.get("tower_positions", md.tower_positions)
 		mines = generated.get("mines", md.mines)
 		camps = generated.get("camps", md.camps)
-	else:
+	elif not md.procedural:
 		md.populate_from_terrain(terrain_overlay)
 		base_positions = md.base_positions
 		tower_positions = md.tower_positions
 		mines = md.mines
 		camps = md.camps
 	var hex_map = $GameBoardNode/HexTileMap
-	if hex_map != null:
+	if apply_generated_content and hex_map != null:
 		for tile in camps.get("basic", []):
 			hex_map.set_player_tile(tile, "camp")
 		for tile in camps.get("dragon", []):
 			hex_map.set_player_tile(tile, "dragon")
 	buildable_structures.clear()
-	ward_vision_active = { "player1": {}, "player2": {} }
-	player_global_vision_until = { "player1": 0, "player2": 0 }
-	targeted_vision_active = { "player1": {}, "player2": {} }
+	ward_vision_active = _build_player_dict(active_players, {})
+	player_global_vision_until = _build_player_dict(active_players, 0)
+	targeted_vision_active = _build_player_dict(active_players, {})
 	_next_ward_id = -1
 	mana_pool_mines.clear()
-	spawn_tower_positions = { "player1": [], "player2": [] }
-	income_tower_positions = {
-		"player1": tower_positions.get("player1", []).duplicate(),
-		"player2": tower_positions.get("player2", []).duplicate()
-	}
+	structure_positions.clear()
+	spawn_tower_positions = _build_player_dict(active_players, [])
+	income_tower_positions = _build_player_dict(active_players, [])
+	for player_id in active_players:
+		income_tower_positions[player_id] = tower_positions.get(player_id, []).duplicate()
 	
-	for player in tower_positions.keys():
-		for tile in tower_positions[player]:
+	if apply_generated_content:
+		for player in tower_positions.keys():
+			for tile in tower_positions[player]:
+				structure_positions.append(tile)
+				unit_manager.spawn_unit("tower", tile, player, false)
+		for player in base_positions.keys():
+			var tile = base_positions[player]
 			structure_positions.append(tile)
-			unit_manager.spawn_unit("tower", tile, player, false)
-	for player in base_positions.keys():
-		var tile = base_positions[player]
-		structure_positions.append(tile)
-		unit_manager.spawn_unit("base", tile, player, false)
-	for tile in mines["unclaimed"]:
-		structure_positions.append(tile)
-		$GameBoardNode/HexTileMap.set_player_tile(tile, "unclaimed")
-		tmap.set_cell(tile)
-		var mine = MineScene.instantiate() as Sprite2D
-		mine.position = $GameBoardNode/HexTileMap.map_to_world(tile) + $GameBoardNode/HexTileMap.tile_size * 0.5
-		mine.z_index = 6
-		mine.grid_pos = tile
-		$GameBoardNode/HexTileMap/Structures.add_child(mine)
-		$GameBoardNode.set_structure_at(tile, mine)
+			unit_manager.spawn_unit("base", tile, player, false)
+		for tile in mines["unclaimed"]:
+			structure_positions.append(tile)
+			$GameBoardNode/HexTileMap.set_player_tile(tile, "unclaimed")
+			tmap.set_cell(tile)
+			var mine = MineScene.instantiate() as Sprite2D
+			mine.position = $GameBoardNode/HexTileMap.map_to_world(tile) + $GameBoardNode/HexTileMap.tile_size * 0.5
+			mine.z_index = 6
+			mine.grid_pos = tile
+			$GameBoardNode/HexTileMap/Structures.add_child(mine)
+			$GameBoardNode.set_structure_at(tile, mine)
 
 func _serialize_unit(unit) -> Dictionary:
 	return {
@@ -3359,6 +3641,9 @@ func _collect_state() -> Dictionary:
 		"state_seq": state_seq,
 		"map_index": current_map_index,
 		"match_seed": NetworkManager.match_seed,
+		"active_players": active_players,
+		"living_players": living_players,
+		"pending_eliminations": pending_eliminations,
 		"turn_number": turn_number,
 		"current_phase": int(current_phase),
 		"current_player": current_player,
@@ -3407,25 +3692,178 @@ func _collect_state_for(viewer_id: String) -> Dictionary:
 	var state = _collect_state()
 	if viewer_id == "":
 		return state
-	if current_phase != Phase.ORDERS:
-		return state
+	var fog = $GameBoardNode.get_node_or_null("FogOfWar")
+	var viewer_vis: Dictionary = {}
+	if fog != null and fog.visiblity.has(viewer_id) and fog.visiblity[viewer_id] is Dictionary:
+		viewer_vis = fog.visiblity[viewer_id].duplicate(true)
 	var filtered := []
 	for data in state.get("units", []):
 		var owner = str(data.get("player_id", ""))
 		var just_purchased = bool(data.get("just_purchased", false))
+		var pos = _state_tile_from_value(data.get("grid_pos", Vector2i(-9999, -9999)))
+		var visible_to_viewer = owner == viewer_id or _viewer_can_see_snapshot_tile(viewer_id, viewer_vis, pos)
 		if just_purchased and owner != viewer_id:
+			continue
+		if not visible_to_viewer:
 			continue
 		filtered.append(data)
 	state["units"] = filtered
+	state["base_positions"] = _filter_player_pos_dict_for_viewer(state.get("base_positions", {}), viewer_id, viewer_vis)
+	state["tower_positions"] = _filter_player_tile_dict_for_viewer(state.get("tower_positions", {}), viewer_id, viewer_vis)
+	state["spawn_tower_positions"] = _filter_player_tile_dict_for_viewer(state.get("spawn_tower_positions", {}), viewer_id, viewer_vis)
+	state["income_tower_positions"] = _filter_player_tile_dict_for_viewer(state.get("income_tower_positions", {}), viewer_id, viewer_vis)
+	state["mines"] = _filter_mines_for_viewer(state.get("mines", {}), viewer_id, viewer_vis)
+	state["camps"] = _filter_camps_for_viewer(state.get("camps", {}), viewer_id, viewer_vis)
+	state["buildable_structures"] = _filter_buildable_structures_for_viewer(viewer_id, viewer_vis)
+	state["structure_positions"] = _filtered_structure_positions_for_viewer(state)
+	state["player_gold"] = _filter_player_scalar_dict_for_viewer(state.get("player_gold", {}), viewer_id, 0)
+	state["player_income"] = _filter_player_scalar_dict_for_viewer(state.get("player_income", {}), viewer_id, 0)
+	state["player_mana"] = _filter_player_scalar_dict_for_viewer(state.get("player_mana", {}), viewer_id, 0)
+	state["player_mana_income"] = _filter_player_scalar_dict_for_viewer(state.get("player_mana_income", {}), viewer_id, 0)
+	state["player_mana_cap"] = _filter_player_scalar_dict_for_viewer(state.get("player_mana_cap", {}), viewer_id, BASE_MANA_CAP)
+	state["player_melee_bonus"] = _filter_player_scalar_dict_for_viewer(state.get("player_melee_bonus", {}), viewer_id, 0)
+	state["player_ranged_bonus"] = _filter_player_scalar_dict_for_viewer(state.get("player_ranged_bonus", {}), viewer_id, 0)
+	state["player_mana_bonus"] = _filter_player_scalar_dict_for_viewer(state.get("player_mana_bonus", {}), viewer_id, 0)
+	state["player_mana_cap_bonus"] = _filter_player_scalar_dict_for_viewer(state.get("player_mana_cap_bonus", {}), viewer_id, 0)
+	state["player_global_vision_until"] = _filter_player_scalar_dict_for_viewer(state.get("player_global_vision_until", {}), viewer_id, 0)
+	state["ward_vision_active"] = _filter_player_dict_entry_for_viewer(state.get("ward_vision_active", {}), viewer_id, {})
+	state["targeted_vision_active"] = _filter_player_dict_entry_for_viewer(state.get("targeted_vision_active", {}), viewer_id, {})
+	state["structure_memory"] = _filter_player_dict_entry_for_viewer(state.get("structure_memory", {}), viewer_id, {})
+	state["neutral_tile_memory"] = _filter_player_dict_entry_for_viewer(state.get("neutral_tile_memory", {}), viewer_id, {})
+	state["mana_pool_mines"] = _filter_vec2i_key_dict_for_viewer(state.get("mana_pool_mines", {}), viewer_id, viewer_vis, false)
+	state["camp_respawns"] = _filter_vec2i_key_dict_for_viewer(state.get("camp_respawns", {}), viewer_id, viewer_vis, false)
+	state["dragon_respawns"] = _filter_vec2i_key_dict_for_viewer(state.get("dragon_respawns", {}), viewer_id, viewer_vis, false)
+	state["camp_respawn_counts"] = _filter_vec2i_key_dict_for_viewer(state.get("camp_respawn_counts", {}), viewer_id, viewer_vis, false)
+	state["dragon_rewards"] = _filter_vec2i_key_dict_for_viewer(state.get("dragon_rewards", {}), viewer_id, viewer_vis, false)
+	state["dragon_spawn_counts"] = _filter_vec2i_key_dict_for_viewer(state.get("dragon_spawn_counts", {}), viewer_id, viewer_vis, false)
 	var viewer_orders := {}
 	viewer_orders[viewer_id] = player_orders.get(viewer_id, {}).duplicate(true)
 	state["player_orders"] = viewer_orders
-	var fog = $GameBoardNode.get_node_or_null("FogOfWar")
-	if fog != null and fog.visiblity.has(viewer_id):
-		state["fog_visibility"] = { viewer_id: fog.visiblity[viewer_id].duplicate(true) }
+	state["committed_orders"] = _filter_player_dict_entry_for_viewer(committed_orders, viewer_id, {})
+	if not viewer_vis.is_empty():
+		state["fog_visibility"] = { viewer_id: viewer_vis }
 	state["damage_log"] = { viewer_id: damage_log.get(viewer_id, []).duplicate(true) }
 	state["damage_log_entries"] = { viewer_id: damage_log_entries.get(viewer_id, []).duplicate(true) }
 	return state
+
+func _state_tile_from_value(value) -> Vector2i:
+	if typeof(value) == TYPE_VECTOR2I:
+		return value
+	return _decode_log_vec2i(value)
+
+func _viewer_can_see_snapshot_tile(viewer_id: String, viewer_vis: Dictionary, tile: Vector2i) -> bool:
+	if viewer_id == "":
+		return true
+	if tile == Vector2i(-9999, -9999):
+		return false
+	if viewer_vis.is_empty():
+		return true
+	return int(viewer_vis.get(tile, 0)) == 2
+
+func _filter_tiles_for_viewer(tiles: Array, viewer_id: String, viewer_vis: Dictionary, include_all: bool) -> Array:
+	var filtered: Array = []
+	var seen := {}
+	for raw_tile in tiles:
+		var tile = _state_tile_from_value(raw_tile)
+		if tile == Vector2i(-9999, -9999):
+			continue
+		if seen.has(tile):
+			continue
+		if include_all or _viewer_can_see_snapshot_tile(viewer_id, viewer_vis, tile):
+			filtered.append(tile)
+			seen[tile] = true
+	return filtered
+
+func _filter_player_tile_dict_for_viewer(source: Dictionary, viewer_id: String, viewer_vis: Dictionary) -> Dictionary:
+	var filtered := {}
+	for player_id in active_players:
+		filtered[player_id] = _filter_tiles_for_viewer(source.get(player_id, []), viewer_id, viewer_vis, player_id == viewer_id)
+	return filtered
+
+func _filter_player_pos_dict_for_viewer(source: Dictionary, viewer_id: String, viewer_vis: Dictionary) -> Dictionary:
+	var filtered := {}
+	for player_id in active_players:
+		var tile = _state_tile_from_value(source.get(player_id, Vector2i(-9999, -9999)))
+		if tile == Vector2i(-9999, -9999):
+			continue
+		if player_id == viewer_id or _viewer_can_see_snapshot_tile(viewer_id, viewer_vis, tile):
+			filtered[player_id] = tile
+	return filtered
+
+func _filter_mines_for_viewer(source: Dictionary, viewer_id: String, viewer_vis: Dictionary) -> Dictionary:
+	var filtered := {"unclaimed": _filter_tiles_for_viewer(source.get("unclaimed", []), viewer_id, viewer_vis, false)}
+	for player_id in active_players:
+		filtered[player_id] = _filter_tiles_for_viewer(source.get(player_id, []), viewer_id, viewer_vis, player_id == viewer_id)
+	return filtered
+
+func _filter_camps_for_viewer(source: Dictionary, viewer_id: String, viewer_vis: Dictionary) -> Dictionary:
+	return {
+		"basic": _filter_tiles_for_viewer(source.get("basic", []), viewer_id, viewer_vis, false),
+		"dragon": _filter_tiles_for_viewer(source.get("dragon", []), viewer_id, viewer_vis, false)
+	}
+
+func _filter_buildable_structures_for_viewer(viewer_id: String, viewer_vis: Dictionary) -> Dictionary:
+	var filtered := {}
+	for cell in buildable_structures.keys():
+		var state = buildable_structures[cell]
+		var owner = str(state.get("owner", ""))
+		if owner == viewer_id or (_viewer_can_see_snapshot_tile(viewer_id, viewer_vis, cell) and _structure_is_visible_to_viewer(state, viewer_id, cell)):
+			filtered[cell] = state.duplicate(true)
+	return filtered
+
+func _filter_vec2i_key_dict_for_viewer(source: Dictionary, viewer_id: String, viewer_vis: Dictionary, include_all: bool) -> Dictionary:
+	var filtered := {}
+	for raw_key in source.keys():
+		var cell = _state_tile_from_value(raw_key)
+		if cell == Vector2i(-9999, -9999):
+			continue
+		if include_all or _viewer_can_see_snapshot_tile(viewer_id, viewer_vis, cell):
+			filtered[cell] = source[raw_key]
+	return filtered
+
+func _filter_player_scalar_dict_for_viewer(source: Dictionary, viewer_id: String, default_value) -> Dictionary:
+	var filtered := {}
+	for player_id in active_players:
+		if player_id == viewer_id and source.has(player_id):
+			filtered[player_id] = source[player_id]
+		else:
+			filtered[player_id] = _clone_default_value(default_value)
+	return filtered
+
+func _filter_player_dict_entry_for_viewer(source: Dictionary, viewer_id: String, default_value) -> Dictionary:
+	var filtered := {}
+	for player_id in active_players:
+		if player_id == viewer_id and source.has(player_id):
+			filtered[player_id] = _clone_default_value(source[player_id])
+		else:
+			filtered[player_id] = _clone_default_value(default_value)
+	return filtered
+
+func _filtered_structure_positions_for_viewer(state: Dictionary) -> Array:
+	var filtered: Array = []
+	var seen := {}
+	for tile in state.get("structure_positions", []):
+		var pos = _state_tile_from_value(tile)
+		if pos == Vector2i(-9999, -9999) or seen.has(pos):
+			continue
+		if _tile_is_in_filtered_state(pos, state):
+			filtered.append(pos)
+			seen[pos] = true
+	return filtered
+
+func _tile_is_in_filtered_state(tile: Vector2i, state: Dictionary) -> bool:
+	for pos in state.get("base_positions", {}).values():
+		if _state_tile_from_value(pos) == tile:
+			return true
+	for player_id in state.get("tower_positions", {}).keys():
+		if tile in state["tower_positions"].get(player_id, []):
+			return true
+	for owner in state.get("mines", {}).keys():
+		if tile in state["mines"].get(owner, []):
+			return true
+	if state.get("buildable_structures", {}).has(tile):
+		return true
+	return false
 
 func _collect_procedural_map_state() -> Dictionary:
 	if current_map_index < 0 or current_map_index >= map_data.size():
@@ -3575,9 +4013,9 @@ func load_game(path: String = SAVE_DEFAULT_PATH) -> bool:
 	_ensure_dev_log_open()
 	_reset_map_state()
 	_load_map_by_index(map_index)
-	var should_reset_fog = map_state.is_empty() or not state.has("fog_visibility")
 	if not map_state.is_empty():
-		_apply_procedural_map_state(map_state, should_reset_fog)
+		# Clear template fog tiles before applying procedural bounds; visibility is restored from the snapshot below.
+		_apply_procedural_map_state(map_state, true)
 	apply_state(state, true)
 	_rebuild_orders_after_load()
 	_devlog({
@@ -3587,7 +4025,7 @@ func load_game(path: String = SAVE_DEFAULT_PATH) -> bool:
 	})
 	_devlog_snapshot("load")
 	call_deferred("_refresh_fog_after_load")
-	NetworkManager._orders_submitted = { "player1": false, "player2": false }
+	NetworkManager.reset_match_tracking(get_submission_players())
 	NetworkManager._step_ready_counts = {}
 	pending_broadcast_map_state = map_state
 	_broadcast_state(true)
@@ -3618,7 +4056,7 @@ func _broadcast_state(force_apply: bool = false) -> void:
 
 func _clamp_unit_healths() -> void:
 	var all_units = $GameBoardNode.get_all_units()
-	for player in ["player1", "player2"]:
+	for player in active_players:
 		for unit in all_units.get(player, []):
 			if unit == null:
 				continue
@@ -3637,7 +4075,7 @@ func _rebuild_orders_after_load() -> void:
 		return
 	if current_phase != Phase.ORDERS:
 		return
-	for player in ["player1", "player2"]:
+	for player in active_players:
 		player_orders[player].clear()
 		if NetworkManager.player_orders.has(player):
 			NetworkManager.player_orders[player].clear()
@@ -3668,8 +4106,7 @@ func _clear_units_only() -> void:
 
 func _apply_units(units_data: Array) -> void:
 	_clear_units_only()
-	var max_odd = 1
-	var max_even = 2
+	var max_player = 1
 	var max_neutral = 1000001
 	for data in units_data:
 		var grid_pos = data.get("grid_pos", Vector2i.ZERO)
@@ -3728,14 +4165,11 @@ func _apply_units(units_data: Array) -> void:
 				reward = _dragon_reward_for_pos(unit.grid_pos, max(count, 0))
 			_apply_dragon_reward_color(unit, reward)
 		var net_id = int(unit.net_id)
-		if unit.player_id == "player1":
-			max_odd = max(max_odd, net_id)
-		elif unit.player_id == "player2":
-			max_even = max(max_even, net_id)
-		else:
+		if unit.player_id == NEUTRAL_PLAYER_ID:
 			max_neutral = max(max_neutral, net_id)
-	unit_manager._next_net_id_odd = max_odd + 2
-	unit_manager._next_net_id_even = max_even + 2
+		else:
+			max_player = max(max_player, net_id)
+	unit_manager._next_net_id_player = max_player + 1
 	unit_manager._next_net_id_neutral = max_neutral + 1
 
 func _on_state_snapshot_received(state: Dictionary) -> void:
@@ -3775,19 +4209,30 @@ func apply_state(state: Dictionary, force_host: bool = false) -> void:
 	var match_seed = int(state.get("match_seed", NetworkManager.match_seed))
 	if match_seed > 0:
 		NetworkManager.match_seed = match_seed
-	if map_index != current_map_index:
-		_reset_map_state()
-		_load_map_by_index(map_index)
+	configure_match_players(state.get("active_players", active_players), false)
 	var map_state = {}
 	if state.has("procedural_map") and state["procedural_map"] is Dictionary:
 		map_state = state["procedural_map"]
+	if map_index != current_map_index:
+		_reset_map_state()
+		var should_apply_generated = not (not _is_host() and not map_state.is_empty())
+		_load_map_by_index(map_index, should_apply_generated)
 	if not map_state.is_empty():
-		var should_reset_fog = not state.has("fog_visibility")
-		_apply_procedural_map_state(map_state, should_reset_fog)
+		# Clients can load the rectangular procedural template first; always clear fog before applying hex bounds.
+		_apply_procedural_map_state(map_state, true)
 	if state.has("base_positions"):
 		base_positions = state["base_positions"]
 	if state.has("tower_positions"):
 		tower_positions = state["tower_positions"]
+	if state.has("living_players") and state["living_players"] is Array:
+		var restored_living = _normalize_player_ids(state["living_players"])
+		living_players = []
+		for player_id in restored_living:
+			if player_id in active_players and not living_players.has(player_id):
+				living_players.append(player_id)
+		if living_players.is_empty():
+			living_players = active_players.duplicate()
+	pending_eliminations = _normalize_player_ids(state.get("pending_eliminations", []))
 	if state.has("structure_positions"):
 		structure_positions = state["structure_positions"]
 	if state.has("buildable_structures"):
@@ -3799,15 +4244,15 @@ func apply_state(state: Dictionary, force_host: bool = false) -> void:
 	if state.has("ward_vision_active"):
 		ward_vision_active = state["ward_vision_active"]
 	else:
-		ward_vision_active = { "player1": {}, "player2": {} }
+		ward_vision_active = _build_player_dict(active_players, {})
 	if state.has("player_global_vision_until"):
 		player_global_vision_until = state["player_global_vision_until"]
 	else:
-		player_global_vision_until = { "player1": 0, "player2": 0 }
+		player_global_vision_until = _build_player_dict(active_players, 0)
 	if state.has("targeted_vision_active"):
 		targeted_vision_active = state["targeted_vision_active"]
 	else:
-		targeted_vision_active = { "player1": {}, "player2": {} }
+		targeted_vision_active = _build_player_dict(active_players, {})
 	_next_ward_id = int(state.get("next_ward_id", _next_ward_id))
 	_rebuild_ward_ids()
 	if state.has("structure_memory"):
@@ -3839,18 +4284,18 @@ func apply_state(state: Dictionary, force_host: bool = false) -> void:
 	camp_respawn_counts = state.get("camp_respawn_counts", camp_respawn_counts)
 	dragon_rewards = state.get("dragon_rewards", dragon_rewards)
 	dragon_spawn_counts = state.get("dragon_spawn_counts", dragon_spawn_counts)
-	damage_log = state.get("damage_log", { "player1": [], "player2": [] })
-	damage_log_entries = state.get("damage_log_entries", { "player1": [], "player2": [] })
+	damage_log = state.get("damage_log", _build_player_dict(active_players, []))
+	damage_log_entries = state.get("damage_log_entries", _build_player_dict(active_players, []))
 	neutral_step_index = int(state.get("neutral_step_index", neutral_step_index))
 	_apply_units(state.get("units", []))
-	player_orders = { "player1": {}, "player2": {} }
+	player_orders = _build_player_dict(active_players, {})
 	if state.has("player_orders"):
 		var incoming_orders = state["player_orders"]
 		if incoming_orders is Dictionary:
 			for pid in incoming_orders.keys():
 				player_orders[pid] = incoming_orders[pid]
 	NetworkManager.player_orders = player_orders
-	committed_orders = state.get("committed_orders", { "player1": {}, "player2": {} })
+	committed_orders = state.get("committed_orders", _build_player_dict(active_players, {}))
 	_recalculate_mana_caps()
 	_prune_dead_units_after_apply()
 	if state.has("fog_visibility"):
@@ -3889,6 +4334,7 @@ func apply_state(state: Dictionary, force_host: bool = false) -> void:
 		_record_turn_stats()
 
 func _reset_map_state() -> void:
+	_prewarmed_map_key = ""
 	if terrain_overlay != null:
 		if is_instance_valid(terrain_overlay):
 			var parent = terrain_overlay.get_parent()
@@ -3917,13 +4363,15 @@ func _reset_map_state() -> void:
 	structure_positions.clear()
 	$GameBoardNode.structure_units.clear()
 	buildable_structures.clear()
-	spawn_tower_positions = { "player1": [], "player2": [] }
-	income_tower_positions = { "player1": [], "player2": [] }
+	spawn_tower_positions = _build_player_dict(active_players, [])
+	income_tower_positions = _build_player_dict(active_players, [])
 	structure_markers.clear()
-	structure_memory = { "player1": {}, "player2": {} }
-	neutral_tile_memory = { "player1": {}, "player2": {} }
+	structure_memory = _build_player_dict(active_players, {})
+	neutral_tile_memory = _build_player_dict(active_players, {})
 	camps = {"basic": [], "dragon": []}
-	mines = {"unclaimed": [], "player1": [], "player2": []}
+	mines = {"unclaimed": []}
+	for player_id in active_players:
+		mines[player_id] = []
 	camp_units.clear()
 	dragon_units.clear()
 	camp_respawns.clear()
@@ -3936,13 +4384,14 @@ func _reset_map_state() -> void:
 	for child in unit_manager.get_children():
 		child.queue_free()
 	unit_manager.unit_by_net_id.clear()
-	unit_manager._next_net_id_odd = 1
-	unit_manager._next_net_id_even = 2
+	unit_manager._next_net_id_player = 1
 	unit_manager._next_net_id_neutral = 1000001
 
 func _on_map_index_received(map_index: int) -> void:
 	var mp = get_tree().get_multiplayer()
 	if mp != null and mp.multiplayer_peer != null and mp.is_server():
+		return
+	if NetworkManager != null and bool(NetworkManager.get("_awaiting_initial_state_ready")):
 		return
 	if current_map_index == -1:
 		return
@@ -4037,7 +4486,8 @@ func start_game() -> void:
 	_maybe_log_match_init()
 	if $UI != null and $UI.has_method("_on_game_started"):
 		$UI._on_game_started()
-	call_deferred("_game_loop")
+	if _is_host():
+		call_deferred("_game_loop")
 
 func update_neutral_markers() -> void:
 	var root = _get_neutral_marker_root()
@@ -4068,11 +4518,96 @@ func _add_neutral_marker(root: Node2D, pos: Vector2i, text: String) -> void:
 	label.z_index = 101
 	root.add_child(label)
 
+func _remove_player_unit_immediately(unit) -> void:
+	if unit == null or not is_instance_valid(unit):
+		return
+	for player in active_players:
+		player_orders.get(player, {}).erase(unit.net_id)
+		committed_orders.get(player, {}).erase(unit.net_id)
+		NetworkManager.player_orders.get(player, {}).erase(unit.net_id)
+	$GameBoardNode.vacate(unit.grid_pos, unit)
+	_refresh_tile_after_unit_change(unit.grid_pos)
+	unit_manager.unit_by_net_id.erase(unit.net_id)
+	unit.queue_free()
+
+func _neutralize_player_mines(player_id: String) -> void:
+	if not mines.has(player_id):
+		return
+	if not mines.has("unclaimed"):
+		mines["unclaimed"] = []
+	for tile in mines.get(player_id, []):
+		if tile not in mines["unclaimed"]:
+			mines["unclaimed"].append(tile)
+	mines[player_id] = []
+
+func _eliminate_player_now(player_id: String) -> void:
+	if player_id == "" or player_id not in living_players:
+		return
+	var affected_tiles: Array = []
+	var base_tile = base_positions.get(player_id, Vector2i(-9999, -9999))
+	if typeof(base_tile) == TYPE_VECTOR2I and base_tile != Vector2i(-9999, -9999):
+		affected_tiles.append(base_tile)
+	for tile in tower_positions.get(player_id, []):
+		if typeof(tile) == TYPE_VECTOR2I and tile not in affected_tiles:
+			affected_tiles.append(tile)
+	living_players.erase(player_id)
+	_neutralize_player_mines(player_id)
+	var units_to_remove: Array = []
+	for unit in unit_manager.get_children():
+		if unit != null and is_instance_valid(unit) and unit.player_id == player_id:
+			units_to_remove.append(unit)
+	for unit in units_to_remove:
+		_remove_player_unit_immediately(unit)
+	player_orders.get(player_id, {}).clear()
+	committed_orders.get(player_id, {}).clear()
+	NetworkManager.player_orders.get(player_id, {}).clear()
+	ward_vision_active.erase(player_id)
+	player_global_vision_until.erase(player_id)
+	targeted_vision_active.erase(player_id)
+	structure_memory.erase(player_id)
+	neutral_tile_memory.erase(player_id)
+	spawn_tower_positions.erase(player_id)
+	income_tower_positions.erase(player_id)
+	tower_positions.erase(player_id)
+	base_positions.erase(player_id)
+	for tile in affected_tiles:
+		_refresh_tile_after_unit_change(tile)
+	current_player = living_players[0] if not living_players.is_empty() else active_players[0]
+	refresh_structure_markers()
+	refresh_mine_tiles()
+	update_neutral_markers()
+	$GameBoardNode/FogOfWar._update_fog()
+
+func queue_player_elimination(player_id: String) -> void:
+	player_id = str(player_id).strip_edges()
+	if player_id == "" or player_id not in living_players:
+		return
+	if pending_eliminations.has(player_id):
+		return
+	pending_eliminations.append(player_id)
+
+func _resolve_pending_eliminations() -> void:
+	if pending_eliminations.is_empty():
+		return
+	var to_eliminate = pending_eliminations.duplicate()
+	pending_eliminations.clear()
+	for player_id in to_eliminate:
+		_eliminate_player_now(player_id)
+	var winner_id = get_winner_id()
+	if winner_id != "":
+		end_game(winner_id)
+
 func _show_game_over(player_id: String) -> void:
 	game_over = true
 	_prepare_replay_metadata(player_id)
 	$GameOver/GameOverLabel.add_theme_font_size_override("font_size", 100)
-	$GameOver/GameOverLabel.text = "%s lost!" % player_id
+	var winner_id = str(player_id).strip_edges()
+	if winner_id == "":
+		winner_id = get_winner_id()
+	if winner_id != "":
+		$GameOver/GameOverLabel.text = "%s wins!" % winner_id
+	else:
+		$GameOver/GameOverLabel.text = "%s lost!" % player_id
 	$GameOver.visible = true
 	$UI.visible = false
 
@@ -4103,7 +4638,7 @@ func _start_replay_from_game_over(fog_mode: String) -> void:
 			$UI._enter_replay_mode()
 
 func _on_replay_view_pressed() -> void:
-	var default_fog = local_player_id if local_player_id in ["player1", "player2"] else "player1"
+	var default_fog = local_player_id if local_player_id in active_players else (active_players[0] if not active_players.is_empty() else "player1")
 	_start_replay_from_game_over(default_fog)
 
 func _on_replay_stats_pressed() -> void:
@@ -4135,7 +4670,13 @@ func end_game(player_id: String) -> void:
 func concede(player_id: String) -> void:
 	if not _is_host():
 		return
-	end_game(player_id)
+	if current_phase == Phase.EXECUTION:
+		queue_player_elimination(player_id)
+	else:
+		_eliminate_player_now(player_id)
+		var winner_id = get_winner_id()
+		if winner_id != "":
+			end_game(winner_id)
 
 func reset_to_lobby() -> void:
 	_devlog({
@@ -4167,9 +4708,11 @@ func reset_to_lobby() -> void:
 	match_init_logged = false
 	_reset_map_state()
 	current_map_index = -1
+	configure_match_players(_default_player_ids(), false)
+	pending_eliminations.clear()
 	turn_number = 0
 	current_phase = Phase.UPKEEP
-	current_player = "player1"
+	current_player = active_players[0]
 	exec_steps = []
 	step_index = 0
 	neutral_step_index = -1
@@ -4178,21 +4721,6 @@ func reset_to_lobby() -> void:
 	rng_replay_enabled = false
 	rng_replay_index = 0
 	rng_replay.clear()
-	player_gold = { "player1": 25, "player2": 25 }
-	player_income = { "player1": 0, "player2": 0 }
-	player_mana = { "player1": 0, "player2": 0 }
-	player_mana_income = { "player1": 0, "player2": 0 }
-	player_mana_cap = { "player1": BASE_MANA_CAP, "player2": BASE_MANA_CAP }
-	player_melee_bonus = { "player1": 0, "player2": 0 }
-	player_ranged_bonus = { "player1": 0, "player2": 0 }
-	player_mana_bonus = { "player1": 0, "player2": 0 }
-	player_mana_cap_bonus = { "player1": 0, "player2": 0 }
-	player_global_vision_until = { "player1": 0, "player2": 0 }
-	targeted_vision_active = { "player1": {}, "player2": {} }
-	damage_log = { "player1": [], "player2": [] }
-	damage_log_entries = { "player1": [], "player2": [] }
-	player_orders = { "player1": {}, "player2": {} }
-	committed_orders = { "player1": {}, "player2": {} }
 	local_player_id = ""
 	replay_mode = false
 	replay_phase_mode = false
@@ -4205,7 +4733,7 @@ func reset_to_lobby() -> void:
 		NetworkManager.match_seed = -1
 		NetworkManager.custom_proc_params = {}
 		NetworkManager.player_orders = player_orders
-		NetworkManager._orders_submitted = { "player1": false, "player2": false }
+		NetworkManager.reset_match_tracking(active_players)
 		NetworkManager._step_ready_counts = {}
 	$UI/DamagePanel.visible = false
 	$GameOver.visible = false
@@ -4218,7 +4746,7 @@ func reset_to_lobby() -> void:
 # Main loop: Upkeep → Orders → Execution → increment → loop
 # --------------------------------------------------------
 func _game_loop() -> void:
-	if replay_mode:
+	if replay_mode or game_over:
 		return
 	_ensure_map_loaded()
 	turn_number += 1
@@ -4229,7 +4757,7 @@ func _game_loop() -> void:
 		"rng_seed": rng.seed
 	})
 	save_game_slot(-1, true)
-	NetworkManager._orders_submitted = { "player1": false, "player2": false }
+	NetworkManager.reset_match_tracking(get_submission_players())
 	player_orders = NetworkManager.player_orders
 	NetworkManager.broadcast_phase("UPKEEP")
 	start_phase_locally("UPKEEP")
@@ -4240,20 +4768,35 @@ func _game_loop() -> void:
 	_do_execution()
 
 func _ensure_map_loaded() -> void:
-	if current_map_index >= 0 and terrain_overlay != null:
-		return
 	_ensure_dev_log_open()
 	if map_data.size() == 0:
 		push_error("TurnManager: map_data is empty.")
 		return
+	if NetworkManager != null and NetworkManager.has_method("get_match_player_ids"):
+		configure_match_players(NetworkManager.get_match_player_ids(), true)
 	if NetworkManager.selected_map_index < 0:
-		NetworkManager.selected_map_index = _pick_random_map_index(NetworkManager.map_selection_mode)
+		NetworkManager.selected_map_index = _pick_random_map_index(NetworkManager.map_selection_mode, active_players.size())
 	if NetworkManager.match_seed < 0:
 		NetworkManager.match_seed = _rng_randi_range(1, 2147483646, "match_seed_fallback")
 	var map_index = NetworkManager.selected_map_index
+	var already_loaded = current_map_index == map_index and terrain_overlay != null
+	if already_loaded:
+		if map_index >= 0 and map_index < map_data.size():
+			var md = map_data[map_index] as MapData
+			if md != null and md.procedural:
+				var desired_key = _procedural_cache_key(map_index, active_players, NetworkManager.match_seed, NetworkManager.custom_proc_params)
+				if _prewarmed_map_key == desired_key:
+					return
+			else:
+				return
+		_reset_map_state()
 	_load_map_by_index(map_index)
 	_spawn_neutral_units()
 	$GameBoardNode/FogOfWar._update_fog()
+	if map_index >= 0 and map_index < map_data.size():
+		var loaded_md = map_data[map_index] as MapData
+		if loaded_md != null and loaded_md.procedural:
+			_prewarmed_map_key = _procedural_cache_key(map_index, active_players, NetworkManager.match_seed, NetworkManager.custom_proc_params)
 
 # --------------------------------------------------------
 # Phase 1: Upkeep — award gold
@@ -4268,16 +4811,16 @@ func _do_upkeep() -> void:
 		"phase_name": "UPKEEP"
 	})
 	_recalculate_mana_caps()
-	for player in ["player1", "player2"]:
+	for player in living_players:
 		var income = 0
 		var mana_income = 0
 		var connected_roads = _connected_road_tiles(player)
 		var connected_rails = _connected_rail_tiles(player)
-		if _controls_tile(player, base_positions[player]):
+		if _controls_tile(player, base_positions.get(player, Vector2i(-9999, -9999))):
 			income += BASE_INCOME
-		for tower in income_tower_positions.get(player, []):
+		for tower in _income_tower_tiles_for(player):
 			income += TOWER_INCOME
-		for pos in mines[player]:
+		for pos in mines.get(player, []):
 			if _controls_tile(player, pos):
 				if $GameBoardNode.is_occupied(pos):
 					var occupant = $GameBoardNode.get_unit_at(pos)
@@ -4302,11 +4845,11 @@ func _do_upkeep() -> void:
 	$UI._clear_all_drawings()
 	$GameBoardNode/FogOfWar._update_fog()
 	var all_units = $GameBoardNode.get_all_units()
-	for p in ["player1", "player2"]:
+	for p in living_players:
 		player_orders[p].clear()
 		if NetworkManager.player_orders.has(p):
 			NetworkManager.player_orders[p].clear()
-		for unit in all_units[p]:
+		for unit in all_units.get(p, []):
 			unit.is_defending = false
 			unit.just_purchased = false
 			unit.ordered = false
@@ -4350,7 +4893,7 @@ func _do_upkeep() -> void:
 	_record_turn_stats()
 
 func _apply_auto_heal_orders(all_units: Dictionary) -> void:
-	for player in ["player1", "player2"]:
+	for player in living_players:
 		if not all_units.has(player):
 			continue
 		var orders = player_orders.get(player, {})
@@ -4378,7 +4921,7 @@ func _apply_auto_heal_orders(all_units: Dictionary) -> void:
 		player_orders[player] = orders
 
 func _apply_auto_defend_orders(all_units: Dictionary) -> void:
-	for player in ["player1", "player2"]:
+	for player in living_players:
 		if not all_units.has(player):
 			continue
 		var orders = player_orders.get(player, {})
@@ -4405,7 +4948,7 @@ func _apply_auto_defend_orders(all_units: Dictionary) -> void:
 		player_orders[player] = orders
 
 func _apply_auto_lookout_orders(all_units: Dictionary) -> void:
-	for player in ["player1", "player2"]:
+	for player in living_players:
 		if not all_units.has(player):
 			continue
 		var orders = player_orders.get(player, {})
@@ -4435,7 +4978,7 @@ func _apply_auto_lookout_orders(all_units: Dictionary) -> void:
 		player_orders[player] = orders
 
 func _apply_auto_build_orders(all_units: Dictionary) -> void:
-	for player in ["player1", "player2"]:
+	for player in living_players:
 		if not all_units.has(player):
 			continue
 		var orders = player_orders.get(player, {})
@@ -4488,7 +5031,7 @@ func _apply_auto_build_orders(all_units: Dictionary) -> void:
 		player_orders[player] = orders
 
 func _apply_auto_ward_orders() -> void:
-	for player in ["player1", "player2"]:
+	for player in living_players:
 		var orders = player_orders.get(player, {})
 		if not NetworkManager.player_orders.has(player):
 			NetworkManager.player_orders[player] = orders
@@ -4822,7 +5365,7 @@ func _record_move_queue_last_order(unit, order: Dictionary) -> void:
 			unit.move_queue_last_target = tail
 
 func _apply_move_queue_orders(all_units: Dictionary) -> void:
-	for player in ["player1", "player2"]:
+	for player in living_players:
 		if not all_units.has(player):
 			continue
 		var orders = player_orders.get(player, {})
@@ -5090,7 +5633,7 @@ func estimate_queue_turns(unit, path: Array, mode: String, player_id: String) ->
 	return -1
 
 func _apply_build_queue_orders(all_units: Dictionary) -> void:
-	for player in ["player1", "player2"]:
+	for player in living_players:
 		if not all_units.has(player):
 			continue
 		var orders = player_orders.get(player, {})
@@ -5132,8 +5675,9 @@ func _apply_build_queue_orders(all_units: Dictionary) -> void:
 # --------------------------------------------------------
 func _do_orders() -> void:
 	current_phase = Phase.ORDERS
-	# start with player1
 	var me = local_player_id
+	if me == "" or me not in active_players:
+		me = active_players[0]
 	print("--- Orders Phase for %s ---" % me.capitalize())
 	_devlog({
 		"type": "phase_start",
@@ -5146,14 +5690,14 @@ func _do_orders() -> void:
 		if $UI.has_method("_update_done_button_state"):
 			$UI._update_done_button_state()
 
-	# wait until both players have submitted
+	# wait until all living players have submitted
 	await NetworkManager.orders_ready
+	var order_counts := {}
+	for player_id in living_players:
+		order_counts[player_id] = player_orders.get(player_id, {}).size()
 	_devlog({
 		"type": "orders_ready",
-		"counts": {
-			"player1": player_orders.get("player1", {}).size(),
-			"player2": player_orders.get("player2", {}).size()
-		}
+		"counts": order_counts
 	})
 	print("→ Both players submitted orders: %s" % player_orders)
 
@@ -5181,7 +5725,7 @@ func reset_orders_for_player(player_id: String) -> void:
 func force_skip_movement_phase() -> void:
 	if not _is_host():
 		return
-	var players = ["player1", "player2"]
+	var players = active_players
 	for player in players:
 		var orders = NetworkManager.player_orders.get(player, {})
 		var to_remove := []
@@ -6125,7 +6669,7 @@ func _handle_neutral_death(unit) -> void:
 		var camp_duration = _roll_camp_respawn()
 		camp_respawns[pos] = camp_duration
 		var killer = unit.last_damaged_by
-		if killer in ["player1", "player2"]:
+		if killer in active_players:
 			var reward = _camp_gold_reward(pos)
 			player_gold[killer] += reward
 			_devlog({
@@ -6141,7 +6685,7 @@ func _handle_neutral_death(unit) -> void:
 		var dragon_duration = _roll_dragon_respawn()
 		dragon_respawns[pos] = dragon_duration
 		var killer = unit.last_damaged_by
-		if killer in ["player1", "player2"]:
+		if killer in active_players:
 			var reward = dragon_rewards.get(pos, DRAGON_REWARD_GOLD)
 			_grant_dragon_reward(killer, pos)
 			_devlog({
@@ -6167,9 +6711,10 @@ func _handle_neutral_death(unit) -> void:
 func _cleanup_dead_unit(unit) -> void:
 	if unit == null or not is_instance_valid(unit):
 		return
-	for player in ["player1", "player2"]:
+	for player in active_players:
 		player_orders[player].erase(unit.net_id)
 		NetworkManager.player_orders[player].erase(unit.net_id)
+		committed_orders[player].erase(unit.net_id)
 	died_dmg_report(unit)
 	_handle_neutral_death(unit)
 	$GameBoardNode.vacate(unit.grid_pos, unit)
@@ -6180,7 +6725,7 @@ func _cleanup_dead_unit(unit) -> void:
 func _remove_dead_unit_silent(unit) -> void:
 	if unit == null or not is_instance_valid(unit):
 		return
-	for player in ["player1", "player2"]:
+	for player in active_players:
 		player_orders[player].erase(unit.net_id)
 		NetworkManager.player_orders[player].erase(unit.net_id)
 		committed_orders[player].erase(unit.net_id)
@@ -6194,7 +6739,7 @@ func _prune_dead_units_after_apply() -> void:
 	for unit in unit_manager.get_children():
 		if unit == null or not is_instance_valid(unit):
 			continue
-		if unit.player_id not in ["player1", "player2"]:
+		if unit.player_id not in active_players:
 			continue
 		if unit.is_base or unit.is_tower:
 			continue
@@ -6352,14 +6897,14 @@ func _death_entries_for_viewer(viewer_id: String, unit) -> Array:
 	}]
 
 func _append_damage_log(atkr, defr, atkr_in_dmg, defr_in_dmg, retaliate, atk_mode) -> void:
-	for viewer_id in ["player1", "player2"]:
+	for viewer_id in active_players:
 		var entries = _damage_entries_for_viewer(viewer_id, atkr, defr, atkr_in_dmg, defr_in_dmg, retaliate, atk_mode)
 		for entry in entries:
 			damage_log[viewer_id].append(str(entry.get("text", "")))
 			damage_log_entries[viewer_id].append(entry)
 
 func _append_death_log(unit) -> void:
-	for viewer_id in ["player1", "player2"]:
+	for viewer_id in active_players:
 		var entries = _death_entries_for_viewer(viewer_id, unit)
 		for entry in entries:
 			damage_log[viewer_id].append(str(entry.get("text", "")))
@@ -6493,7 +7038,7 @@ func _process_spawns():
 		orders_source[player_id].erase(unit_net_id)
 		_remove_player_order(player_id, unit_net_id)
 	
-	for player in ["player1", "player2"]:
+	for player in living_players:
 		var unit_ids = orders_source[player].keys()
 		unit_ids.sort()
 		for unit_net_id in unit_ids:
@@ -6511,7 +7056,7 @@ func _process_spawns():
 					continue
 				unit.is_healing = true
 	
-	for player in ["player1", "player2"]:
+	for player in living_players:
 		for unit_net_id in orders_source[player].keys():
 			if orders_source[player][unit_net_id]["type"] == "move":
 				var unit = unit_manager.get_unit_by_net_id(unit_net_id)
@@ -6520,7 +7065,7 @@ func _process_spawns():
 				unit.is_moving = true
 				unit.moving_to = orders_source[player][unit_net_id]["path"][1]
 	var all_units = $GameBoardNode.get_all_units()
-	for player in ["player1", "player2"]:
+	for player in living_players:
 		for unit in all_units.get(player, []):
 			if unit == null:
 				continue
@@ -6531,7 +7076,7 @@ func _process_spawns():
 
 func _process_spells() -> void:
 	var spell_orders := []
-	for player in ["player1", "player2"]:
+	for player in living_players:
 		var unit_ids = player_orders[player].keys()
 		unit_ids.sort()
 		for unit_net_id in unit_ids:
@@ -6665,7 +7210,7 @@ func _process_attacks():
 	var spell_dmg: Dictionary = {} # key: target.net_id, value: damage received
 	
 	# get all attacks
-	for player in ["player1", "player2"]:
+	for player in living_players:
 		var unit_ids = player_orders[player].keys()
 		unit_ids.sort()
 		for unit_net_id in unit_ids:
@@ -7073,7 +7618,7 @@ func _process_engineering() -> void:
 	var sabotaged_tiles := {}
 	var build_tiles := {}
 
-	for player in ["player1", "player2"]:
+	for player in living_players:
 		var unit_ids = player_orders[player].keys()
 		unit_ids.sort()
 		for unit_net_id in unit_ids:
@@ -7842,8 +8387,8 @@ func _process_move():
 	$GameBoardNode/FogOfWar._update_fog()
 	
 	# 10) schedule the next tick if any moves remain
-	for player in ["player1", "player2"]:
-		for unit_id in NetworkManager.player_orders[player].keys():
+	for player in living_players:
+		for unit_id in NetworkManager.player_orders.get(player, {}).keys():
 			var ord = NetworkManager.player_orders[player][unit_id]
 			if ord.has("type") and ord["type"] == "move":
 				exec_steps.append(func(): _process_move())
@@ -7871,7 +8416,7 @@ func _do_execution() -> void:
 	for unit in $GameBoardNode.get_all_units_flat():
 		if unit != null:
 			unit.is_looking_out = false
-	for player in ["player1", "player2"]:
+	for player in living_players:
 		var orders = committed_orders.get(player, {})
 		for order in orders.values():
 			if order.get("type", "") != "lookout":
@@ -7883,8 +8428,8 @@ func _do_execution() -> void:
 	$GameBoardNode/OrderReminderMap.clear()
 	for child in dmg_report.get_children():
 		child.queue_free()
-	damage_log = { "player1": [], "player2": [] }
-	damage_log_entries = { "player1": [], "player2": [] }
+	damage_log = _build_player_dict(active_players, [])
+	damage_log_entries = _build_player_dict(active_players, [])
 	neutral_step_index = -1
 	exec_steps = [
 		func(): _process_spawns(),
@@ -7900,10 +8445,13 @@ func _do_execution() -> void:
 func _run_next_step():
 	$GameBoardNode/FogOfWar._update_fog()
 	if step_index >= exec_steps.size():
+		_resolve_pending_eliminations()
 		emit_signal("execution_complete")
 		if _is_host() and not replay_mode:
 			_broadcast_state()
 			NetworkManager.broadcast_execution_complete()
+		if game_over:
+			return
 		if get_tree().get_multiplayer().is_server() and not replay_mode:
 			call_deferred("_game_loop")
 		return
@@ -7939,7 +8487,7 @@ func start_phase_locally(phase_name: String) -> void:
 		return
 	match phase_name:
 		"UPKEEP":
-			NetworkManager._orders_submitted = { "player1": false, "player2": false }
+			NetworkManager.reset_match_tracking(get_submission_players())
 			_do_upkeep()
 		"ORDERS":
 			# kick off the orders coroutine on the client

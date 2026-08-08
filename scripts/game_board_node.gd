@@ -11,6 +11,12 @@ var structure_tiles: Dictionary = {}
 var structure_units: Dictionary = {}
 var damage_hover_highlight_map: TileMapLayer = null
 
+func _get_player_ids() -> Array:
+	var tm = $".."
+	if tm != null and tm.has_method("get_match_players"):
+		return tm.get_match_players()
+	return ["player1", "player2"]
+
 func _ready() -> void:
 	pass
 
@@ -29,8 +35,8 @@ func vacate(tile: Vector2i, unit: Node = null) -> void:
 			structure_units.erase(tile)
 		if structure_tiles.get(tile) == unit:
 			structure_tiles.erase(tile)
-		for player in ["player1", "player2"]:
-			if unit.is_tower and tile in $"..".tower_positions[player]:
+		for player in _get_player_ids():
+			if unit.is_tower and tile in $"..".tower_positions.get(player, []):
 				$"..".tower_positions[player].erase(tile)
 				$"..".structure_positions.erase(tile)
 				if $"..".has_method("get_spawn_points"):
@@ -38,8 +44,10 @@ func vacate(tile: Vector2i, unit: Node = null) -> void:
 						$"..".spawn_tower_positions[player].erase(tile)
 					if $"..".income_tower_positions.has(player) and tile in $"..".income_tower_positions[player]:
 						$"..".income_tower_positions[player].erase(tile)
-			if unit.is_base and tile == $"..".base_positions[player]:
-				$"..".end_game(player)
+			if unit.is_base and tile == $"..".base_positions.get(player, Vector2i(-9999, -9999)):
+				$"..".structure_positions.erase(tile)
+				if $"..".has_method("queue_player_elimination"):
+					$"..".queue_player_elimination(player)
 		return
 	if unit != null:
 		if occupied_tiles.get(tile) == unit:
@@ -95,21 +103,19 @@ func get_structure_at(tile: Vector2i):
 	return structure
 
 func get_all_units():
-	var units: Dictionary = {"player1": [], "player2": [], "neutral": []}
+	var units: Dictionary = {"neutral": []}
+	for player_id in _get_player_ids():
+		units[player_id] = []
 	for unit in occupied_tiles.values():
-		if unit.player_id == "player1":
-			units["player1"].append(unit)
-		elif unit.player_id == "player2":
-			units["player2"].append(unit)
-		elif unit.player_id == "neutral":
-			units["neutral"].append(unit)
+		var owner = str(unit.player_id)
+		if not units.has(owner):
+			units[owner] = []
+		units[owner].append(unit)
 	for unit in structure_units.values():
-		if unit.player_id == "player1":
-			units["player1"].append(unit)
-		elif unit.player_id == "player2":
-			units["player2"].append(unit)
-		elif unit.player_id == "neutral":
-			units["neutral"].append(unit)
+		var owner = str(unit.player_id)
+		if not units.has(owner):
+			units[owner] = []
+		units[owner].append(unit)
 	return units
 
 func get_all_units_flat(include_structures: bool = true) -> Array:

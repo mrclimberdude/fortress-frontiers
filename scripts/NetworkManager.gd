@@ -4,8 +4,8 @@ var hex: TileMapLayer
 var turn_mgr: Node2D
 
 var received_map_data: Array = []
-var _orders_submitted := { "player1": false, "player2": false }
-var player_orders := {"player1": {}, "player2": {}}  # map player_id → orders list
+var _orders_submitted := {}
+var player_orders := {}  # map player_id → orders list
 
 const MAX_PLAYERS: int = 6
 
@@ -21,11 +21,70 @@ var selected_map_index: int = -1
 var map_selection_mode: String = "random_normal"
 var match_seed: int = -1
 var custom_proc_params: Dictionary = {}
+var _pending_start_ready_peers: Dictionary = {}
+var _awaiting_initial_state_ready: bool = false
+var _start_game_waiting_for_prewarm: bool = false
+var _start_game_handshake_active: bool = false
+var _start_game_snapshots_sent: bool = false
 
 
 var _step_ready_counts := {}
 var _incoming_replay: Dictionary = {}
 const REPLAY_CHUNK_SIZE: int = 200000
+
+func _default_player_ids() -> Array:
+	return ["player1", "player2"]
+
+func get_match_player_ids() -> Array:
+	var players: Array = []
+	for slot in lobby_slots:
+		var occupied = false
+		if slot.has("peer_id"):
+			occupied = int(slot.get("peer_id", 0)) != 0
+		else:
+			occupied = bool(slot.get("occupied", false))
+		if not occupied:
+			continue
+		var player_id = str(slot.get("player_id", "")).strip_edges()
+		if player_id == "" or players.has(player_id):
+			continue
+		players.append(player_id)
+	if players.is_empty():
+		return _default_player_ids()
+	return players
+
+func reset_match_tracking(player_ids: Array = []) -> void:
+	var ids = player_ids
+	if ids.is_empty():
+		ids = get_match_player_ids()
+	_orders_submitted.clear()
+	player_orders.clear()
+	for player_id in ids:
+		_orders_submitted[player_id] = false
+		player_orders[player_id] = {}
+
+func _all_required_orders_submitted() -> bool:
+	var required: Array = []
+	if turn_mgr != null and turn_mgr.has_method("get_submission_players"):
+		required = turn_mgr.get_submission_players()
+	else:
+		required = get_match_player_ids()
+	if required.is_empty():
+		required = _default_player_ids()
+	for player_id in required:
+		if not bool(_orders_submitted.get(player_id, false)):
+			return false
+	return true
+
+func _required_step_ready_count() -> int:
+	if turn_mgr != null and turn_mgr.has_method("get_submission_players"):
+		var players = turn_mgr.get_submission_players()
+		if not players.is_empty():
+			return players.size()
+	var players = get_match_player_ids()
+	if not players.is_empty():
+		return players.size()
+	return 2
 
 signal orders_ready(all_orders: Dictionary)
 signal orders_cancelled(player_id: String)
@@ -67,6 +126,12 @@ func _reset_lobby_state() -> void:
 	client_peer_ids.clear()
 	lobby_slot_count = 2
 	local_player_id = ""
+	_pending_start_ready_peers.clear()
+	_awaiting_initial_state_ready = false
+	_start_game_waiting_for_prewarm = false
+	_start_game_handshake_active = false
+	_start_game_snapshots_sent = false
+	reset_match_tracking(_default_player_ids())
 
 func _init_lobby_slots() -> void:
 	lobby_slots.clear()
@@ -78,6 +143,7 @@ func _init_lobby_slots() -> void:
 			"username": ""
 		})
 	_assign_host_slot()
+	reset_match_tracking(get_match_player_ids())
 	_emit_lobby_update()
 
 func _assign_host_slot() -> void:
@@ -147,6 +213,7 @@ func set_lobby_slot_count(count: int) -> void:
 				"username": ""
 			})
 	lobby_slot_count = clamped
+	reset_match_tracking(get_match_player_ids())
 	_emit_lobby_update()
 
 func _clear_peer_slot(peer_id: int) -> void:
@@ -155,6 +222,8 @@ func _clear_peer_slot(peer_id: int) -> void:
 			slot["peer_id"] = 0
 			slot["username"] = ""
 			peer_id_to_player_id.erase(peer_id)
+			_pending_start_ready_peers.erase(peer_id)
+			reset_match_tracking(get_match_player_ids())
 			_emit_lobby_update()
 			return
 
@@ -163,6 +232,7 @@ func _assign_peer_to_slot(peer_id: int, username: String) -> void:
 		if int(slot.get("peer_id", 0)) == peer_id:
 			slot["username"] = username
 			peer_id_to_player_id[peer_id] = slot.get("player_id", "")
+			reset_match_tracking(get_match_player_ids())
 			_emit_lobby_update()
 			return
 	for slot in lobby_slots:
@@ -171,17 +241,19 @@ func _assign_peer_to_slot(peer_id: int, username: String) -> void:
 			slot["username"] = username
 			peer_id_to_player_id[peer_id] = slot.get("player_id", "")
 			rpc_id(peer_id, "rpc_set_player_id", peer_id_to_player_id[peer_id])
+			reset_match_tracking(get_match_player_ids())
 			_emit_lobby_update()
 			return
 	var mp_local = get_tree().get_multiplayer()
 	if mp_local != null and mp_local.multiplayer_peer != null:
 		mp_local.multiplayer_peer.disconnect_peer(peer_id)
-func host_game(port: int) -> void:
+func host_game(port: int, initial_slot_count: int = 2) -> void:
 	#print("NetworkManager.host_game called with port:", port)
 	var peer = ENetMultiplayerPeer.new()
 	peer.create_server(port, MAX_PLAYERS - 1)
 	get_tree().get_multiplayer().multiplayer_peer = peer
 	server_peer_id = get_tree().get_multiplayer().get_unique_id()
+	lobby_slot_count = int(clamp(initial_slot_count, 2, MAX_PLAYERS))
 	_init_lobby_slots()
 	print("Hosting game on port %d" % port)
 
@@ -213,19 +285,28 @@ func _on_peer_connected(id: int) -> void:
 		if match_seed >= 0:
 			rpc_id(id, "rpc_set_match_seed", match_seed)
 	else:
-		# Client sees the host
-		server_peer_id = id
-		print("Connected to host peer %d" % id)
-		if local_username == "":
-			local_username = "Player"
-		rpc_id(server_peer_id, "rpc_register_username", local_username)
+		var is_host_peer = id == 1
+		if is_host_peer or server_peer_id == 0:
+			server_peer_id = id
+			print("Connected to host peer %d" % id)
+			if local_username == "":
+				local_username = "Player"
+			rpc_id(server_peer_id, "rpc_register_username", local_username)
+		else:
+			print("Connected to peer %d" % id)
 
 func _on_peer_disconnected(id: int) -> void:
 	print("Peer disconnected with ID %d" % id)
 	if client_peer_ids.has(id):
 		client_peer_ids.erase(id)
 	if is_host():
+		var conceded_player = str(peer_id_to_player_id.get(id, "")).strip_edges()
 		_clear_peer_slot(id)
+		if (_start_game_handshake_active or (turn_mgr != null and int(turn_mgr.get("turn_number")) <= 0)) and turn_mgr != null and turn_mgr.has_method("configure_match_players"):
+			turn_mgr.configure_match_players(get_match_player_ids(), false)
+		if conceded_player != "" and turn_mgr != null and int(turn_mgr.get("turn_number")) > 0:
+			_handle_concede_request(conceded_player)
+		_try_complete_start_handshake()
 
 # RPC to receive the map data on clients
 @rpc("any_peer", "reliable")
@@ -308,15 +389,21 @@ func rpc_lobby_update(slot_count: int, slots_payload: Array) -> void:
 				"username": slot.get("username", ""),
 				"occupied": bool(slot.get("occupied", false))
 			})
+	reset_match_tracking(get_match_player_ids())
 	emit_signal("lobby_updated", lobby_slots, lobby_slot_count)
 
 @rpc("any_peer", "reliable")
-func rpc_start_game() -> void:
+func rpc_start_game(match_players: Array = []) -> void:
 	if _ignore_rpc_in_replay():
 		return
 	var mp_local = get_tree().get_multiplayer()
 	if mp_local != null and mp_local.is_server():
 		return
+	_awaiting_initial_state_ready = true
+	if not match_players.is_empty():
+		reset_match_tracking(match_players)
+		if turn_mgr != null and turn_mgr.has_method("configure_match_players"):
+			turn_mgr.configure_match_players(match_players, false)
 	if turn_mgr != null and turn_mgr.has_method("start_game"):
 		turn_mgr.start_game()
 
@@ -342,6 +429,9 @@ func rpc_state_snapshot(state: Dictionary) -> void:
 	if mp.is_server():
 		return
 	emit_signal("state_snapshot_received", state)
+	if _awaiting_initial_state_ready:
+		_awaiting_initial_state_ready = false
+		rpc_id(server_peer_id, "rpc_client_start_ready")
 
 @rpc("any_peer", "reliable")
 func rpc_request_state() -> void:
@@ -563,6 +653,13 @@ func _handle_order_request(player_id: String, order: Dictionary) -> Dictionary:
 func _handle_concede_request(player_id: String) -> void:
 	if turn_mgr != null and turn_mgr.has_method("concede"):
 		turn_mgr.concede(player_id)
+	if turn_mgr != null and not bool(turn_mgr.get("game_over")):
+		broadcast_state(turn_mgr.get_state_snapshot(true))
+	if turn_mgr != null and int(turn_mgr.get("current_phase")) == 1 and _all_required_orders_submitted():
+		turn_mgr.committed_orders = turn_mgr.player_orders.duplicate(true)
+		broadcast_state(turn_mgr.get_state_snapshot(true))
+		rpc("rpc_orders_ready", turn_mgr.player_orders)
+		emit_signal("orders_ready", turn_mgr.player_orders)
 
 func _handle_cancel_request(player_id: String) -> void:
 	print("[NetworkManager] Player ", player_id, " cancelled their orders.")
@@ -602,19 +699,91 @@ func start_game_for_all() -> void:
 		return
 	if not is_lobby_full():
 		return
-	if turn_mgr != null and turn_mgr.has_method("_ensure_map_loaded"):
-		turn_mgr._ensure_map_loaded()
-	broadcast_map_selection()
+	var match_players = get_match_player_ids()
+	if turn_mgr != null and turn_mgr.has_method("ensure_selected_map_supports_player_count"):
+		if not turn_mgr.ensure_selected_map_supports_player_count(match_players.size()):
+			return
+	if turn_mgr != null and turn_mgr.has_method("is_selected_procedural_prewarm_ready"):
+		var procedural_ready = bool(turn_mgr.is_selected_procedural_prewarm_ready())
+		if not procedural_ready:
+			if turn_mgr.has_method("request_procedural_prewarm"):
+				turn_mgr.request_procedural_prewarm()
+			if not _start_game_waiting_for_prewarm:
+				_start_game_waiting_for_prewarm = true
+				call_deferred("_retry_start_game_after_prewarm")
+			return
+	_start_game_waiting_for_prewarm = false
 	if match_seed >= 0:
 		for peer_id in client_peer_ids:
 			rpc_id(peer_id, "rpc_set_match_seed", match_seed)
 	if custom_proc_params.size() > 0:
 		for peer_id in client_peer_ids:
 			rpc_id(peer_id, "rpc_set_custom_proc_params", custom_proc_params)
+	reset_match_tracking(match_players)
+	if turn_mgr != null and turn_mgr.has_method("configure_match_players"):
+		turn_mgr.configure_match_players(match_players, false)
+	_start_game_handshake_active = true
+	_start_game_snapshots_sent = false
+	_pending_start_ready_peers.clear()
+	for peer_id in client_peer_ids:
+		_pending_start_ready_peers[peer_id] = true
+		rpc_id(peer_id, "rpc_start_game", match_players)
+	call_deferred("_finish_start_game_for_all_async", match_players)
+
+func _retry_start_game_after_prewarm() -> void:
+	await get_tree().process_frame
+	await get_tree().process_frame
+	_start_game_waiting_for_prewarm = false
+	start_game_for_all()
+
+func _finish_start_game_for_all_async(match_players: Array) -> void:
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var mp = get_tree().get_multiplayer()
+	if mp == null or mp.multiplayer_peer == null or not mp.is_server():
+		return
+	if turn_mgr != null and turn_mgr.has_method("_ensure_map_loaded"):
+		turn_mgr._ensure_map_loaded()
+	for peer_id in client_peer_ids:
+		if not _pending_start_ready_peers.has(peer_id):
+			continue
+		var viewer = _peer_id_to_player_id(peer_id)
+		var initial_state = turn_mgr.get_state_snapshot(true)
+		if viewer != "" and turn_mgr.has_method("get_state_snapshot_for"):
+			initial_state = turn_mgr.get_state_snapshot_for(viewer)
+		if turn_mgr != null and turn_mgr.has_method("_collect_procedural_map_state"):
+			var map_state = turn_mgr._collect_procedural_map_state()
+			if map_state is Dictionary and not map_state.is_empty():
+				initial_state["procedural_map"] = map_state
+		initial_state["force_apply"] = true
+		rpc_id(peer_id, "rpc_state_snapshot", initial_state)
+	_start_game_snapshots_sent = true
+	_try_complete_start_handshake()
+
+@rpc("any_peer", "reliable")
+func rpc_client_start_ready() -> void:
+	if _ignore_rpc_in_replay():
+		return
+	var mp = get_tree().get_multiplayer()
+	if mp == null or not mp.is_server():
+		return
+	var sender = multiplayer.get_remote_sender_id()
+	_pending_start_ready_peers.erase(sender)
+	_try_complete_start_handshake()
+
+func _try_complete_start_handshake() -> void:
+	if not _start_game_handshake_active:
+		return
+	if not _start_game_snapshots_sent:
+		return
+	if not _pending_start_ready_peers.is_empty():
+		return
+	_start_game_handshake_active = false
+	_start_game_snapshots_sent = false
+	if turn_mgr != null and turn_mgr.has_method("configure_match_players"):
+		turn_mgr.configure_match_players(get_match_player_ids(), false)
 	if turn_mgr != null and turn_mgr.has_method("start_game"):
 		turn_mgr.start_game()
-	for peer_id in client_peer_ids:
-		rpc_id(peer_id, "rpc_start_game")
 
 @rpc("any_peer", "reliable")
 func rpc_game_over(player_id: String) -> void:
@@ -864,9 +1033,9 @@ func _buffer_orders(player_id:String, orders:Array) -> void:
 			return
 	_orders_submitted[player_id] = true
 
-	# once both are in, multicast and signal
-	if _orders_submitted["player1"] and _orders_submitted["player2"]:
-		print("[NM] Both orders in, broadcasting & emitting orders_ready")
+	# once all living players are in, multicast and signal
+	if _all_required_orders_submitted():
+		print("[NM] All required orders in, broadcasting & emitting orders_ready")
 		turn_mgr.committed_orders = turn_mgr.player_orders.duplicate(true)
 		broadcast_state(turn_mgr.get_state_snapshot(true))
 		rpc("rpc_orders_ready", turn_mgr.player_orders)
@@ -931,8 +1100,19 @@ func rpc_orders_cancelled(player_id: String):
 func _peer_id_to_player_id(peer_id: int) -> String:
 	if peer_id_to_player_id.has(peer_id):
 		return str(peer_id_to_player_id[peer_id])
+	for slot in lobby_slots:
+		if int(slot.get("peer_id", 0)) != peer_id:
+			continue
+		var player_id = str(slot.get("player_id", "")).strip_edges()
+		if player_id != "":
+			return player_id
 	if peer_id == server_peer_id:
-		return "player1"
+		for slot in lobby_slots:
+			if int(slot.get("peer_id", 0)) == peer_id:
+				var host_player = str(slot.get("player_id", "")).strip_edges()
+				if host_player != "":
+					return host_player
+		return local_player_id if local_player_id != "" else "player1"
 	return ""
 
 @rpc("any_peer", "reliable")
@@ -948,8 +1128,9 @@ func rpc_step_ready(step_idx: int) -> void:
 	_step_ready_counts[step_idx] = _step_ready_counts.get(step_idx, 0) + 1
 	print("[NM] step_ready for step %d: count = %d" % [step_idx, _step_ready_counts[step_idx]])
 
-	# once both players are in, broadcast resume
-	if _step_ready_counts[step_idx] >= 2:
+	# once all living players are in, broadcast resume
+	var required_count = _required_step_ready_count()
+	if _step_ready_counts[step_idx] >= required_count:
 		print("[NM] both ready for step %d, resuming…" % step_idx)
 		rpc("rpc_resume_execution", step_idx)
 		rpc_resume_execution(step_idx)

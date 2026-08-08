@@ -3,7 +3,11 @@ extends Control
 var series: Dictionary = {}
 var colors := {
 	"player1": Color(0.2, 0.65, 1.0),
-	"player2": Color(1.0, 0.45, 0.45)
+	"player2": Color(1.0, 0.45, 0.45),
+	"player3": Color(0.35, 0.9, 0.45),
+	"player4": Color(0.95, 0.8, 0.3),
+	"player5": Color(0.66, 0.5, 0.92),
+	"player6": Color(0.82, 0.3, 0.66)
 }
 var padding: float = 12.0
 var axis_label_padding: float = 18.0
@@ -60,8 +64,15 @@ func _draw() -> void:
 			var sy = size.y - pad_bottom - (pt.y - min_y) / (max_y - min_y) * h
 			poly.append(Vector2(sx, sy))
 		if poly.size() >= 2:
-			draw_polyline(poly, colors.get(pid, Color(1, 1, 1)), 2.0)
+			draw_polyline(poly, _color_for_player(str(pid)), 2.0)
 	_draw_axis_labels_and_ticks(font, font_size, min_x, max_x, min_y, max_y)
+
+func _color_for_player(pid: String) -> Color:
+	if colors.has(pid):
+		return colors[pid]
+	var hash_val = abs(pid.hash())
+	var hue = fmod(float(hash_val % 360) / 360.0, 1.0)
+	return Color.from_hsv(hue, 0.65, 0.95)
 
 func _draw_axis_labels_and_ticks(font: Font, font_size: int, min_x: float, max_x: float, min_y: float, max_y: float) -> void:
 	if font == null:

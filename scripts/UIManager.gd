@@ -62,8 +62,12 @@ var _default_camera_zoom: Vector2 = Vector2.ZERO
 var replay_metric_ids: Array = []
 var replay_browser_entries: Array = []
 var _replay_name_syncing: bool = false
+var replay_stats_player_checks: Dictionary = {}
+var replay_fog_values: Array = []
 var dev_state_inputs: Dictionary = {}
+var dev_state_rows_box: VBoxContainer = null
 var dev_owner_option: OptionButton = null
+var dev_owner_ids: Array = []
 var dev_unit_type_option: OptionButton = null
 var dev_board_tool_option: OptionButton = null
 var dev_selected_unit_label: Label = null
@@ -79,6 +83,8 @@ var dev_panel_minimized_size: Vector2 = Vector2(420, 28)
 var dev_health_dialog: ConfirmationDialog = null
 var dev_health_input: LineEdit = null
 var dev_health_target_unit_id: int = -1
+var host_player_count_dialog: ConfirmationDialog = null
+var host_player_count_spinbox: SpinBox = null
 
 const DEV_TOOL_SELECT: int = 0
 const DEV_TOOL_SPAWN: int = 1
@@ -184,6 +190,7 @@ const DEV_SPAWN_UNIT_TYPES = [
 @onready var keep_logs_game_over_name = $"../GameOver/ReplayNameLineEdit" as LineEdit
 @onready var keep_logs_replay_name = $ReplayPanel/VBoxContainer/ReplayNameLineEdit as LineEdit
 @onready var replay_stats_panel = $ReplayStatsPanel as Window
+@onready var replay_stats_controls_row = $ReplayStatsPanel/VBoxContainer/ControlsRow as HBoxContainer
 @onready var replay_stats_metric = $ReplayStatsPanel/VBoxContainer/ControlsRow/MetricOption as OptionButton
 @onready var replay_stats_player1 = $ReplayStatsPanel/VBoxContainer/ControlsRow/Player1Check as CheckButton
 @onready var replay_stats_player2 = $ReplayStatsPanel/VBoxContainer/ControlsRow/Player2Check as CheckButton
@@ -283,6 +290,10 @@ func _ready():
 		_default_camera_zoom = cam.zoom
 	if username_edit != null:
 		username_edit.text = _load_username()
+	if $IPLineEdit != null:
+		$IPLineEdit.text = _load_saved_ip()
+	if $PortLineEdit != null:
+		$PortLineEdit.text = _load_saved_port()
 	if replay_browser_panel != null:
 		replay_browser_panel.visible = false
 	
@@ -311,6 +322,7 @@ func _ready():
 					Callable(self, "_on_map_selection_changed"))
 	_init_map_select()
 	_init_proc_custom_panel()
+	_init_host_player_count_dialog()
 	_show_main_menu()
 	if keep_logs_game_over_check != null and not keep_logs_game_over_check.is_connected("toggled", Callable(self, "_on_keep_logs_toggled")):
 		keep_logs_game_over_check.connect("toggled", Callable(self, "_on_keep_logs_toggled"))
@@ -715,9 +727,12 @@ func _init_map_select() -> void:
 	var themed := []
 	var normal := []
 	var small := []
+	var player_count = max(2, int(NetworkManager.lobby_slot_count))
 	for i in range(turn_mgr.map_data.size()):
 		var md = turn_mgr.map_data[i] as MapData
 		if md == null:
+			continue
+		if turn_mgr.has_method("_map_supports_player_count") and not turn_mgr._map_supports_player_count(md, player_count):
 			continue
 		if md.procedural:
 			continue
@@ -785,6 +800,33 @@ func _init_proc_custom_panel() -> void:
 		proc_custom_apply.connect("pressed", Callable(self, "_on_proc_custom_apply_pressed"))
 	if proc_custom_close != null and not proc_custom_close.is_connected("pressed", Callable(self, "_on_proc_custom_close_pressed")):
 		proc_custom_close.connect("pressed", Callable(self, "_on_proc_custom_close_pressed"))
+
+func _init_host_player_count_dialog() -> void:
+	if host_player_count_dialog != null:
+		return
+	host_player_count_dialog = ConfirmationDialog.new()
+	host_player_count_dialog.title = "Host Game"
+	host_player_count_dialog.min_size = Vector2i(320, 0)
+	host_player_count_dialog.initial_position = Window.WINDOW_INITIAL_POSITION_CENTER_MAIN_WINDOW_SCREEN
+	host_player_count_dialog.ok_button_text = "Open Lobby"
+	host_player_count_dialog.cancel_button_text = "Cancel"
+	add_child(host_player_count_dialog)
+	var content = VBoxContainer.new()
+	content.custom_minimum_size = Vector2(260, 0)
+	host_player_count_dialog.add_child(content)
+	var label = Label.new()
+	label.text = "How many players?"
+	content.add_child(label)
+	host_player_count_spinbox = SpinBox.new()
+	host_player_count_spinbox.min_value = 2
+	host_player_count_spinbox.max_value = NetworkManager.MAX_PLAYERS
+	host_player_count_spinbox.step = 1
+	host_player_count_spinbox.rounded = true
+	host_player_count_spinbox.value = 2
+	host_player_count_spinbox.custom_minimum_size = Vector2(120, 0)
+	content.add_child(host_player_count_spinbox)
+	if not host_player_count_dialog.is_connected("confirmed", Callable(self, "_on_host_player_count_confirmed")):
+		host_player_count_dialog.connect("confirmed", Callable(self, "_on_host_player_count_confirmed"))
 
 func _get_procedural_map_data() -> MapData:
 	if turn_mgr == null:
@@ -923,6 +965,8 @@ func _on_proc_custom_apply_pressed() -> void:
 	else:
 		NetworkManager.custom_proc_params = params
 	_populate_proc_custom_fields(params)
+	if NetworkManager.is_host() and turn_mgr != null and turn_mgr.has_method("request_procedural_prewarm"):
+		turn_mgr.request_procedural_prewarm()
 
 func _on_proc_custom_close_pressed() -> void:
 	_set_proc_custom_panel_visible(false)
@@ -997,44 +1041,62 @@ func _apply_map_selection(id: int) -> void:
 		NetworkManager.map_selection_mode = "random_any"
 		if NetworkManager.is_host():
 			NetworkManager.broadcast_map_selection()
+			if turn_mgr != null and turn_mgr.has_method("request_procedural_prewarm"):
+				turn_mgr.request_procedural_prewarm()
 		return
 	if id == MAP_SELECT_RANDOM_NORMAL:
 		NetworkManager.selected_map_index = -1
 		NetworkManager.map_selection_mode = "random_normal"
 		if NetworkManager.is_host():
 			NetworkManager.broadcast_map_selection()
+			if turn_mgr != null and turn_mgr.has_method("request_procedural_prewarm"):
+				turn_mgr.request_procedural_prewarm()
 		return
 	if id == MAP_SELECT_RANDOM_THEMED:
 		NetworkManager.selected_map_index = -1
 		NetworkManager.map_selection_mode = "random_themed"
 		if NetworkManager.is_host():
 			NetworkManager.broadcast_map_selection()
+			if turn_mgr != null and turn_mgr.has_method("request_procedural_prewarm"):
+				turn_mgr.request_procedural_prewarm()
 		return
 	if id == MAP_SELECT_RANDOM_SMALL:
 		NetworkManager.selected_map_index = -1
 		NetworkManager.map_selection_mode = "random_small"
 		if NetworkManager.is_host():
 			NetworkManager.broadcast_map_selection()
+			if turn_mgr != null and turn_mgr.has_method("request_procedural_prewarm"):
+				turn_mgr.request_procedural_prewarm()
 		return
 	if id == MAP_SELECT_PROCEDURAL:
 		NetworkManager.selected_map_index = -1
 		NetworkManager.map_selection_mode = "procedural"
 		if NetworkManager.is_host():
 			NetworkManager.broadcast_map_selection()
+			if turn_mgr != null and turn_mgr.has_method("request_procedural_prewarm"):
+				turn_mgr.request_procedural_prewarm()
 		return
 	if id == MAP_SELECT_PROCEDURAL_CUSTOM:
 		NetworkManager.selected_map_index = -1
 		NetworkManager.map_selection_mode = "procedural_custom"
 		if NetworkManager.is_host():
 			NetworkManager.broadcast_map_selection()
+			if turn_mgr != null and turn_mgr.has_method("request_procedural_prewarm"):
+				turn_mgr.request_procedural_prewarm()
 		return
 	if id >= MAP_SELECT_MAP_BASE:
 		var idx = id - MAP_SELECT_MAP_BASE
 		if idx >= 0 and idx < turn_mgr.map_data.size():
+			var md = turn_mgr.map_data[idx] as MapData
+			if md != null and turn_mgr.has_method("_map_supports_player_count"):
+				if not turn_mgr._map_supports_player_count(md, max(2, int(NetworkManager.lobby_slot_count))):
+					return
 			NetworkManager.selected_map_index = idx
 			NetworkManager.map_selection_mode = "fixed"
 			if NetworkManager.is_host():
 				NetworkManager.broadcast_map_selection()
+				if turn_mgr != null and turn_mgr.has_method("request_procedural_prewarm"):
+					turn_mgr.request_procedural_prewarm()
 
 func _sync_menu_checks() -> void:
 	if menu_popup == null:
@@ -1997,23 +2059,117 @@ func _on_dev_panel_toggle_pressed() -> void:
 	dev_panel_minimized = not dev_panel_minimized
 	_apply_dev_panel_layout()
 
-func _init_dev_tools_ui() -> void:
-	if dev_panel_vbox == null or dev_board_tool_option != null:
+func _active_player_ids_for_ui() -> Array:
+	var ids: Array = []
+	if turn_mgr != null:
+		var active = turn_mgr.get("active_players")
+		if active is Array:
+			for entry in active:
+				var pid = str(entry).strip_edges()
+				if pid != "" and not ids.has(pid):
+					ids.append(pid)
+		if ids.is_empty() and turn_mgr.has_method("get_living_players"):
+			for entry in turn_mgr.get_living_players():
+				var pid = str(entry).strip_edges()
+				if pid != "" and not ids.has(pid):
+					ids.append(pid)
+	if ids.is_empty():
+		ids = ["player1", "player2"]
+	return ids
+
+func _player_label(player_id: String) -> String:
+	var pid = str(player_id).strip_edges()
+	if pid.begins_with("player"):
+		var suffix = pid.substr(6)
+		if suffix.is_valid_int():
+			return "Player %d" % int(suffix)
+	if pid == "neutral":
+		return "Neutral"
+	return pid.capitalize()
+
+func _replay_player_ids() -> Array:
+	if turn_mgr != null and turn_mgr.has_method("get_replay_available_player_ids"):
+		return turn_mgr.get_replay_available_player_ids()
+	return _active_player_ids_for_ui()
+
+func _setup_replay_fog_options() -> void:
+	if replay_fog_option == null:
 		return
-	var sep := HSeparator.new()
-	dev_panel_vbox.add_child(sep)
-	var state_title := Label.new()
-	state_title.text = "State"
-	dev_panel_vbox.add_child(state_title)
+	replay_fog_option.clear()
+	replay_fog_values.clear()
+	var names := {}
+	if turn_mgr != null and turn_mgr.has_method("get_replay_display_names"):
+		names = turn_mgr.get_replay_display_names()
+	for pid in _replay_player_ids():
+		var player_id = str(pid)
+		replay_fog_option.add_item(str(names.get(player_id, _player_label(player_id))), replay_fog_values.size())
+		replay_fog_values.append(player_id)
+	replay_fog_option.add_item("No Fog", replay_fog_values.size())
+	replay_fog_values.append("none")
+	var mode = "none"
+	if turn_mgr != null:
+		mode = str(turn_mgr.get("replay_fog_mode"))
+	var selected = replay_fog_values.find(mode)
+	if selected == -1:
+		selected = replay_fog_values.find("none")
+	if selected == -1:
+		selected = 0
+	replay_fog_option.select(selected)
+
+func _setup_replay_stats_player_checks() -> void:
+	if replay_stats_controls_row == null:
+		return
+	if replay_stats_player1 != null:
+		replay_stats_player1.visible = false
+	if replay_stats_player2 != null:
+		replay_stats_player2.visible = false
+	for pid in replay_stats_player_checks.keys():
+		var check: CheckButton = replay_stats_player_checks[pid]
+		if check != null and is_instance_valid(check):
+			check.queue_free()
+	replay_stats_player_checks.clear()
+	var names := {}
+	if turn_mgr != null and turn_mgr.has_method("get_replay_display_names"):
+		names = turn_mgr.get_replay_display_names()
+	for pid in _replay_player_ids():
+		var player_id = str(pid)
+		var check = CheckButton.new()
+		check.text = str(names.get(player_id, _player_label(player_id)))
+		check.button_pressed = true
+		check.connect("toggled", Callable(self, "_on_replay_metric_changed"))
+		replay_stats_controls_row.add_child(check)
+		replay_stats_controls_row.move_child(check, replay_stats_controls_row.get_child_count() - 1)
+		replay_stats_player_checks[player_id] = check
+
+func _selected_replay_stats_players() -> Array:
+	var selected: Array = []
+	for pid in _replay_player_ids():
+		var player_id = str(pid)
+		var check: CheckButton = replay_stats_player_checks.get(player_id, null)
+		if check == null or not is_instance_valid(check):
+			continue
+		if check.button_pressed:
+			selected.append(player_id)
+	if selected.is_empty():
+		return _replay_player_ids()
+	return selected
+
+func _rebuild_dev_state_rows() -> void:
+	if dev_state_rows_box == null:
+		return
+	for child in dev_state_rows_box.get_children():
+		child.queue_free()
+	dev_state_inputs.clear()
 	var turn_row := HBoxContainer.new()
 	turn_row.add_child(_make_dev_caption("Turn", 42.0))
 	var turn_input = _make_dev_input(72.0)
 	dev_state_inputs["turn_number"] = turn_input
 	turn_row.add_child(turn_input)
-	dev_panel_vbox.add_child(turn_row)
-	for player_id in ["player1", "player2"]:
+	dev_state_rows_box.add_child(turn_row)
+	for player_id in _active_player_ids_for_ui():
 		var row := HBoxContainer.new()
-		row.add_child(_make_dev_caption("P1" if player_id == "player1" else "P2", 24.0))
+		var label = _player_label(player_id)
+		row.add_child(_make_dev_caption(label.replace("Player ", "P"), max(24.0, float(label.length() * 7))))
 		row.add_child(_make_dev_caption("Gold", 34.0))
 		var gold_input = _make_dev_input()
 		dev_state_inputs["%s_gold" % player_id] = gold_input
@@ -2026,7 +2182,44 @@ func _init_dev_tools_ui() -> void:
 		var income_input = _make_dev_input()
 		dev_state_inputs["%s_income" % player_id] = income_input
 		row.add_child(income_input)
-		dev_panel_vbox.add_child(row)
+		dev_state_rows_box.add_child(row)
+
+func _refresh_dev_owner_options() -> void:
+	if dev_owner_option == null:
+		return
+	var previous_owner = _current_dev_owner()
+	dev_owner_option.clear()
+	dev_owner_ids.clear()
+	for player_id in _active_player_ids_for_ui():
+		dev_owner_option.add_item(_player_label(player_id), dev_owner_ids.size())
+		dev_owner_ids.append(player_id)
+	dev_owner_option.add_item("Neutral", dev_owner_ids.size())
+	dev_owner_ids.append("neutral")
+	var selected = dev_owner_ids.find(previous_owner)
+	if selected == -1:
+		selected = 0
+	dev_owner_option.select(selected)
+
+func _overlay_player_ids() -> Array:
+	if turn_mgr == null:
+		return ["player1", "player2"]
+	if turn_mgr.current_phase == turn_mgr.Phase.ORDERS:
+		return [current_player] if current_player != "" else []
+	if turn_mgr.has_method("get_living_players"):
+		return turn_mgr.get_living_players()
+	return _active_player_ids_for_ui()
+
+func _init_dev_tools_ui() -> void:
+	if dev_panel_vbox == null or dev_board_tool_option != null:
+		return
+	var sep := HSeparator.new()
+	dev_panel_vbox.add_child(sep)
+	var state_title := Label.new()
+	state_title.text = "State"
+	dev_panel_vbox.add_child(state_title)
+	dev_state_rows_box = VBoxContainer.new()
+	dev_panel_vbox.add_child(dev_state_rows_box)
+	_rebuild_dev_state_rows()
 	var state_buttons := HBoxContainer.new()
 	dev_state_apply_button = Button.new()
 	dev_state_apply_button.text = "Apply State"
@@ -2056,12 +2249,10 @@ func _init_dev_tools_ui() -> void:
 	var owner_row := HBoxContainer.new()
 	owner_row.add_child(_make_dev_caption("Owner", 42.0))
 	dev_owner_option = OptionButton.new()
-	dev_owner_option.add_item("Player 1", 0)
-	dev_owner_option.add_item("Player 2", 1)
-	dev_owner_option.add_item("Neutral", 2)
 	dev_owner_option.connect("item_selected", Callable(self, "_refresh_dev_board_highlights"))
 	owner_row.add_child(dev_owner_option)
 	dev_panel_vbox.add_child(owner_row)
+	_refresh_dev_owner_options()
 	var unit_row := HBoxContainer.new()
 	unit_row.add_child(_make_dev_caption("Unit", 42.0))
 	dev_unit_type_option = OptionButton.new()
@@ -2089,13 +2280,10 @@ func _current_dev_board_tool() -> int:
 func _current_dev_owner() -> String:
 	if dev_owner_option == null:
 		return "player1"
-	match dev_owner_option.get_selected_id():
-		1:
-			return "player2"
-		2:
-			return "neutral"
-		_:
-			return "player1"
+	var idx = dev_owner_option.selected
+	if idx >= 0 and idx < dev_owner_ids.size():
+		return str(dev_owner_ids[idx])
+	return "player1"
 
 func _current_dev_unit_type() -> String:
 	if dev_unit_type_option == null:
@@ -2148,9 +2336,19 @@ func _refresh_dev_tool_hint() -> void:
 func _refresh_dev_state_inputs() -> void:
 	if turn_mgr == null:
 		return
+	if dev_state_rows_box != null:
+		var expected_players = _active_player_ids_for_ui()
+		var missing_inputs = false
+		for player_id in expected_players:
+			if not dev_state_inputs.has("%s_gold" % player_id):
+				missing_inputs = true
+				break
+		if missing_inputs:
+			_rebuild_dev_state_rows()
+	_refresh_dev_owner_options()
 	if dev_state_inputs.has("turn_number"):
 		dev_state_inputs["turn_number"].text = str(int(turn_mgr.turn_number))
-	for player_id in ["player1", "player2"]:
+	for player_id in _active_player_ids_for_ui():
 		if dev_state_inputs.has("%s_gold" % player_id):
 			dev_state_inputs["%s_gold" % player_id].text = str(int(turn_mgr.player_gold.get(player_id, 0)))
 		if dev_state_inputs.has("%s_mana" % player_id):
@@ -2177,7 +2375,7 @@ func _on_dev_state_apply_pressed() -> void:
 		status_lbl.text = "[%s]" % str(turn_value.get("reason", "Invalid turn"))
 		return
 	var patch := {"turn_number": int(turn_value["value"]), "player_gold": {}, "player_mana": {}, "player_income": {}}
-	for player_id in ["player1", "player2"]:
+	for player_id in _active_player_ids_for_ui():
 		for field in ["gold", "mana", "income"]:
 			var parsed = _dev_parse_input_value("%s_%s" % [player_id, field], "%s %s" % [player_id, field])
 			if not bool(parsed.get("ok", false)):
@@ -2456,7 +2654,7 @@ func _on_fog_toggled(pressed:bool):
 		$"../GameBoardNode/ExploredFog".visible = false
 
 func _on_give_income_pressed():
-	for player in ["player1", "player2"]:
+	for player in _active_player_ids_for_ui():
 		turn_mgr.player_gold[player] += turn_mgr.player_income[player]
 	status_lbl.text = "Income granted"
 	_refresh_resource_labels()
@@ -2913,7 +3111,27 @@ func _load_username() -> String:
 
 func _save_username(name: String) -> void:
 	var cfg = ConfigFile.new()
+	cfg.load(USERNAME_SAVE_PATH)
 	cfg.set_value("user", "name", name.strip_edges())
+	cfg.save(USERNAME_SAVE_PATH)
+
+func _load_saved_ip() -> String:
+	var cfg = ConfigFile.new()
+	if cfg.load(USERNAME_SAVE_PATH) == OK:
+		return str(cfg.get_value("network", "ip", "")).strip_edges()
+	return ""
+
+func _load_saved_port() -> String:
+	var cfg = ConfigFile.new()
+	if cfg.load(USERNAME_SAVE_PATH) == OK:
+		return str(cfg.get_value("network", "port", "7777")).strip_edges()
+	return "7777"
+
+func _save_connection_settings(ip: String, port: String) -> void:
+	var cfg = ConfigFile.new()
+	cfg.load(USERNAME_SAVE_PATH)
+	cfg.set_value("network", "ip", ip.strip_edges())
+	cfg.set_value("network", "port", port.strip_edges())
 	cfg.save(USERNAME_SAVE_PATH)
 
 func _show_main_menu() -> void:
@@ -2990,6 +3208,16 @@ func _on_start_game_pressed() -> void:
 
 func _on_lobby_updated(slots: Array, slot_count: int) -> void:
 	lobby_slots_payload = slots
+	if NetworkManager.is_host() and turn_mgr != null and turn_mgr.has_method("ensure_selected_map_supports_player_count"):
+		var prev_index = NetworkManager.selected_map_index
+		var prev_mode = NetworkManager.map_selection_mode
+		if turn_mgr.ensure_selected_map_supports_player_count(max(2, int(slot_count))):
+			if prev_index != NetworkManager.selected_map_index or prev_mode != NetworkManager.map_selection_mode:
+				NetworkManager.broadcast_map_selection()
+			if turn_mgr.has_method("request_procedural_prewarm"):
+				turn_mgr.request_procedural_prewarm()
+	if map_select != null:
+		_init_map_select()
 	_update_lobby_list()
 	_update_start_game_state()
 
@@ -3050,6 +3278,12 @@ func _on_game_started() -> void:
 	_reset_replay_name_inputs()
 
 func _on_host_pressed():
+	if host_player_count_spinbox != null:
+		host_player_count_spinbox.value = 2
+	if host_player_count_dialog != null:
+		host_player_count_dialog.popup_centered()
+
+func _on_host_player_count_confirmed() -> void:
 	var username = ""
 	if username_edit != null:
 		username = username_edit.text.strip_edges()
@@ -3062,7 +3296,11 @@ func _on_host_pressed():
 		turn_mgr.current_map_index = -1
 		turn_mgr._reset_map_state()
 	var port = $"PortLineEdit".text.strip_edges()
-	NetworkManager.host_game(int(port))
+	var slot_count = 2
+	if host_player_count_spinbox != null:
+		slot_count = int(host_player_count_spinbox.value)
+	_save_connection_settings($"IPLineEdit".text.strip_edges(), port)
+	NetworkManager.host_game(int(port), slot_count)
 	_show_lobby(true)
 
 func _on_join_pressed():
@@ -3075,6 +3313,7 @@ func _on_join_pressed():
 		username = "Player"
 	NetworkManager.set_local_username(username)
 	_save_username(username)
+	_save_connection_settings(ip, port)
 	print("[UI] Joining game at %s:%d" % [ip, port])
 	NetworkManager.join_game(ip, int(port))
 	_show_lobby(false)
@@ -3970,11 +4209,7 @@ func _draw_paths() -> void:
 	var path_arrows_node = hex.get_node("PathArrows")
 	for child in path_arrows_node.get_children():
 		child.queue_free()
-	var players = []
-	if turn_mgr.current_phase == turn_mgr.Phase.ORDERS:
-		players.append(current_player)
-	else:
-		players = ["player1", "player2"]
+	var players = _overlay_player_ids()
 	for player in players:
 		var all_orders = turn_mgr.get_all_orders_for_phase(player)
 		for order in all_orders:
@@ -4108,11 +4343,7 @@ func _draw_attacks():
 	var attack_arrows_node = hex.get_node("AttackArrows")
 	for child in attack_arrows_node.get_children():
 		child.queue_free()
-	var players = []
-	if turn_mgr.current_phase == turn_mgr.Phase.ORDERS:
-		players.append(current_player)
-	else:
-		players = ["player1", "player2"]
+	var players = _overlay_player_ids()
 	var attack_counts := {}
 	var buff_by_target := {}
 	for player in players:
@@ -4228,11 +4459,7 @@ func _draw_supports():
 	var support_arrows_node = hex.get_node("SupportArrows")
 	for child in support_arrows_node.get_children():
 		child.queue_free()
-	var players = []
-	if turn_mgr.current_phase == turn_mgr.Phase.ORDERS:
-		players.append(current_player)
-	else:
-		players = ["player1", "player2"]
+	var players = _overlay_player_ids()
 	for player in players:
 		var all_orders = turn_mgr.get_all_orders_for_phase(player)
 		for order in all_orders:
@@ -4352,11 +4579,7 @@ func _draw_heals():
 	var heal_node = hex.get_node("HealingSprites")
 	for child in heal_node.get_children():
 		child.queue_free()
-	var players = []
-	if turn_mgr.current_phase == turn_mgr.Phase.ORDERS:
-		players.append(current_player)
-	else:
-		players = ["player1", "player2"]
+	var players = _overlay_player_ids()
 	for player in players:
 		var all_orders = turn_mgr.get_all_orders_for_phase(player)
 		for order in all_orders:
@@ -4375,11 +4598,7 @@ func _draw_defends():
 	var defend_node = hex.get_node("DefendingSprites")
 	for child in defend_node.get_children():
 		child.queue_free()
-	var players = []
-	if turn_mgr.current_phase == turn_mgr.Phase.ORDERS:
-		players.append(current_player)
-	else:
-		players = ["player1", "player2"]
+	var players = _overlay_player_ids()
 	for player in players:
 		var all_orders = turn_mgr.get_all_orders_for_phase(player)
 		for order in all_orders:
@@ -4406,11 +4625,7 @@ func _draw_lookouts():
 	var lookout_node = _get_lookout_sprites_root()
 	for child in lookout_node.get_children():
 		child.queue_free()
-	var players = []
-	if turn_mgr.current_phase == turn_mgr.Phase.ORDERS:
-		players.append(current_player)
-	else:
-		players = ["player1", "player2"]
+	var players = _overlay_player_ids()
 	for player in players:
 		var all_orders = turn_mgr.get_all_orders_for_phase(player)
 		for order in all_orders:
@@ -4466,11 +4681,7 @@ func _draw_builds():
 	var build_node = _get_building_sprites_root()
 	for child in build_node.get_children():
 		child.queue_free()
-	var players = []
-	if turn_mgr.current_phase == turn_mgr.Phase.ORDERS:
-		players.append(current_player)
-	else:
-		players = ["player1", "player2"]
+	var players = _overlay_player_ids()
 	for player in players:
 		var all_orders = turn_mgr.get_all_orders_for_phase(player)
 		for order in all_orders:
@@ -4520,11 +4731,7 @@ func _draw_repairs():
 	var repair_node = _get_repair_sprites_root()
 	for child in repair_node.get_children():
 		child.queue_free()
-	var players = []
-	if turn_mgr.current_phase == turn_mgr.Phase.ORDERS:
-		players.append(current_player)
-	else:
-		players = ["player1", "player2"]
+	var players = _overlay_player_ids()
 	for player in players:
 		var all_orders = turn_mgr.get_all_orders_for_phase(player)
 		for order in all_orders:
@@ -4548,11 +4755,7 @@ func _draw_sabotages():
 	var sabotage_node = _get_sabotage_sprites_root()
 	for child in sabotage_node.get_children():
 		child.queue_free()
-	var players = []
-	if turn_mgr.current_phase == turn_mgr.Phase.ORDERS:
-		players.append(current_player)
-	else:
-		players = ["player1", "player2"]
+	var players = _overlay_player_ids()
 	for player in players:
 		var all_orders = turn_mgr.get_all_orders_for_phase(player)
 		for order in all_orders:
@@ -4576,11 +4779,7 @@ func _draw_ward_orders():
 	var ward_node = _get_ward_sprites_root()
 	for child in ward_node.get_children():
 		child.queue_free()
-	var players = []
-	if turn_mgr.current_phase == turn_mgr.Phase.ORDERS:
-		players.append(current_player)
-	else:
-		players = ["player1", "player2"]
+	var players = _overlay_player_ids()
 	for player in players:
 		var all_orders = turn_mgr.get_all_orders_for_phase(player)
 		for order in all_orders:
@@ -5205,20 +5404,7 @@ func _enter_replay_mode() -> void:
 	menu_button.visible = false
 	if replay_panel != null:
 		replay_panel.visible = true
-	if replay_fog_option != null and replay_fog_option.item_count == 0:
-		replay_fog_option.add_item("Player 1", 0)
-		replay_fog_option.add_item("Player 2", 1)
-		replay_fog_option.add_item("No Fog", 2)
-	if replay_fog_option != null:
-		var mode = ""
-		if turn_mgr != null:
-			mode = str(turn_mgr.get("replay_fog_mode"))
-		var selected = 0
-		if mode == "player2":
-			selected = 1
-		elif mode == "none":
-			selected = 2
-		replay_fog_option.select(selected)
+	_setup_replay_fog_options()
 	if replay_phase_toggle != null:
 		replay_phase_toggle.button_pressed = false
 
@@ -5250,13 +5436,9 @@ func _on_replay_phase_toggled(enabled: bool) -> void:
 func _on_replay_fog_selected(index: int) -> void:
 	if turn_mgr == null:
 		return
-	match index:
-		0:
-			turn_mgr.set_replay_fog_mode("player1")
-		1:
-			turn_mgr.set_replay_fog_mode("player2")
-		2:
-			turn_mgr.set_replay_fog_mode("none")
+	if index < 0 or index >= replay_fog_values.size():
+		return
+	turn_mgr.set_replay_fog_mode(str(replay_fog_values[index]))
 
 func _on_replay_stats_pressed() -> void:
 	_show_replay_stats()
@@ -5266,6 +5448,7 @@ func _show_replay_stats() -> void:
 		return
 	replay_stats_panel.visible = true
 	replay_metric_ids.clear()
+	_setup_replay_stats_player_checks()
 	if replay_stats_metric != null:
 		replay_stats_metric.clear()
 		var metrics = turn_mgr.get_replay_metric_list()
@@ -5294,9 +5477,7 @@ func _update_replay_stats_graph() -> void:
 		if idx < 0:
 			idx = replay_stats_metric.get_selected()
 	var metric_id = replay_metric_ids[min(idx, replay_metric_ids.size() - 1)]
-	var include_p1 = replay_stats_player1 == null or replay_stats_player1.button_pressed
-	var include_p2 = replay_stats_player2 == null or replay_stats_player2.button_pressed
-	var series = turn_mgr.get_replay_series(metric_id, include_p1, include_p2)
+	var series = turn_mgr.get_replay_series_for_players(metric_id, _selected_replay_stats_players()) if turn_mgr.has_method("get_replay_series_for_players") else turn_mgr.get_replay_series(metric_id, true, true)
 	if replay_stats_graph.has_method("set_series"):
 		replay_stats_graph.set_series(series)
 

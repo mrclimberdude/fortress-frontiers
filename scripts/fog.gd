@@ -16,6 +16,12 @@ const DRAGON_REWARD_RANGED: String = "ranged_bonus"
 const DRAGON_REWARD_MANA: String = "mana_income"
 const DRAGON_GHOST_ALPHA: float = 0.75
 
+func _get_player_ids() -> Array:
+	var tm_root = $"../.."
+	if tm_root != null and tm_root.has_method("get_match_players"):
+		return tm_root.get_match_players()
+	return ["player1", "player2"]
+
 func _dragon_reward_color(reward: String) -> Color:
 	match reward:
 		DRAGON_REWARD_GOLD:
@@ -45,7 +51,7 @@ func _set_base_tile_for_fog(cell: Vector2i, pid: String) -> void:
 	var tm = $"../.."
 	if hex_map == null or tm == null:
 		return
-	for player in ["player1", "player2"]:
+	for player in _get_player_ids():
 		if tm.spawn_tower_positions.has(player) and cell in tm.spawn_tower_positions[player]:
 			var src = hex_map.tile_set.get_source_id(0)
 			hex_map.set_cell(cell, src, hex_map.ground_tile)
@@ -55,6 +61,11 @@ func _set_base_tile_for_fog(cell: Vector2i, pid: String) -> void:
 	var tint = ground
 	var is_camp = cell in tm.camps["basic"]
 	var is_dragon = cell in tm.camps["dragon"]
+	var is_base = false
+	for player in _get_player_ids():
+		if tm.base_positions.get(player, Vector2i(-9999, -9999)) == cell:
+			is_base = true
+			break
 	if is_camp or is_dragon:
 		if pid in ["", "neutral", "camp", "dragon"]:
 			var camp_key = "dragon" if is_dragon else "camp"
@@ -62,9 +73,9 @@ func _set_base_tile_for_fog(cell: Vector2i, pid: String) -> void:
 		else:
 			tint = hex_map.player_atlas_tiles.get(pid, ground)
 	elif cell in tm.structure_positions:
-		tint = hex_map.structure_atlas_tiles.get(pid, ground)
-		for player in ["player1", "player2", "unclaimed"]:
-			if cell in tm.mines[player]:
+		tint = hex_map.player_atlas_tiles.get(pid, ground) if is_base else hex_map.structure_atlas_tiles.get(pid, ground)
+		for player in tm.mines.keys():
+			if cell in tm.mines.get(player, []):
 				tint = hex_map.structure_atlas_tiles.get(player, ground)
 				break
 	else:
@@ -78,7 +89,7 @@ func _spawn_tower_cell_map(tm_root) -> Dictionary:
 	var positions = tm_root.spawn_tower_positions
 	if positions == null or not (positions is Dictionary):
 		return cells
-	for player_id in ["player1", "player2"]:
+	for player_id in _get_player_ids():
 		if positions.has(player_id):
 			for cell in positions[player_id]:
 				cells[cell] = true
@@ -97,11 +108,23 @@ func reset_fog() -> void:
 	var explored = $"../ExploredFog"
 	if explored != null:
 		explored.clear()
-	for player in ["player1", "player2"]:
-		visiblity[player] = {}
-		for cell in cells:
-			visiblity[player][cell] = 0
-			set_cell(cell, tile_set.get_source_id(0), Vector2i(3,0))
+	visiblity = {}
+	_ensure_visibility_state(cells)
+
+func _ensure_visibility_state(cells: Array = []) -> void:
+	var hex_map = $"../HexTileMap"
+	if hex_map == null:
+		return
+	var all_cells = cells if not cells.is_empty() else hex_map.used_cells
+	for player in _get_player_ids():
+		if not visiblity.has(player) or not (visiblity[player] is Dictionary):
+			visiblity[player] = {}
+		var player_visibility: Dictionary = visiblity[player]
+		for cell in all_cells:
+			if not player_visibility.has(cell):
+				player_visibility[cell] = 0
+				set_cell(cell, tile_set.get_source_id(0), Vector2i(3,0))
+		visiblity[player] = player_visibility
 
 func _update_fog():
 	var units = $"..".get_all_units()
@@ -118,6 +141,7 @@ func _update_fog():
 		no_fog = tm_root.is_replay_fog_disabled()
 	var neutral_root = _get_neutral_memory_root()
 	var spawn_tower_cells := _spawn_tower_cell_map(tm_root)
+	_ensure_visibility_state(hex_map.used_cells if hex_map != null else [])
 	if neutral_root != null:
 		for child in neutral_root.get_children():
 			child.queue_free()
@@ -147,13 +171,15 @@ func _update_fog():
 		if structure == null or not is_instance_valid(structure):
 			continue
 		structure.z_index = 6
-	for player in ["player1", "player2"]:
+	for player in _get_player_ids():
+		if not visiblity.has(player) or not (visiblity[player] is Dictionary):
+			visiblity[player] = {}
 		# reset all visible cells to explored
 		for cell in visiblity[player].keys():
 			if visiblity[player][cell] == 2:
 				visiblity[player][cell] = 1
 		# set all cells within sight range of all of a players units to visible
-		for unit in units[player]:
+		for unit in units.get(player, []):
 			var in_sight
 			if unit.just_purchased and not unit.is_base and not unit.is_tower:
 				in_sight = $"..".get_reachable_tiles(unit.grid_pos, 0, "visibility")
@@ -209,12 +235,11 @@ func _update_fog():
 							var structure_unit = $"..".get_structure_unit_at(cell)
 							if structure_unit != null:
 								pid = structure_unit.player_id
-							elif cell in $"../..".mines["player1"]:
-								pid = "player1"
-							elif cell in $"../..".mines["player2"]:
-								pid = "player2"
-							elif cell in $"../..".mines["unclaimed"]:
-								pid = "unclaimed"
+							else:
+								for mine_owner in $"../..".mines.keys():
+									if cell in $"../..".mines.get(mine_owner, []):
+										pid = str(mine_owner)
+										break
 							_set_base_tile_for_fog(cell, pid)
 					if explored != null and terrain_map != null:
 						var src_id = terrain_map.get_cell_source_id(cell)
