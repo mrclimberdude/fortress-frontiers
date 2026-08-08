@@ -45,6 +45,7 @@ func vacate(tile: Vector2i, unit: Node = null) -> void:
 					if $"..".income_tower_positions.has(player) and tile in $"..".income_tower_positions[player]:
 						$"..".income_tower_positions[player].erase(tile)
 			if unit.is_base and tile == $"..".base_positions.get(player, Vector2i(-9999, -9999)):
+				$"..".structure_positions.erase(tile)
 				if $"..".has_method("queue_player_elimination"):
 					$"..".queue_player_elimination(player)
 		return

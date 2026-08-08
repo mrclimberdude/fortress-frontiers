@@ -4013,9 +4013,9 @@ func load_game(path: String = SAVE_DEFAULT_PATH) -> bool:
 	_ensure_dev_log_open()
 	_reset_map_state()
 	_load_map_by_index(map_index)
-	var should_reset_fog = map_state.is_empty() or not state.has("fog_visibility")
 	if not map_state.is_empty():
-		_apply_procedural_map_state(map_state, should_reset_fog)
+		# Clear template fog tiles before applying procedural bounds; visibility is restored from the snapshot below.
+		_apply_procedural_map_state(map_state, true)
 	apply_state(state, true)
 	_rebuild_orders_after_load()
 	_devlog({
@@ -4218,8 +4218,8 @@ func apply_state(state: Dictionary, force_host: bool = false) -> void:
 		var should_apply_generated = not (not _is_host() and not map_state.is_empty())
 		_load_map_by_index(map_index, should_apply_generated)
 	if not map_state.is_empty():
-		var should_reset_fog = not state.has("fog_visibility")
-		_apply_procedural_map_state(map_state, should_reset_fog)
+		# Clients can load the rectangular procedural template first; always clear fog before applying hex bounds.
+		_apply_procedural_map_state(map_state, true)
 	if state.has("base_positions"):
 		base_positions = state["base_positions"]
 	if state.has("tower_positions"):
@@ -4543,6 +4543,13 @@ func _neutralize_player_mines(player_id: String) -> void:
 func _eliminate_player_now(player_id: String) -> void:
 	if player_id == "" or player_id not in living_players:
 		return
+	var affected_tiles: Array = []
+	var base_tile = base_positions.get(player_id, Vector2i(-9999, -9999))
+	if typeof(base_tile) == TYPE_VECTOR2I and base_tile != Vector2i(-9999, -9999):
+		affected_tiles.append(base_tile)
+	for tile in tower_positions.get(player_id, []):
+		if typeof(tile) == TYPE_VECTOR2I and tile not in affected_tiles:
+			affected_tiles.append(tile)
 	living_players.erase(player_id)
 	_neutralize_player_mines(player_id)
 	var units_to_remove: Array = []
@@ -4563,6 +4570,8 @@ func _eliminate_player_now(player_id: String) -> void:
 	income_tower_positions.erase(player_id)
 	tower_positions.erase(player_id)
 	base_positions.erase(player_id)
+	for tile in affected_tiles:
+		_refresh_tile_after_unit_change(tile)
 	current_player = living_players[0] if not living_players.is_empty() else active_players[0]
 	refresh_structure_markers()
 	refresh_mine_tiles()
