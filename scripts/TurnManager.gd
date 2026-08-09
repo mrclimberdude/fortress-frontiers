@@ -33,6 +33,7 @@ enum Phase { UPKEEP, ORDERS, EXECUTION }
 
 const MineScene = preload("res://scenes/GemMine.tscn")
 const MapGenerator = preload("res://scripts/MapGenerator.gd")
+const MovementGraphScript = preload("res://scripts/movement_graph.gd")
 const TurnStateSyncService = preload("res://scripts/turn_state_sync.gd")
 const TurnPersistenceService = preload("res://scripts/turn_persistence.gd")
 const AsyncTurnContractService = preload("res://scripts/async_turn_contract.gd")
@@ -75,7 +76,7 @@ const DEV_LOG_VERSION: int = 1
 const REPLAY_MANIFEST_PATH: String = "user://replay_index.json"
 const REPLAY_MANIFEST_VERSION: int = 1
 
-func _map_category_for(md: MapData) -> String:
+func _map_category_for(md) -> String:
 	if md == null:
 		return "normal"
 	var cat = str(md.map_category).strip_edges().to_lower()
@@ -88,7 +89,7 @@ func _map_category_for(md: MapData) -> String:
 			return "normal"
 	return "themed"
 
-func _map_size_for(md: MapData) -> String:
+func _map_size_for(md) -> String:
 	if md == null:
 		return "normal"
 	var size = str(md.map_size).strip_edges().to_lower()
@@ -96,7 +97,7 @@ func _map_size_for(md: MapData) -> String:
 		return size
 	return "normal"
 
-func _apply_custom_proc_params(md: MapData, params: Dictionary) -> void:
+func _apply_custom_proc_params(md, params: Dictionary) -> void:
 	if md == null or params.is_empty():
 		return
 	if params.has("map_size"):
@@ -286,7 +287,7 @@ func _collect_replay_player_ids() -> Array:
 	return ids
 
 func _prepare_replay_metadata(result_player_id: String) -> void:
-	var md: MapData = null
+	var md = null
 	if current_map_index >= 0 and current_map_index < map_data.size():
 		md = map_data[current_map_index]
 	var dt = Time.get_datetime_dict_from_system()
@@ -1309,7 +1310,7 @@ func _pick_random_map_index(mode: String, player_count_override: int = -1) -> in
 	var candidates := []
 	var player_count = max(2, player_count_override if player_count_override > 0 else active_players.size())
 	for i in range(map_data.size()):
-		var md = map_data[i] as MapData
+		var md = map_data[i]
 		if md == null:
 			continue
 		if not _map_supports_player_count(md, player_count):
@@ -1334,7 +1335,7 @@ func _pick_random_map_index(mode: String, player_count_override: int = -1) -> in
 	_devlog({"type": "map_pick", "mode": normalized, "candidates": candidates.size(), "choice": choice})
 	return choice
 
-func _map_player_range(md: MapData) -> Vector2i:
+func _map_player_range(md) -> Vector2i:
 	if md == null:
 		return Vector2i(2, 2)
 	var min_players = max(2, int(md.min_players))
@@ -1343,7 +1344,7 @@ func _map_player_range(md: MapData) -> Vector2i:
 		max_players = 3
 	return Vector2i(min_players, max_players)
 
-func _map_supports_player_count(md: MapData, player_count: int) -> bool:
+func _map_supports_player_count(md, player_count: int) -> bool:
 	var range = _map_player_range(md)
 	return player_count >= range.x and player_count <= range.y
 
@@ -1352,7 +1353,7 @@ func ensure_selected_map_supports_player_count(player_count: int) -> bool:
 	if map_data.size() == 0:
 		return false
 	if NetworkManager.selected_map_index >= 0 and NetworkManager.selected_map_index < map_data.size():
-		var selected_md = map_data[NetworkManager.selected_map_index] as MapData
+		var selected_md = map_data[NetworkManager.selected_map_index]
 		if selected_md != null and _map_supports_player_count(selected_md, player_count):
 			return true
 	var fallback_mode = "procedural" if player_count > 2 else NetworkManager.map_selection_mode
@@ -1419,12 +1420,12 @@ func _prewarm_player_ids() -> Array:
 		return _normalize_player_ids(ids)
 	return active_players
 
-func _generate_procedural_map_data(map_index: int, md: MapData, player_ids: Array, seed_value: int) -> Dictionary:
+func _generate_procedural_map_data(map_index: int, md, player_ids: Array, seed_value: int) -> Dictionary:
 	var gen_rng = RandomNumberGenerator.new()
 	gen_rng.seed = seed_value + map_index * 7919
 	return MapGenerator.generate(md, gen_rng, player_ids)
 
-func _get_or_build_procedural_map_data(map_index: int, md: MapData, player_ids: Array) -> Dictionary:
+func _get_or_build_procedural_map_data(map_index: int, md, player_ids: Array) -> Dictionary:
 	var seed_value = NetworkManager.match_seed
 	if seed_value <= 0:
 		seed_value = _rng_randi_range(1, 2147483646, "procedural_seed")
@@ -1454,7 +1455,7 @@ func is_selected_procedural_prewarm_ready() -> bool:
 	var map_index = NetworkManager.selected_map_index if NetworkManager != null else -1
 	if map_index < 0 or map_index >= map_data.size():
 		return false
-	var md = map_data[map_index] as MapData
+	var md = map_data[map_index]
 	if md == null:
 		return false
 	if not md.procedural:
@@ -1479,7 +1480,7 @@ func _run_procedural_prewarm() -> void:
 		NetworkManager.selected_map_index = _pick_random_map_index("procedural", max(2, active_players.size()))
 	if NetworkManager.selected_map_index < 0 or NetworkManager.selected_map_index >= map_data.size():
 		return
-	var md = map_data[NetworkManager.selected_map_index] as MapData
+	var md = map_data[NetworkManager.selected_map_index]
 	if md == null or not md.procedural:
 		return
 	md = md.duplicate(true)
@@ -3437,7 +3438,7 @@ func _load_map_by_index(map_index: int, apply_generated_content: bool = true) ->
 		existing.free()
 	var idx = int(clamp(map_index, 0, map_data.size() - 1))
 	current_map_index = idx
-	var md = map_data[idx] as MapData
+	var md = map_data[idx]
 	md = md.duplicate(true)
 	if md.procedural and NetworkManager.custom_proc_params.size() > 0:
 		_apply_custom_proc_params(md, NetworkManager.custom_proc_params)
@@ -4694,7 +4695,7 @@ func _ensure_map_loaded() -> void:
 	var already_loaded = current_map_index == map_index and terrain_overlay != null
 	if already_loaded:
 		if map_index >= 0 and map_index < map_data.size():
-			var md = map_data[map_index] as MapData
+			var md = map_data[map_index]
 			if md != null and md.procedural:
 				var desired_key = _procedural_cache_key(map_index, active_players, NetworkManager.match_seed, NetworkManager.custom_proc_params)
 				if _prewarmed_map_key == desired_key:
@@ -4706,7 +4707,7 @@ func _ensure_map_loaded() -> void:
 	_spawn_neutral_units()
 	$GameBoardNode/FogOfWar._update_fog()
 	if map_index >= 0 and map_index < map_data.size():
-		var loaded_md = map_data[map_index] as MapData
+		var loaded_md = map_data[map_index]
 		if loaded_md != null and loaded_md.procedural:
 			_prewarmed_map_key = _procedural_cache_key(map_index, active_players, NetworkManager.match_seed, NetworkManager.custom_proc_params)
 
@@ -7977,8 +7978,8 @@ func _fifo_resolve_empty_tile(dest: Vector2i, qA: Array, qB: Array) -> Variant:
 
 # Rotate an uncontested SCC atomically. winners_by_tile must already reflect internal predecessors.
 # Returns a Set (Dictionary used as set) of tiles touched by the rotation.
-func _mg_commit_rotation(scc: Array, mg: MovementGraph, winners_by_tile: Dictionary, vacated: Dictionary) -> Dictionary:
-	var prev := mg.cycle_prev_map()
+func _mg_commit_rotation(scc: Array, mg, winners_by_tile: Dictionary, vacated: Dictionary) -> Dictionary:
+	var prev: Dictionary = mg.cycle_prev_map()
 
 	# Build planned moves (from -> to) and validate uniqueness of destinations
 	var moves := []  # Array[{unit: Unit, from: Vector2i, to: Vector2i}]
@@ -8020,7 +8021,7 @@ func _mg_commit_rotation(scc: Array, mg: MovementGraph, winners_by_tile: Diction
 #  entrants_map: mg.entries_all() (captured once before rotations).
 #  start_tile  : the current sink (empty or stationary/stayed occupant).
 #  rotated_tiles: Dictionary set of tiles that were part of this tick's rotations – skip them.
-func _mg_resolve_chain_from_sink(mg: MovementGraph, entrants_map: Dictionary, start_tile: Vector2i, rotated_tiles: Dictionary) -> void:
+func _mg_resolve_chain_from_sink(mg, entrants_map: Dictionary, start_tile: Vector2i, rotated_tiles: Dictionary) -> void:
 	var pending := [start_tile]
 	var seen := {}
 
@@ -8141,7 +8142,7 @@ func _process_move():
 			hop_units[u.net_id] = true
 		else:
 			u.moving_to = next_tile
-	var mg = MovementGraph.new()
+	var mg = MovementGraphScript.new()
 	mg.build(units)
 	var start_positions := {}
 	for u in units:
@@ -8193,7 +8194,7 @@ func _process_move():
 			var in_comp := {}
 			for n in comp:
 				in_comp[n] = true
-			var prev := mg.cycle_prev_map()
+			var prev: Dictionary = mg.cycle_prev_map()
 
 			for node in comp:
 				# entrants to this node in this tick

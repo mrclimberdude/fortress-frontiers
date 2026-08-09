@@ -37,15 +37,26 @@ var camp_atlas_tiles := {
 
 var structure_tiles : Array
 
+func _turn_manager():
+	var tm = get_node_or_null("../..")
+	if tm == null:
+		return null
+	if not (tm.has_method("seed_async_turn_contract") or tm.has_method("get_match_players")):
+		return null
+	return tm
+
 func _get_player_ids() -> Array:
-	var tm = $"../.."
+	var tm = _turn_manager()
 	if tm != null and tm.has_method("get_match_players"):
 		return tm.get_match_players()
 	return ["player1", "player2"]
 
 
 func _ready():
-	structure_tiles = $"../..".structure_positions
+	var tm = _turn_manager()
+	structure_tiles = tm.get("structure_positions") if tm != null else []
+	if structure_tiles == null:
+		structure_tiles = []
 	if Engine.is_editor_hint() or use_editor_paint:
 		for cell in used_cells:
 			valid_cells[cell] = true
@@ -80,10 +91,15 @@ func is_cell_valid(cell: Vector2i) -> bool:
 func set_player_tile(pos: Vector2i, pid: String) -> void:
 	var src = tile_set.get_source_id(0)
 	var tint
-	structure_tiles = $"../..".structure_positions
+	var tm = _turn_manager()
+	if tm == null:
+		set_cell(pos, src, player_atlas_tiles.get(pid, ground_tile))
+		update_internals()
+		return
+	structure_tiles = tm.structure_positions
 	var is_spawn_tower = false
 	for player in _get_player_ids():
-		if $"../..".spawn_tower_positions.has(player) and pos in $"../..".spawn_tower_positions[player]:
+		if tm.spawn_tower_positions.has(player) and pos in tm.spawn_tower_positions[player]:
 			is_spawn_tower = true
 			break
 	if is_spawn_tower:
@@ -91,11 +107,11 @@ func set_player_tile(pos: Vector2i, pid: String) -> void:
 		$"..".clear_highlights()
 		update_internals()
 		return
-	var is_camp = pos in $"../..".camps["basic"]
-	var is_dragon = pos in $"../..".camps["dragon"]
+	var is_camp = pos in tm.camps["basic"]
+	var is_dragon = pos in tm.camps["dragon"]
 	var is_base = false
 	for player in _get_player_ids():
-		if $"../..".base_positions.get(player, Vector2i(-9999, -9999)) == pos:
+		if tm.base_positions.get(player, Vector2i(-9999, -9999)) == pos:
 			is_base = true
 			break
 	if is_camp or is_dragon:
@@ -106,8 +122,8 @@ func set_player_tile(pos: Vector2i, pid: String) -> void:
 			tint = player_atlas_tiles.get(pid, ground_tile)
 	elif pos in structure_tiles:
 		tint = player_atlas_tiles.get(pid, ground_tile) if is_base else structure_atlas_tiles.get(pid, ground_tile)
-		for player in $"../..".mines.keys():
-			if pos in $"../..".mines.get(player, []):
+		for player in tm.mines.keys():
+			if pos in tm.mines.get(player, []):
 				tint = structure_atlas_tiles.get(player, ground_tile)
 	else:
 		tint = player_atlas_tiles.get(pid, ground_tile)
