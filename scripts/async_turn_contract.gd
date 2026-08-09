@@ -3,6 +3,13 @@ extends RefCounted
 
 const RULES_VERSION: String = "async_v1"
 
+var NetworkManager:
+	get:
+		var tree := Engine.get_main_loop() as SceneTree
+		if tree == null or tree.root == null:
+			return null
+		return tree.root.get_node_or_null("NetworkManager")
+
 var tm
 
 

@@ -2,6 +2,13 @@
 
 extends Node
 
+var NetworkManager:
+	get:
+		var tree := Engine.get_main_loop() as SceneTree
+		if tree == null or tree.root == null:
+			return null
+		return tree.root.get_node_or_null("NetworkManager")
+
 signal orders_phase_begin(player: String)
 signal orders_phase_end()
 signal state_applied()
