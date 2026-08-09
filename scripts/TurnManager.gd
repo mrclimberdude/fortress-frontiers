@@ -1383,7 +1383,10 @@ const SAVE_KEY_PREFIX_INT: String = "i:"
 const SAVE_KEY_PREFIX_VEC2I: String = "v2i:"
 
 func _is_host() -> bool:
-	var mp = get_tree().get_multiplayer()
+	var tree := get_tree()
+	if tree == null:
+		return true
+	var mp = tree.get_multiplayer()
 	return mp == null or mp.multiplayer_peer == null or mp.is_server()
 
 func is_host() -> bool:
@@ -3416,13 +3419,15 @@ func _ready():
 	_state_sync = TurnStateSyncService.new(self)
 	_persistence = TurnPersistenceService.new(self)
 	_async_contract = AsyncTurnContractService.new(self)
-	NetworkManager.hex = $GameBoardNode/HexTileMap
-	NetworkManager.turn_mgr = $"."
-	NetworkManager.connect("map_index_received", Callable(self, "_on_map_index_received"))
-	NetworkManager.connect("match_seed_received", Callable(self, "_on_match_seed_received"))
-	NetworkManager.connect("state_snapshot_received", Callable(self, "_on_state_snapshot_received"))
-	NetworkManager.connect("execution_paused_received", Callable(self, "_on_execution_paused_received"))
-	NetworkManager.connect("execution_complete_received", Callable(self, "_on_execution_complete_received"))
+	var nm = NetworkManager
+	if nm != null:
+		nm.hex = $GameBoardNode/HexTileMap
+		nm.turn_mgr = $"."
+		nm.connect("map_index_received", Callable(self, "_on_map_index_received"))
+		nm.connect("match_seed_received", Callable(self, "_on_match_seed_received"))
+		nm.connect("state_snapshot_received", Callable(self, "_on_state_snapshot_received"))
+		nm.connect("execution_paused_received", Callable(self, "_on_execution_paused_received"))
+		nm.connect("execution_complete_received", Callable(self, "_on_execution_complete_received"))
 	var quit_button = $GameOver.get_node_or_null("QuitToLobbyButton")
 	if quit_button != null:
 		quit_button.connect("pressed", Callable(self, "_on_game_over_quit_pressed"))
@@ -3744,6 +3749,12 @@ func build_async_match_state(match_id: String, waiting_on_players: Array = []) -
 
 func seed_async_turn_contract(match_id: String, seed_config: Dictionary = {}) -> Dictionary:
 	set_async_match_id(match_id)
+	var nm = NetworkManager
+	if nm == null:
+		return {
+			"ok": false,
+			"reason": "missing_network_manager"
+		}
 	var player_slots = seed_config.get("player_slots", _default_player_ids())
 	configure_match_players(player_slots, false)
 	var local_player = str(seed_config.get("local_player_id", active_players[0] if not active_players.is_empty() else "player1")).strip_edges()
@@ -3752,12 +3763,12 @@ func seed_async_turn_contract(match_id: String, seed_config: Dictionary = {}) ->
 	set_local_player_id(local_player)
 	var map_selection = seed_config.get("map_selection", {})
 	if map_selection is Dictionary:
-		NetworkManager.map_selection_mode = str(map_selection.get("map_selection_mode", NetworkManager.map_selection_mode)).strip_edges()
-		NetworkManager.selected_map_index = int(map_selection.get("selected_map_index", -1))
-		NetworkManager.custom_proc_params = map_selection.get("custom_proc_params", {}).duplicate(true) if map_selection.get("custom_proc_params", {}) is Dictionary else {}
+		nm.map_selection_mode = str(map_selection.get("map_selection_mode", nm.map_selection_mode)).strip_edges()
+		nm.selected_map_index = int(map_selection.get("selected_map_index", -1))
+		nm.custom_proc_params = map_selection.get("custom_proc_params", {}).duplicate(true) if map_selection.get("custom_proc_params", {}) is Dictionary else {}
 	var configured_match_seed = int(seed_config.get("match_seed", map_selection.get("match_seed", -1) if map_selection is Dictionary else -1))
 	if configured_match_seed > 0:
-		NetworkManager.match_seed = configured_match_seed
+		nm.match_seed = configured_match_seed
 		rng.seed = configured_match_seed
 	else:
 		rng.randomize()
@@ -3773,8 +3784,8 @@ func seed_async_turn_contract(match_id: String, seed_config: Dictionary = {}) ->
 	last_stats_turn = -1
 	player_orders = _build_player_dict(active_players, {})
 	committed_orders = _build_player_dict(active_players, {})
-	NetworkManager.player_orders = player_orders
-	NetworkManager.reset_match_tracking(get_submission_players())
+	nm.player_orders = player_orders
+	nm.reset_match_tracking(get_submission_players())
 	_ensure_map_loaded()
 	rng.seed = turn_number
 	player_orders = NetworkManager.player_orders
