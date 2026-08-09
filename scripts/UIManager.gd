@@ -299,6 +299,9 @@ const DragonScene = preload("res://scenes/Dragon.tscn")
 const MineScene = preload("res://scenes/GemMine.tscn")
 
 func _ready():
+	if DisplayServer.get_name() == "headless":
+		visible = false
+		return
 	# Enable unhandled input processing
 	set_process_unhandled_input(true)
 	set_process(true)
