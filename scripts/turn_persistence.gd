@@ -157,9 +157,11 @@ func load_game(path: String = "") -> bool:
 		return false
 	var map_index = int(state.get("map_index", 0))
 	var match_seed = int(state.get("match_seed", -1))
-	NetworkManager.selected_map_index = map_index
-	if match_seed > 0:
-		NetworkManager.match_seed = match_seed
+	var nm = NetworkManager
+	if nm != null:
+		nm.selected_map_index = map_index
+		if match_seed > 0:
+			nm.match_seed = match_seed
 	tm._ensure_dev_log_open()
 	tm._reset_map_state()
 	tm._load_map_by_index(map_index)
@@ -174,8 +176,9 @@ func load_game(path: String = "") -> bool:
 	})
 	tm._devlog_snapshot("load")
 	tm.call_deferred("_refresh_fog_after_load")
-	NetworkManager.reset_match_tracking(tm.get_submission_players())
-	NetworkManager._step_ready_counts = {}
+	if nm != null:
+		nm.reset_match_tracking(tm.get_submission_players())
+		nm._step_ready_counts = {}
 	tm.pending_broadcast_map_state = map_state
 	tm._broadcast_state(true)
 	tm.call_deferred("_broadcast_state", true)
